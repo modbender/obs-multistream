@@ -69,6 +69,38 @@ void CanvasManager::EnsureDefault()
 	definitions.insert(definitions.begin(), std::move(def));
 }
 
+bool CanvasManager::EnsureDefaultEncoders()
+{
+	CanvasDefinition *def = nullptr;
+	for (CanvasDefinition &d : definitions) {
+		if (d.isDefault) {
+			def = &d;
+			break;
+		}
+	}
+	if (!def) {
+		return false;
+	}
+
+	bool changed = false;
+	if (def->video.id.empty()) {
+		def->video.id = "obs_x264";
+		OBSDataAutoRelease s = obs_encoder_defaults("obs_x264");
+		obs_data_set_int(s, "bitrate", 6000);
+		obs_data_set_string(s, "rate_control", "CBR");
+		def->video.settings = std::move(s);
+		changed = true;
+	}
+	if (def->audio.id.empty()) {
+		def->audio.id = "ffmpeg_aac";
+		OBSDataAutoRelease s = obs_encoder_defaults("ffmpeg_aac");
+		obs_data_set_int(s, "bitrate", 160);
+		def->audio.settings = std::move(s);
+		changed = true;
+	}
+	return changed;
+}
+
 const CanvasDefinition &CanvasManager::Default() const
 {
 	for (const CanvasDefinition &def : definitions) {

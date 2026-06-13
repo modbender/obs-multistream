@@ -21,6 +21,11 @@ public:
 	const std::vector<CanvasDefinition> &Definitions() const { return definitions; }
 	const CanvasDefinition &Default() const; // always present (see invariant above)
 
+	/* Seed the Default canvas's stream encoders if unset. Call AFTER modules load
+	 * (obs_encoder_defaults needs registered encoders). Returns true if it changed
+	 * anything (caller should Save()). */
+	bool EnsureDefaultEncoders();
+
 	/* The returned reference/pointer is invalidated by any subsequent Add/Remove/Load. */
 	CanvasDefinition *Find(const std::string &uuid);
 	CanvasDefinition &Add(CanvasDefinition def); // assigns uuid if empty

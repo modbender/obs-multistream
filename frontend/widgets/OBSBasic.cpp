@@ -1106,6 +1106,12 @@ void OBSBasic::OBSInit()
 
 	LogEncoders();
 
+	/* Seed the Default canvas's stream encoders now that modules are loaded and
+	 * obs_x264/ffmpeg_aac are registered, before any encoder is created below. */
+	if (canvasManager.EnsureDefaultEncoders()) {
+		canvasManager.Save();
+	}
+
 	blog(LOG_INFO, STARTUP_SEPARATOR);
 
 	if (!InitService()) {
