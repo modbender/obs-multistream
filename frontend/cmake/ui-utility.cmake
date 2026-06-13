@@ -8,6 +8,8 @@ target_sources(
     utility/BasicOutputHandler.hpp
     utility/CanvasDefinition.cpp
     utility/CanvasDefinition.hpp
+    utility/CanvasManager.cpp
+    utility/CanvasManager.hpp
     utility/CrashHandler.cpp
     utility/CrashHandler.hpp
     utility/FFmpegCodec.cpp
