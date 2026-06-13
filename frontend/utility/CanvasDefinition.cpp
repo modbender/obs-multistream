@@ -1,5 +1,48 @@
 #include "CanvasDefinition.hpp"
 
+#include <util/dstr.h>
+
+namespace {
+video_format VideoFormatFromName(const std::string &name)
+{
+	if (astrcmpi(name.c_str(), "I420") == 0) {
+		return VIDEO_FORMAT_I420;
+	} else if (astrcmpi(name.c_str(), "NV12") == 0) {
+		return VIDEO_FORMAT_NV12;
+	} else if (astrcmpi(name.c_str(), "I444") == 0) {
+		return VIDEO_FORMAT_I444;
+	} else if (astrcmpi(name.c_str(), "I010") == 0) {
+		return VIDEO_FORMAT_I010;
+	} else if (astrcmpi(name.c_str(), "P010") == 0) {
+		return VIDEO_FORMAT_P010;
+	} else if (astrcmpi(name.c_str(), "P216") == 0) {
+		return VIDEO_FORMAT_P216;
+	} else if (astrcmpi(name.c_str(), "P416") == 0) {
+		return VIDEO_FORMAT_P416;
+	}
+	return VIDEO_FORMAT_BGRA; // includes the editor's "RGB" data value
+}
+
+video_colorspace VideoColorSpaceFromName(const std::string &name)
+{
+	if (astrcmpi(name.c_str(), "601") == 0) {
+		return VIDEO_CS_601;
+	} else if (astrcmpi(name.c_str(), "709") == 0) {
+		return VIDEO_CS_709;
+	} else if (astrcmpi(name.c_str(), "2100PQ") == 0) {
+		return VIDEO_CS_2100_PQ;
+	} else if (astrcmpi(name.c_str(), "2100HLG") == 0) {
+		return VIDEO_CS_2100_HLG;
+	}
+	return VIDEO_CS_SRGB;
+}
+
+video_range_type VideoRangeFromName(const std::string &name)
+{
+	return astrcmpi(name.c_str(), "Full") == 0 ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+}
+}
+
 static OBSDataAutoRelease EncoderToData(const CanvasEncoderDef &enc)
 {
 	OBSDataAutoRelease d = obs_data_create();
@@ -100,8 +143,8 @@ void CanvasDefinition::ToVideoInfo(struct obs_video_info &ovi) const
 	ovi.fps_num = fpsNum;
 	ovi.fps_den = fpsDen;
 	ovi.gpu_conversion = true;  // GPU colorspace conversion, matching the main video pipeline
-	ovi.output_format = VIDEO_FORMAT_NV12; // overridden per encoder later (Sub-plan 4)
-	ovi.colorspace = VIDEO_CS_709;
-	ovi.range = VIDEO_RANGE_PARTIAL;
+	ovi.output_format = VideoFormatFromName(color.format);
+	ovi.colorspace = VideoColorSpaceFromName(color.space);
+	ovi.range = VideoRangeFromName(color.range);
 	ovi.scale_type = OBS_SCALE_BICUBIC;
 }
