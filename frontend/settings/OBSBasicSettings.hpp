@@ -201,6 +201,7 @@ private:
 	void AddCanvasClicked();
 	void RemoveCanvasClicked(const std::string &uuid);
 	void EditCanvasClicked(const std::string &uuid);
+	void ApplyCanvasEdit(const CanvasDefinition &def);
 
 	void LoadSettings(bool changedOnly);
 

@@ -2,6 +2,7 @@
 
 #include <widgets/OBSBasic.hpp>
 #include <utility/CanvasManager.hpp>
+#include <dialogs/CanvasEditorDialog.hpp>
 
 #include <utility>
 
@@ -113,11 +114,16 @@ void OBSBasicSettings::AddCanvasClicked()
 	def.fpsNum = 60;
 	def.fpsDen = 1;
 
-	const CanvasDefinition &added = mgr.Add(std::move(def));
+	CanvasDefinition &added = mgr.Add(std::move(def));
 
 	obs_video_info covi = {};
 	added.ToVideoInfo(covi);
 	main->AddCanvas(added.name, &covi, ACTIVATE | MIX_AUDIO | SCENE_REF, added.uuid.c_str());
+
+	CanvasEditorDialog dlg(added, main, this);
+	if (dlg.exec() == QDialog::Accepted) {
+		ApplyCanvasEdit(added);
+	}
 
 	/* Add/remove are immediate management actions (like profiles/scene collections):
 	 * commit to disk now rather than deferring to the Settings Apply button. */
@@ -154,7 +160,50 @@ void OBSBasicSettings::RemoveCanvasClicked(const std::string &uuid)
 
 void OBSBasicSettings::EditCanvasClicked(const std::string &uuid)
 {
-	(void)uuid;
-	QMessageBox::information(this, QTStr("Basic.Settings.Canvas"),
-				QTStr("Basic.Settings.Canvas.EditComingSoon"));
+	CanvasManager &mgr = main->GetCanvasManager();
+	CanvasDefinition *def = mgr.Find(uuid);
+	if (!def) {
+		return;
+	}
+
+	CanvasEditorDialog dlg(*def, main, this);
+	if (dlg.exec() != QDialog::Accepted) {
+		return;
+	}
+
+	ApplyCanvasEdit(*def);
+	mgr.Save();
+	RebuildCanvasList();
+}
+
+void OBSBasicSettings::ApplyCanvasEdit(const CanvasDefinition &def)
+{
+	if (def.isDefault) {
+		obs_video_info ovi;
+		if (obs_get_video_info(&ovi)) {
+			ovi.base_width = def.width;
+			ovi.base_height = def.height;
+			ovi.output_width = def.width;
+			ovi.output_height = def.height;
+			ovi.fps_num = def.fpsNum;
+			ovi.fps_den = def.fpsDen;
+			if (obs_reset_video(&ovi) != OBS_VIDEO_SUCCESS) {
+				blog(LOG_WARNING, "Failed to apply Default canvas resolution %ux%u", def.width,
+				     def.height);
+			}
+		}
+		return;
+	}
+
+	for (const OBS::Canvas &canvas : main->GetCanvases()) {
+		if (def.uuid == obs_canvas_get_uuid(canvas)) {
+			obs_video_info ovi = {};
+			def.ToVideoInfo(ovi);
+			if (!obs_canvas_reset_video(static_cast<obs_canvas_t *>(canvas), &ovi)) {
+				blog(LOG_WARNING, "Failed to apply canvas '%s' resolution %ux%u", def.name.c_str(),
+				     def.width, def.height);
+			}
+			break;
+		}
+	}
 }
