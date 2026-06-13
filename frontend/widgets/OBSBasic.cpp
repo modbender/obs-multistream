@@ -999,6 +999,10 @@ void OBSBasic::OBSInit()
 		throw "Failed to initialize audio";
 	}
 
+	/* Load global canvas definitions before resetting video: the Default
+	 * definition drives the main canvas's resolution, fps, and color. */
+	canvasManager.Load();
+
 	int ret = 0;
 
 	ret = ResetVideo();
@@ -1013,30 +1017,6 @@ void OBSBasic::OBSInit()
 	default:
 		if (ret != OBS_VIDEO_SUCCESS) {
 			throw UNKNOWN_ERROR;
-		}
-	}
-
-	/* Load global canvas definitions before any scene collection. The Default
-	 * definition drives the main canvas's resolution/fps; additional definitions
-	 * become obs_canvas_t objects (their scenes are bound per-collection). */
-	canvasManager.Load();
-
-	{
-		const CanvasDefinition &def = canvasManager.Default();
-		obs_video_info ovi;
-		if (obs_get_video_info(&ovi)) {
-			ovi.base_width = def.width;
-			ovi.base_height = def.height;
-			ovi.output_width = def.width;
-			ovi.output_height = def.height;
-			ovi.fps_num = def.fpsNum;
-			ovi.fps_den = def.fpsDen;
-			if (obs_reset_video(&ovi) != OBS_VIDEO_SUCCESS) {
-				blog(LOG_WARNING, "Failed to apply Default canvas resolution %ux%u; keeping profile settings",
-				     def.width, def.height);
-			}
-		} else {
-			blog(LOG_WARNING, "obs_get_video_info failed; Default canvas resolution not applied");
 		}
 	}
 
@@ -1562,67 +1542,6 @@ static inline int AttemptToResetVideo(struct obs_video_info *ovi)
 	return obs_reset_video(ovi);
 }
 
-static inline enum obs_scale_type GetScaleType(ConfigFile &activeConfiguration)
-{
-	const char *scaleTypeStr = config_get_string(activeConfiguration, "Video", "ScaleType");
-
-	if (astrcmpi(scaleTypeStr, "bilinear") == 0) {
-		return OBS_SCALE_BILINEAR;
-	} else if (astrcmpi(scaleTypeStr, "lanczos") == 0) {
-		return OBS_SCALE_LANCZOS;
-	} else if (astrcmpi(scaleTypeStr, "area") == 0) {
-		return OBS_SCALE_AREA;
-	} else {
-		return OBS_SCALE_BICUBIC;
-	}
-}
-
-static inline enum video_format GetVideoFormatFromName(const char *name)
-{
-	if (astrcmpi(name, "I420") == 0) {
-		return VIDEO_FORMAT_I420;
-	} else if (astrcmpi(name, "NV12") == 0) {
-		return VIDEO_FORMAT_NV12;
-	} else if (astrcmpi(name, "I444") == 0) {
-		return VIDEO_FORMAT_I444;
-	} else if (astrcmpi(name, "I010") == 0) {
-		return VIDEO_FORMAT_I010;
-	} else if (astrcmpi(name, "P010") == 0) {
-		return VIDEO_FORMAT_P010;
-	} else if (astrcmpi(name, "P216") == 0) {
-		return VIDEO_FORMAT_P216;
-	} else if (astrcmpi(name, "P416") == 0) {
-		return VIDEO_FORMAT_P416;
-	}
-#if 0 //currently unsupported
-	else if (astrcmpi(name, "YVYU") == 0)
-		return VIDEO_FORMAT_YVYU;
-	else if (astrcmpi(name, "YUY2") == 0)
-		return VIDEO_FORMAT_YUY2;
-	else if (astrcmpi(name, "UYVY") == 0)
-		return VIDEO_FORMAT_UYVY;
-#endif
-	else {
-		return VIDEO_FORMAT_BGRA;
-	}
-}
-
-static inline enum video_colorspace GetVideoColorSpaceFromName(const char *name)
-{
-	enum video_colorspace colorspace = VIDEO_CS_SRGB;
-	if (strcmp(name, "601") == 0) {
-		colorspace = VIDEO_CS_601;
-	} else if (strcmp(name, "709") == 0) {
-		colorspace = VIDEO_CS_709;
-	} else if (strcmp(name, "2100PQ") == 0) {
-		colorspace = VIDEO_CS_2100_PQ;
-	} else if (strcmp(name, "2100HLG") == 0) {
-		colorspace = VIDEO_CS_2100_HLG;
-	}
-
-	return colorspace;
-}
-
 int OBSBasic::ResetVideo()
 {
 	if (outputHandler && outputHandler->Active()) {
@@ -1634,36 +1553,15 @@ int OBSBasic::ResetVideo()
 	struct obs_video_info ovi;
 	int ret;
 
-	GetConfigFPS(ovi.fps_num, ovi.fps_den);
+	const CanvasDefinition &def = canvasManager.Default();
 
-	const char *colorFormat = config_get_string(activeConfiguration, "Video", "ColorFormat");
-	const char *colorSpace = config_get_string(activeConfiguration, "Video", "ColorSpace");
-	const char *colorRange = config_get_string(activeConfiguration, "Video", "ColorRange");
-
+	def.ToVideoInfo(ovi); // base==output resolution, fps, color, gpu_conversion, scale_type
 	ovi.graphics_module = App()->GetRenderModule();
-	ovi.base_width = (uint32_t)config_get_uint(activeConfiguration, "Video", "BaseCX");
-	ovi.base_height = (uint32_t)config_get_uint(activeConfiguration, "Video", "BaseCY");
-	ovi.output_width = (uint32_t)config_get_uint(activeConfiguration, "Video", "OutputCX");
-	ovi.output_height = (uint32_t)config_get_uint(activeConfiguration, "Video", "OutputCY");
-	ovi.output_format = GetVideoFormatFromName(colorFormat);
-	ovi.colorspace = GetVideoColorSpaceFromName(colorSpace);
-	ovi.range = astrcmpi(colorRange, "Full") == 0 ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	ovi.adapter = config_get_uint(App()->GetUserConfig(), "Video", "AdapterIdx");
-	ovi.gpu_conversion = true;
-	ovi.scale_type = GetScaleType(activeConfiguration);
 
 	if (ovi.base_width < 32 || ovi.base_height < 32) {
-		ovi.base_width = 1920;
-		ovi.base_height = 1080;
-		config_set_uint(activeConfiguration, "Video", "BaseCX", 1920);
-		config_set_uint(activeConfiguration, "Video", "BaseCY", 1080);
-	}
-
-	if (ovi.output_width < 32 || ovi.output_height < 32) {
-		ovi.output_width = ovi.base_width;
-		ovi.output_height = ovi.base_height;
-		config_set_uint(activeConfiguration, "Video", "OutputCX", ovi.base_width);
-		config_set_uint(activeConfiguration, "Video", "OutputCY", ovi.base_height);
+		ovi.base_width = ovi.output_width = 1920;
+		ovi.base_height = ovi.output_height = 1080;
 	}
 
 	ret = AttemptToResetVideo(&ovi);
@@ -1678,10 +1576,7 @@ int OBSBasic::ResetVideo()
 			ResizeProgram(ovi.base_width, ovi.base_height);
 		}
 
-		const float sdr_white_level = (float)config_get_uint(activeConfiguration, "Video", "SdrWhiteLevel");
-		const float hdr_nominal_peak_level =
-			(float)config_get_uint(activeConfiguration, "Video", "HdrNominalPeakLevel");
-		obs_set_video_levels(sdr_white_level, hdr_nominal_peak_level);
+		obs_set_video_levels((float)def.color.sdrWhiteLevel, (float)def.color.hdrNominalPeakLevel);
 		OBSBasicStats::InitializeValues();
 		OBSProjector::UpdateMultiviewProjectors();
 
