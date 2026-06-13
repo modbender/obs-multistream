@@ -5712,6 +5712,11 @@ QIcon OBSBasicSettings::GetAdvancedIcon() const
 	return advancedIcon;
 }
 
+QIcon OBSBasicSettings::GetCanvasIcon() const
+{
+	return canvasIcon;
+}
+
 void OBSBasicSettings::SetGeneralIcon(const QIcon &icon)
 {
 	ui->listWidget->item(Pages::GENERAL)->setIcon(icon);
@@ -5755,6 +5760,12 @@ void OBSBasicSettings::SetAccessibilityIcon(const QIcon &icon)
 void OBSBasicSettings::SetAdvancedIcon(const QIcon &icon)
 {
 	ui->listWidget->item(Pages::ADVANCED)->setIcon(icon);
+}
+
+void OBSBasicSettings::SetCanvasIcon(const QIcon &icon)
+{
+	canvasIcon = icon;
+	ui->listWidget->item(Pages::CANVAS)->setIcon(icon);
 }
 
 int OBSBasicSettings::CurrentFLVTrack()

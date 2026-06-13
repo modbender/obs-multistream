@@ -48,8 +48,9 @@ class OBSBasicSettings : public QDialog {
 	Q_PROPERTY(QIcon hotkeysIcon READ GetHotkeysIcon WRITE SetHotkeysIcon DESIGNABLE true)
 	Q_PROPERTY(QIcon accessibilityIcon READ GetAccessibilityIcon WRITE SetAccessibilityIcon DESIGNABLE true)
 	Q_PROPERTY(QIcon advancedIcon READ GetAdvancedIcon WRITE SetAdvancedIcon DESIGNABLE true)
+	Q_PROPERTY(QIcon canvasIcon READ GetCanvasIcon WRITE SetCanvasIcon DESIGNABLE true)
 
-	enum Pages { GENERAL, APPEARANCE, STREAM, OUTPUT, AUDIO, VIDEO, HOTKEYS, ACCESSIBILITY, ADVANCED, NUM_PAGES };
+	enum Pages { GENERAL, APPEARANCE, STREAM, OUTPUT, AUDIO, VIDEO, HOTKEYS, ACCESSIBILITY, ADVANCED, CANVAS, NUM_PAGES };
 
 private:
 	OBSBasic *main;
@@ -320,6 +321,7 @@ private:
 	QIcon hotkeysIcon;
 	QIcon accessibilityIcon;
 	QIcon advancedIcon;
+	QIcon canvasIcon;
 
 	QIcon GetGeneralIcon() const;
 	QIcon GetAppearanceIcon() const;
@@ -330,6 +332,7 @@ private:
 	QIcon GetHotkeysIcon() const;
 	QIcon GetAccessibilityIcon() const;
 	QIcon GetAdvancedIcon() const;
+	QIcon GetCanvasIcon() const;
 
 	int CurrentFLVTrack();
 	int SimpleOutGetSelectedAudioTracks();
@@ -440,6 +443,7 @@ private slots:
 	void SetHotkeysIcon(const QIcon &icon);
 	void SetAccessibilityIcon(const QIcon &icon);
 	void SetAdvancedIcon(const QIcon &icon);
+	void SetCanvasIcon(const QIcon &icon);
 
 	void UseStreamKeyAdvClicked();
 

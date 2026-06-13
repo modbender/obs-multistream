@@ -141,6 +141,15 @@
           <normaloff>:/settings/images/settings/advanced.svg</normaloff>:/settings/images/settings/advanced.svg</iconset>
         </property>
        </item>
+       <item>
+        <property name="text">
+         <string>Basic.Settings.Canvas</string>
+        </property>
+        <property name="icon">
+         <iconset resource="obs.qrc">
+          <normaloff>:/settings/images/settings/canvas.svg</normaloff>:/settings/images/settings/canvas.svg</iconset>
+        </property>
+       </item>
       </widget>
      </item>
      <item>
@@ -8778,6 +8787,27 @@
              </widget>
             </item>
            </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="canvasPage">
+        <layout class="QVBoxLayout" name="canvasPageOuterLayout">
+         <item>
+          <widget class="QScrollArea" name="canvasScrollArea">
+           <property name="frameShape">
+            <enum>QFrame::NoFrame</enum>
+           </property>
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <widget class="QWidget" name="canvasScrollContents">
+            <layout class="QVBoxLayout" name="canvasPageLayout">
+             <property name="spacing">
+              <number>12</number>
+             </property>
+            </layout>
+           </widget>
           </widget>
          </item>
         </layout>
