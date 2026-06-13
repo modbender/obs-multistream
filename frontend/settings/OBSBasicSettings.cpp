@@ -3031,6 +3031,9 @@ void OBSBasicSettings::LoadSettings(bool changedOnly)
 	if (!changedOnly || advancedChanged) {
 		LoadAdvancedSettings();
 	}
+	if (!changedOnly || canvasChanged) {
+		LoadCanvasSettings();
+	}
 }
 
 void OBSBasicSettings::SaveGeneralSettings()

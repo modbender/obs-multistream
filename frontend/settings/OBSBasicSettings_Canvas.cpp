@@ -59,9 +59,48 @@ QWidget *OBSBasicSettings::BuildCanvasCard(const CanvasDefinition &def)
 	return card;
 }
 
-void OBSBasicSettings::LoadCanvasSettings() {}
+void OBSBasicSettings::RebuildCanvasList()
+{
+	QVBoxLayout *layout = ui->canvasPageLayout;
+
+	QLayoutItem *item;
+	while ((item = layout->takeAt(0)) != nullptr) {
+		if (item->widget()) {
+			item->widget()->deleteLater();
+		}
+		delete item;
+	}
+
+	CanvasManager &mgr = main->GetCanvasManager();
+
+	layout->addWidget(BuildCanvasCard(mgr.Default()));
+
+	QFrame *divider = new QFrame();
+	divider->setFrameShape(QFrame::HLine);
+	divider->setObjectName("canvasDivider");
+	layout->addWidget(divider);
+
+	for (const CanvasDefinition &def : mgr.Definitions()) {
+		if (def.isDefault) {
+			continue;
+		}
+		layout->addWidget(BuildCanvasCard(def));
+	}
+
+	QPushButton *add = new QPushButton(QTStr("Basic.Settings.Canvas.AddCanvas"));
+	add->setObjectName("canvasAddTile");
+	connect(add, &QPushButton::clicked, this, &OBSBasicSettings::AddCanvasClicked);
+	layout->addWidget(add);
+
+	layout->addStretch();
+}
+
+void OBSBasicSettings::LoadCanvasSettings()
+{
+	RebuildCanvasList();
+}
+
 void OBSBasicSettings::SaveCanvasSettings() {}
-void OBSBasicSettings::RebuildCanvasList() {}
 void OBSBasicSettings::AddCanvasClicked() {}
 void OBSBasicSettings::RemoveCanvasClicked(const std::string &) {}
 void OBSBasicSettings::EditCanvasClicked(const std::string &) {}
