@@ -897,9 +897,19 @@ void OBSBasic::Save(SceneCollection &collection)
 	obs_data_set_string(saveData, "current_scene", obs_source_get_name(obs_scene_get_source(scene)));
 	obs_data_set_string(saveData, "current_program_scene", obs_source_get_name(curProgramScene));
 
-	// Canvases
-	OBSDataArrayAutoRelease savedCanvases = OBS::Canvas::SaveCanvases(canvases);
-	obs_data_set_array(saveData, "canvases", savedCanvases);
+	// Per-collection canvas content bindings (definitions live in canvases.json).
+	OBSDataArrayAutoRelease canvasBindings = obs_data_array_create();
+	for (const auto &canvas : canvases) {
+		if (obs_canvas_get_flags(canvas) & EPHEMERAL) {
+			continue;
+		}
+		OBSDataAutoRelease binding = obs_data_create();
+		obs_data_set_string(binding, "canvas_uuid", obs_canvas_get_uuid(canvas));
+		OBSSourceAutoRelease cur = obs_canvas_get_channel(canvas, 0);
+		obs_data_set_string(binding, "current_scene", cur ? obs_source_get_name(cur) : "");
+		obs_data_array_push_back(canvasBindings, binding);
+	}
+	obs_data_set_array(saveData, "canvas_bindings", canvasBindings);
 
 	// Transitions
 	OBSSourceAutoRelease transition = obs_get_output_source(0);
@@ -1226,7 +1236,6 @@ void OBSBasic::LoadData(obs_data_t *data, SceneCollection &collection)
 	OBSDataArrayAutoRelease sources = obs_data_get_array(data, "sources");
 	OBSDataArrayAutoRelease groups = obs_data_get_array(data, "groups");
 	OBSDataArrayAutoRelease transitionsData = obs_data_get_array(data, "transitions");
-	OBSDataArrayAutoRelease collection_canvases = obs_data_get_array(data, "canvases");
 	const char *sceneName = obs_data_get_string(data, "current_scene");
 	const char *programSceneName = obs_data_get_string(data, "current_program_scene");
 	const char *transitionName = obs_data_get_string(data, "current_transition");
@@ -1267,8 +1276,25 @@ void OBSBasic::LoadData(obs_data_t *data, SceneCollection &collection)
 	LoadAudioDevice(AUX_AUDIO_3.data(), 5, data);
 	LoadAudioDevice(AUX_AUDIO_4.data(), 6, data);
 
-	if (collection_canvases) {
-		canvases = OBS::Canvas::LoadCanvases(collection_canvases);
+	// Apply per-collection canvas content bindings to the globally-created canvases.
+	OBSDataArrayAutoRelease canvasBindings = obs_data_get_array(data, "canvas_bindings");
+	if (canvasBindings) {
+		const size_t bindingCount = obs_data_array_count(canvasBindings);
+		for (size_t i = 0; i < bindingCount; i++) {
+			OBSDataAutoRelease binding = obs_data_array_item(canvasBindings, i);
+			const char *uuid = obs_data_get_string(binding, "canvas_uuid");
+			const char *boundScene = obs_data_get_string(binding, "current_scene");
+
+			OBSCanvasAutoRelease canvas = obs_get_canvas_by_uuid(uuid);
+			if (!canvas || !boundScene || !*boundScene) {
+				continue;
+			}
+
+			OBSSourceAutoRelease scene = obs_get_source_by_name(boundScene);
+			if (scene && obs_source_is_scene(scene)) {
+				obs_canvas_set_channel(canvas, 0, scene);
+			}
+		}
 	}
 
 	if (!sources) {
