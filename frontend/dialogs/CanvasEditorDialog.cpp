@@ -4,6 +4,8 @@
 #include <properties-view.hpp>
 #include <qt-wrappers.hpp>
 
+#include <Idian/Idian.hpp>
+
 #include <cstdio>
 
 #include <QComboBox>
@@ -70,6 +72,18 @@ void CanvasEditorDialog::BuildUI()
 	fpsLayout->addStretch();
 	form->addRow(QTStr("Basic.Settings.Canvas.Editor.FPS"), fpsWidget);
 
+	if (!def.isDefault) {
+		resUseDefault = new idian::ToggleSwitch(def.useDefaultResolution);
+		form->addRow(QTStr("Basic.Settings.Canvas.Editor.UseDefaultRes"), resUseDefault);
+		auto applyResDefault = [this](bool on) {
+			resCombo->setEnabled(!on);
+			fpsNum->setEnabled(!on);
+			fpsDen->setEnabled(!on);
+		};
+		applyResDefault(def.useDefaultResolution);
+		connect(resUseDefault, &QAbstractButton::toggled, this, applyResDefault);
+	}
+
 	root->addLayout(form);
 
 	tabs = new QTabWidget();
@@ -86,8 +100,30 @@ void CanvasEditorDialog::BuildUI()
 	}
 	videoTabLayout->addWidget(videoEncoderCombo);
 	RebuildEncoderProps(videoEncoderCombo, videoTabLayout, videoProps, def.video);
-	connect(videoEncoderCombo, &QComboBox::currentIndexChanged, this,
-		[this](int) { RebuildEncoderProps(videoEncoderCombo, videoTabLayout, videoProps, def.video); });
+	if (!def.isDefault) {
+		videoUseDefault = new idian::ToggleSwitch(def.video.useDefault);
+		QWidget *row = new QWidget();
+		QHBoxLayout *rowLayout = new QHBoxLayout(row);
+		rowLayout->setContentsMargins(0, 0, 0, 0);
+		rowLayout->addWidget(new QLabel(QTStr("Basic.Settings.Canvas.Editor.UseDefault")));
+		rowLayout->addWidget(videoUseDefault);
+		rowLayout->addStretch();
+		videoTabLayout->insertWidget(0, row);
+		auto applyVideoDefault = [this](bool on) {
+			videoEncoderCombo->setEnabled(!on);
+			if (videoProps) {
+				videoProps->SetDisabled(on);
+			}
+		};
+		applyVideoDefault(def.video.useDefault);
+		connect(videoUseDefault, &QAbstractButton::toggled, this, applyVideoDefault);
+	}
+	connect(videoEncoderCombo, &QComboBox::currentIndexChanged, this, [this](int) {
+		RebuildEncoderProps(videoEncoderCombo, videoTabLayout, videoProps, def.video);
+		if (videoProps && videoUseDefault) {
+			videoProps->SetDisabled(videoUseDefault->isChecked());
+		}
+	});
 	tabs->addTab(videoTab, QTStr("Basic.Settings.Canvas.Editor.Tab.Video"));
 
 	QWidget *audioTab = new QWidget();
@@ -102,8 +138,30 @@ void CanvasEditorDialog::BuildUI()
 	}
 	audioTabLayout->addWidget(audioEncoderCombo);
 	RebuildEncoderProps(audioEncoderCombo, audioTabLayout, audioProps, def.audio);
-	connect(audioEncoderCombo, &QComboBox::currentIndexChanged, this,
-		[this](int) { RebuildEncoderProps(audioEncoderCombo, audioTabLayout, audioProps, def.audio); });
+	if (!def.isDefault) {
+		audioUseDefault = new idian::ToggleSwitch(def.audio.useDefault);
+		QWidget *row = new QWidget();
+		QHBoxLayout *rowLayout = new QHBoxLayout(row);
+		rowLayout->setContentsMargins(0, 0, 0, 0);
+		rowLayout->addWidget(new QLabel(QTStr("Basic.Settings.Canvas.Editor.UseDefault")));
+		rowLayout->addWidget(audioUseDefault);
+		rowLayout->addStretch();
+		audioTabLayout->insertWidget(0, row);
+		auto applyAudioDefault = [this](bool on) {
+			audioEncoderCombo->setEnabled(!on);
+			if (audioProps) {
+				audioProps->SetDisabled(on);
+			}
+		};
+		applyAudioDefault(def.audio.useDefault);
+		connect(audioUseDefault, &QAbstractButton::toggled, this, applyAudioDefault);
+	}
+	connect(audioEncoderCombo, &QComboBox::currentIndexChanged, this, [this](int) {
+		RebuildEncoderProps(audioEncoderCombo, audioTabLayout, audioProps, def.audio);
+		if (audioProps && audioUseDefault) {
+			audioProps->SetDisabled(audioUseDefault->isChecked());
+		}
+	});
 	tabs->addTab(audioTab, QTStr("Basic.Settings.Canvas.Editor.Tab.Audio"));
 
 	root->addWidget(tabs);
@@ -143,6 +201,12 @@ void CanvasEditorDialog::ReadBack()
 	if (audioProps) {
 		def.audio.settings = obs_data_create();
 		obs_data_apply(def.audio.settings, audioProps->GetSettings());
+	}
+
+	if (!def.isDefault) {
+		def.useDefaultResolution = resUseDefault->isChecked();
+		def.video.useDefault = videoUseDefault->isChecked();
+		def.audio.useDefault = audioUseDefault->isChecked();
 	}
 }
 

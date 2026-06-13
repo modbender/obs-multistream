@@ -12,6 +12,10 @@ class QVBoxLayout;
 class OBSPropertiesView;
 class OBSBasic;
 
+namespace idian {
+class ToggleSwitch;
+}
+
 /* Modal editor for a single CanvasDefinition. Holds a reference to the live
  * manager entry and writes back into it only on accept(); cancel writes nothing. */
 class CanvasEditorDialog : public QDialog {
@@ -33,13 +37,16 @@ private:
 	QComboBox *resCombo = nullptr;
 	QSpinBox *fpsNum = nullptr;
 	QSpinBox *fpsDen = nullptr;
+	idian::ToggleSwitch *resUseDefault = nullptr;
 
 	QTabWidget *tabs = nullptr;
 	QComboBox *videoEncoderCombo = nullptr;
 	OBSPropertiesView *videoProps = nullptr;
 	QVBoxLayout *videoTabLayout = nullptr;
+	idian::ToggleSwitch *videoUseDefault = nullptr;
 
 	QComboBox *audioEncoderCombo = nullptr;
 	OBSPropertiesView *audioProps = nullptr;
 	QVBoxLayout *audioTabLayout = nullptr;
+	idian::ToggleSwitch *audioUseDefault = nullptr;
 };
