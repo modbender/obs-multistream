@@ -102,8 +102,6 @@ void OBSBasicSettings::LoadCanvasSettings()
 	RebuildCanvasList();
 }
 
-void OBSBasicSettings::SaveCanvasSettings() {}
-
 void OBSBasicSettings::AddCanvasClicked()
 {
 	CanvasManager &mgr = main->GetCanvasManager();
@@ -121,8 +119,9 @@ void OBSBasicSettings::AddCanvasClicked()
 	added.ToVideoInfo(covi);
 	main->AddCanvas(added.name, &covi, ACTIVATE | MIX_AUDIO | SCENE_REF, added.uuid.c_str());
 
-	canvasChanged = true;
-	EnableApplyButton(true);
+	/* Add/remove are immediate management actions (like profiles/scene collections):
+	 * commit to disk now rather than deferring to the Settings Apply button. */
+	mgr.Save();
 	RebuildCanvasList();
 }
 
@@ -149,8 +148,7 @@ void OBSBasicSettings::RemoveCanvasClicked(const std::string &uuid)
 	}
 	mgr.Remove(uuid);
 
-	canvasChanged = true;
-	EnableApplyButton(true);
+	mgr.Save();
 	RebuildCanvasList();
 }
 

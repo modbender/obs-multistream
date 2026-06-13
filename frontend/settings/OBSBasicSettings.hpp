@@ -195,9 +195,7 @@ private:
 	void LoadAppearanceSettings(bool reload = false);
 	void LoadAdvancedSettings();
 
-	bool canvasChanged = false;
 	void LoadCanvasSettings();
-	void SaveCanvasSettings();
 	void RebuildCanvasList();
 	QWidget *BuildCanvasCard(const CanvasDefinition &def);
 	void AddCanvasClicked();

@@ -3031,7 +3031,7 @@ void OBSBasicSettings::LoadSettings(bool changedOnly)
 	if (!changedOnly || advancedChanged) {
 		LoadAdvancedSettings();
 	}
-	if (!changedOnly || canvasChanged) {
+	if (!changedOnly) {
 		LoadCanvasSettings();
 	}
 }
