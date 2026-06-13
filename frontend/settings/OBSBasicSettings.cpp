@@ -761,6 +761,12 @@ void OBSBasicSettings::LoadGeneralSettings()
 		config_get_bool(App()->GetUserConfig(), "BasicWindow", "KeepReplayBufferStreamStops");
 	ui->keepReplayStreamStops->setChecked(keepReplayStreamStops);
 
+	/* Phase 1: recording/replay hidden and inert; hide the while-streaming rows so they can't be re-enabled. */
+	ui->recordWhenStreaming->setVisible(false);
+	ui->keepRecordStreamStops->setVisible(false);
+	ui->replayWhileStreaming->setVisible(false);
+	ui->keepReplayStreamStops->setVisible(false);
+
 	bool systemTrayEnabled = config_get_bool(App()->GetUserConfig(), "BasicWindow", "SysTrayEnabled");
 	ui->systemTrayEnabled->setChecked(systemTrayEnabled);
 

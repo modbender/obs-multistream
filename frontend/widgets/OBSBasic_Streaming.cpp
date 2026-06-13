@@ -106,17 +106,7 @@ void OBSBasic::StartStreaming()
 			broadcastActive = true;
 		}
 
-		bool recordWhenStreaming =
-			config_get_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming");
-		if (recordWhenStreaming) {
-			StartRecording();
-		}
-
-		bool replayBufferWhileStreaming =
-			config_get_bool(App()->GetUserConfig(), "BasicWindow", "ReplayBufferWhileStreaming");
-		if (replayBufferWhileStreaming) {
-			StartReplayBuffer();
-		}
+		/* Phase 1: recording/replay hidden and inert; never auto-start them on stream start. */
 
 #ifdef YOUTUBE_ENABLED
 		if (!autoStartBroadcast)

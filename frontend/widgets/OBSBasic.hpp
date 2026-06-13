@@ -493,8 +493,10 @@ private:
 	obs_hotkey_id screenshotHotkey = 0;
 	obs_hotkey_id sourceScreenshotHotkey = 0;
 
-	obs_hotkey_pair_id streamingHotkeys, recordingHotkeys, pauseHotkeys, replayBufHotkeys, vcamHotkeys,
-		togglePreviewHotkeys, contextBarHotkeys;
+	obs_hotkey_pair_id streamingHotkeys, vcamHotkeys, togglePreviewHotkeys, contextBarHotkeys;
+	/* Phase 1: recording/replay hidden and inert; left at the invalid sentinel so ClearHotkeys unregister is a no-op. */
+	obs_hotkey_pair_id recordingHotkeys = OBS_INVALID_HOTKEY_PAIR_ID, pauseHotkeys = OBS_INVALID_HOTKEY_PAIR_ID,
+			   replayBufHotkeys = OBS_INVALID_HOTKEY_PAIR_ID;
 	obs_hotkey_id forceStreamingStopHotkey, splitFileHotkey, addChapterHotkey;
 
 	void InitHotkeys();

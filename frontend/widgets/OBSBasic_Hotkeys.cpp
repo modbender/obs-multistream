@@ -160,25 +160,7 @@ void OBSBasic::CreateHotkeys()
 								Str("Basic.Main.ForceStopStreaming"), cb, this);
 	LoadHotkey(forceStreamingStopHotkey, "OBSBasic.ForceStopStreaming");
 
-	recordingHotkeys = obs_hotkey_pair_register_frontend(
-		"OBSBasic.StartRecording", Str("Basic.Main.StartRecording"), "OBSBasic.StopRecording",
-		Str("Basic.Main.StopRecording"),
-		MAKE_CALLBACK(!basic.outputHandler->RecordingActive() && !basic.recordingStarted, basic.StartRecording,
-			      "Starting recording"),
-		MAKE_CALLBACK(basic.outputHandler->RecordingActive() && basic.recordingStarted, basic.StopRecording,
-			      "Stopping recording"),
-		this, this);
-	LoadHotkeyPair(recordingHotkeys, "OBSBasic.StartRecording", "OBSBasic.StopRecording");
-
-	pauseHotkeys =
-		obs_hotkey_pair_register_frontend("OBSBasic.PauseRecording", Str("Basic.Main.PauseRecording"),
-						  "OBSBasic.UnpauseRecording", Str("Basic.Main.UnpauseRecording"),
-						  MAKE_CALLBACK(basic.isRecordingPausable && !basic.recordingPaused,
-								basic.PauseRecording, "Pausing recording"),
-						  MAKE_CALLBACK(basic.isRecordingPausable && basic.recordingPaused,
-								basic.UnpauseRecording, "Unpausing recording"),
-						  this, this);
-	LoadHotkeyPair(pauseHotkeys, "OBSBasic.PauseRecording", "OBSBasic.UnpauseRecording");
+	/* Phase 1: recording/replay hidden and inert; skip registering their hotkeys so a bound key can't trigger them. */
 
 	splitFileHotkey = obs_hotkey_register_frontend(
 		"OBSBasic.SplitFile", Str("Basic.Main.SplitFile"),
@@ -199,16 +181,6 @@ void OBSBasic::CreateHotkeys()
 		},
 		this);
 	LoadHotkey(addChapterHotkey, "OBSBasic.AddChapterMarker");
-
-	replayBufHotkeys =
-		obs_hotkey_pair_register_frontend("OBSBasic.StartReplayBuffer", Str("Basic.Main.StartReplayBuffer"),
-						  "OBSBasic.StopReplayBuffer", Str("Basic.Main.StopReplayBuffer"),
-						  MAKE_CALLBACK(!basic.outputHandler->ReplayBufferActive(),
-								basic.StartReplayBuffer, "Starting replay buffer"),
-						  MAKE_CALLBACK(basic.outputHandler->ReplayBufferActive(),
-								basic.StopReplayBuffer, "Stopping replay buffer"),
-						  this, this);
-	LoadHotkeyPair(replayBufHotkeys, "OBSBasic.StartReplayBuffer", "OBSBasic.StopReplayBuffer");
 
 	if (vcamEnabled) {
 		vcamHotkeys = obs_hotkey_pair_register_frontend(

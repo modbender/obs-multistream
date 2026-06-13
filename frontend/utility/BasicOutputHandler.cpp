@@ -232,11 +232,8 @@ BasicOutputHandler::BasicOutputHandler(OBSBasic *main_) : main(main_)
 		deactivateVirtualCam.Connect(signal, "deactivate", OBSDeactivateVirtualCam, this);
 	}
 
-	auto service = main_->GetService();
-	OBSDataAutoRelease settings = obs_service_get_settings(service);
-	auto multitrack_enabled = config_get_bool(main->Config(), "Stream1", "EnableMultitrackVideo") &&
-				  (obs_data_has_user_value(settings, "multitrack_video_configuration_url") ||
-				   strcmp(obs_service_get_id(service), "rtmp_custom") == 0);
+	/* Phase 1: GoLive disabled; the Default Canvas drives the single stream output. */
+	auto multitrack_enabled = false;
 
 	if (multitrack_enabled) {
 		multitrackVideo = make_unique<MultitrackVideoOutput>();

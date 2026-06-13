@@ -30,6 +30,8 @@ void OBSBasic::ResetOutputs()
 	if ((!outputHandler || !outputHandler->Active()) &&
 	    (!setupStreamingGuard.valid() ||
 	     setupStreamingGuard.wait_for(std::chrono::seconds{0}) == std::future_status::ready)) {
+		/* Phase 1: always-Advanced handler; keep Output/Mode in sync so path/remux reads match. */
+		config_set_string(Config(), "Output", "Mode", "Advanced");
 		outputHandler.reset();
 		outputHandler.reset(CreateAdvancedOutputHandler(this));
 

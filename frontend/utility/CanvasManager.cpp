@@ -84,19 +84,29 @@ bool CanvasManager::EnsureDefaultEncoders()
 
 	bool changed = false;
 	if (def->video.id.empty()) {
-		def->video.id = "obs_x264";
 		OBSDataAutoRelease s = obs_encoder_defaults("obs_x264");
-		obs_data_set_int(s, "bitrate", 6000);
-		obs_data_set_string(s, "rate_control", "CBR");
-		def->video.settings = std::move(s);
-		changed = true;
+		if (s) {
+			def->video.id = "obs_x264";
+			obs_data_set_int(s, "bitrate", 6000);
+			obs_data_set_string(s, "rate_control", "CBR");
+			def->video.settings = std::move(s);
+			changed = true;
+		} else {
+			blog(LOG_WARNING, "EnsureDefaultEncoders: video encoder 'obs_x264' is not registered; "
+					  "leaving default canvas video encoder unset");
+		}
 	}
 	if (def->audio.id.empty()) {
-		def->audio.id = "ffmpeg_aac";
 		OBSDataAutoRelease s = obs_encoder_defaults("ffmpeg_aac");
-		obs_data_set_int(s, "bitrate", 160);
-		def->audio.settings = std::move(s);
-		changed = true;
+		if (s) {
+			def->audio.id = "ffmpeg_aac";
+			obs_data_set_int(s, "bitrate", 160);
+			def->audio.settings = std::move(s);
+			changed = true;
+		} else {
+			blog(LOG_WARNING, "EnsureDefaultEncoders: audio encoder 'ffmpeg_aac' is not registered; "
+					  "leaving default canvas audio encoder unset");
+		}
 	}
 	return changed;
 }
