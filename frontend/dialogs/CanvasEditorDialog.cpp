@@ -1,6 +1,7 @@
 #include "CanvasEditorDialog.hpp"
 
 #include <widgets/OBSBasic.hpp>
+#include <properties-view.hpp>
 #include <qt-wrappers.hpp>
 
 #include <cstdio>
@@ -12,9 +13,14 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 #include "moc_CanvasEditorDialog.cpp"
+
+namespace {
+static constexpr uint32_t ENCODER_HIDE_FLAGS = OBS_ENCODER_CAP_DEPRECATED | OBS_ENCODER_CAP_INTERNAL;
+}
 
 CanvasEditorDialog::CanvasEditorDialog(CanvasDefinition &def_, OBSBasic *main_, QWidget *parent)
 	: QDialog(parent),
@@ -66,7 +72,24 @@ void CanvasEditorDialog::BuildUI()
 
 	root->addLayout(form);
 
-	/* Tasks 2-5 insert the encoder/color QTabWidget here, before the buttons. */
+	tabs = new QTabWidget();
+
+	QWidget *videoTab = new QWidget();
+	videoTabLayout = new QVBoxLayout(videoTab);
+	videoEncoderCombo = new QComboBox();
+	PopulateEncoderCombo(videoEncoderCombo, OBS_ENCODER_VIDEO);
+	{
+		int i = videoEncoderCombo->findData(QString::fromStdString(def.video.id));
+		if (i >= 0) {
+			videoEncoderCombo->setCurrentIndex(i);
+		}
+	}
+	videoTabLayout->addWidget(videoEncoderCombo);
+	RebuildVideoProps();
+	connect(videoEncoderCombo, &QComboBox::currentIndexChanged, this, [this](int) { RebuildVideoProps(); });
+	tabs->addTab(videoTab, QTStr("Basic.Settings.Canvas.Editor.Tab.Video"));
+
+	root->addWidget(tabs);
 
 	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
 	connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
@@ -92,4 +115,47 @@ void CanvasEditorDialog::ReadBack()
 
 	def.fpsNum = (uint32_t)fpsNum->value();
 	def.fpsDen = (uint32_t)fpsDen->value();
+
+	def.video.id = QT_TO_UTF8(videoEncoderCombo->currentData().toString());
+	if (videoProps) {
+		def.video.settings = obs_data_create();
+		obs_data_apply(def.video.settings, videoProps->GetSettings());
+	}
+}
+
+void CanvasEditorDialog::PopulateEncoderCombo(QComboBox *combo, obs_encoder_type want)
+{
+	const char *type;
+	size_t idx = 0;
+	while (obs_enum_encoder_types(idx++, &type)) {
+		if (obs_get_encoder_type(type) != want) {
+			continue;
+		}
+		if (want == OBS_ENCODER_VIDEO && (obs_get_encoder_caps(type) & ENCODER_HIDE_FLAGS)) {
+			continue;
+		}
+		combo->addItem(QT_UTF8(obs_encoder_get_display_name(type)), QT_UTF8(type));
+	}
+	combo->model()->sort(0);
+}
+
+void CanvasEditorDialog::RebuildVideoProps()
+{
+	if (videoProps) {
+		videoTabLayout->removeWidget(videoProps);
+		videoProps->deleteLater();
+		videoProps = nullptr;
+	}
+	std::string id = QT_TO_UTF8(videoEncoderCombo->currentData().toString());
+	if (id.empty()) {
+		return;
+	}
+	OBSDataAutoRelease settings = obs_encoder_defaults(id.c_str());
+	if (def.video.id == id && def.video.settings) {
+		obs_data_apply(settings, def.video.settings);
+	}
+	videoProps = new OBSPropertiesView(settings.Get(), id.c_str(),
+					   (PropertiesReloadCallback)obs_get_encoder_properties, 170);
+	videoProps->setFrameShape(QFrame::NoFrame);
+	videoTabLayout->addWidget(videoProps);
 }

@@ -7,6 +7,9 @@
 class QLineEdit;
 class QComboBox;
 class QSpinBox;
+class QTabWidget;
+class QVBoxLayout;
+class OBSPropertiesView;
 class OBSBasic;
 
 /* Modal editor for a single CanvasDefinition. Holds a reference to the live
@@ -20,6 +23,8 @@ public:
 private:
 	void BuildUI();
 	void ReadBack();
+	void PopulateEncoderCombo(QComboBox *combo, obs_encoder_type want);
+	void RebuildVideoProps();
 
 	CanvasDefinition &def;
 	OBSBasic *main;
@@ -28,4 +33,9 @@ private:
 	QComboBox *resCombo = nullptr;
 	QSpinBox *fpsNum = nullptr;
 	QSpinBox *fpsDen = nullptr;
+
+	QTabWidget *tabs = nullptr;
+	QComboBox *videoEncoderCombo = nullptr;
+	OBSPropertiesView *videoProps = nullptr;
+	QVBoxLayout *videoTabLayout = nullptr;
 };
