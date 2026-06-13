@@ -75,8 +75,9 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 	useStreamEncoder = astrcmpi(recordEncoder, "none") == 0;
 	useStreamAudioEncoder = astrcmpi(recAudioEncoder, "none") == 0;
 
-	OBSData streamEncSettings = GetDataFromJsonFile("streamEncoder.json");
 	OBSData recordEncSettings = GetDataFromJsonFile("recordEncoder.json");
+
+	const CanvasDefinition &canvasDef = main->GetCanvasManager().Default();
 
 	if (ffmpegOutput) {
 		fileOutput = obs_output_create("ffmpeg_output", "adv_ffmpeg_output", nullptr, nullptr);
@@ -134,7 +135,8 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 		}
 	}
 
-	videoStreaming = obs_video_encoder_create(streamEncoder, "advanced_video_stream", streamEncSettings, nullptr);
+	videoStreaming = obs_video_encoder_create(canvasDef.video.id.c_str(), "advanced_video_stream",
+						  canvasDef.video.settings, nullptr);
 	if (!videoStreaming) {
 		throw "Failed to create streaming video encoder "
 		      "(advanced output)";
@@ -147,8 +149,8 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 					      video_output_get_height(obs_get_video()));
 	}
 
-	const char *rate_control =
-		obs_data_get_string(useStreamEncoder ? streamEncSettings : recordEncSettings, "rate_control");
+	const char *rate_control = obs_data_get_string(
+		useStreamEncoder ? canvasDef.video.settings.Get() : recordEncSettings.Get(), "rate_control");
 	if (!rate_control) {
 		rate_control = "";
 	}
@@ -181,9 +183,8 @@ AdvancedOutput::AdvancedOutput(OBSBasic *main_) : BasicOutputHandler(main_)
 	}
 
 	std::string id;
-	int streamTrackIndex = config_get_int(main->Config(), "AdvOut", "TrackIndex") - 1;
-	streamAudioEnc =
-		obs_audio_encoder_create(streamAudioEncoder, "adv_stream_audio", nullptr, streamTrackIndex, nullptr);
+	streamAudioEnc = obs_audio_encoder_create(canvasDef.audio.id.c_str(), "adv_stream_audio",
+						  canvasDef.audio.settings, 0, nullptr);
 	if (!streamAudioEnc) {
 		throw "Failed to create streaming audio encoder "
 		      "(advanced output)";
@@ -211,9 +212,12 @@ void AdvancedOutput::UpdateStreamSettings()
 	bool applyServiceSettings = config_get_bool(main->Config(), "AdvOut", "ApplyServiceSettings");
 	bool enforceBitrate = !config_get_bool(main->Config(), "Stream1", "IgnoreRecommended");
 	bool dynBitrate = config_get_bool(main->Config(), "Output", "DynamicBitrate");
-	const char *streamEncoder = config_get_string(main->Config(), "AdvOut", "Encoder");
+	const CanvasDefinition &canvasDef = main->GetCanvasManager().Default();
+	const char *streamEncoder = canvasDef.video.id.c_str();
 
-	OBSData settings = GetDataFromJsonFile("streamEncoder.json");
+	OBSDataAutoRelease canvasSettings = obs_data_create();
+	obs_data_apply(canvasSettings, canvasDef.video.settings);
+	OBSData settings = canvasSettings.Get();
 	ApplyEncoderDefaults(settings, videoStreaming);
 
 	if (applyServiceSettings) {

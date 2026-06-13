@@ -27,14 +27,11 @@ void OBSBasic::ResetOutputs()
 {
 	ProfileScope("OBSBasic::ResetOutputs");
 
-	const char *mode = config_get_string(activeConfiguration, "Output", "Mode");
-	bool advOut = astrcmpi(mode, "Advanced") == 0;
-
 	if ((!outputHandler || !outputHandler->Active()) &&
 	    (!setupStreamingGuard.valid() ||
 	     setupStreamingGuard.wait_for(std::chrono::seconds{0}) == std::future_status::ready)) {
 		outputHandler.reset();
-		outputHandler.reset(advOut ? CreateAdvancedOutputHandler(this) : CreateSimpleOutputHandler(this));
+		outputHandler.reset(CreateAdvancedOutputHandler(this));
 
 		emit ReplayBufEnabled(outputHandler->replayBuffer);
 
