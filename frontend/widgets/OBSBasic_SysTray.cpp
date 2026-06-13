@@ -60,6 +60,10 @@ void OBSBasic::SystemTrayInit()
 	trayMenu->addAction(sysTrayRecord);
 	trayMenu->addAction(sysTrayReplayBuffer);
 	trayMenu->addAction(sysTrayVirtualCam);
+
+	/* Hide recording/replay tray entries in this streaming-only build; handlers stay dormant. */
+	sysTrayRecord->setVisible(false);
+	sysTrayReplayBuffer->setVisible(false);
 	trayMenu->addSeparator();
 	trayMenu->addAction(exit);
 	trayIcon->setContextMenu(trayMenu);

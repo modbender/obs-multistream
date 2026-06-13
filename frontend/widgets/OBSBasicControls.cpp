@@ -59,6 +59,8 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main) : QFrame(nullptr), ui(new Ui:
 
 	/* Set up default visibility */
 	ui->broadcastButton->setVisible(false);
+	/* Recording/replay UI is hidden in this streaming-only build; handlers stay dormant. */
+	ui->recordButton->setVisible(false);
 	ui->pauseRecordButton->setVisible(false);
 	ui->replayBufferButton->setVisible(false);
 	ui->saveReplayButton->setVisible(false);
@@ -273,9 +275,10 @@ void OBSBasicControls::EnableBroadcastFlow(bool enabled)
 	ui->broadcastButton->style()->polish(ui->broadcastButton);
 }
 
-void OBSBasicControls::EnableReplayBufferButtons(bool enabled)
+void OBSBasicControls::EnableReplayBufferButtons(bool)
 {
-	ui->replayBufferButton->setVisible(enabled);
+	/* Replay-buffer UI stays hidden in this streaming-only build regardless of config. */
+	ui->replayBufferButton->setVisible(false);
 }
 
 void OBSBasicControls::EnableVirtualCamButtons()
