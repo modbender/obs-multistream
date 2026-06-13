@@ -23,9 +23,25 @@ void OBSBasic::CanvasRemoved(void *data, calldata_t *params)
 	QMetaObject::invokeMethod(static_cast<OBSBasic *>(data), "RemoveCanvas", Q_ARG(OBSCanvas, OBSCanvas(canvas)));
 }
 
-const OBS::Canvas &OBSBasic::AddCanvas(const std::string &name, obs_video_info *ovi, int flags)
+const OBS::Canvas &OBSBasic::AddCanvas(const std::string &name, obs_video_info *ovi, int flags, const char *uuid)
 {
-	OBSCanvas canvas = obs_canvas_create(name.c_str(), ovi, flags);
+	obs_canvas_t *raw;
+	if (uuid && *uuid) {
+		/* Preserve the definition's uuid so per-collection scene bindings survive
+		 * restarts; obs_canvas_create would mint a fresh uuid each launch. */
+		OBSDataAutoRelease data = obs_data_create();
+		obs_data_set_string(data, "name", name.c_str());
+		obs_data_set_string(data, "uuid", uuid);
+		obs_data_set_int(data, "flags", flags);
+		raw = obs_load_canvas(data);
+		if (raw && ovi && !obs_canvas_reset_video(raw, ovi)) {
+			blog(LOG_WARNING, "Canvas '%s' (uuid %s) created without a video mix; reset_video failed",
+			     name.c_str(), uuid);
+		}
+	} else {
+		raw = obs_canvas_create(name.c_str(), ovi, flags);
+	}
+	OBSCanvas canvas = raw;
 	auto &it = canvases.emplace_back(canvas);
 	OnEvent(OBS_FRONTEND_EVENT_CANVAS_ADDED);
 	return it;

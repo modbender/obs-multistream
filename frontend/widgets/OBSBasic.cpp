@@ -1016,6 +1016,41 @@ void OBSBasic::OBSInit()
 		}
 	}
 
+	/* Load global canvas definitions before any scene collection. The Default
+	 * definition drives the main canvas's resolution/fps; additional definitions
+	 * become obs_canvas_t objects (their scenes are bound per-collection). */
+	canvasManager.Load();
+
+	{
+		const CanvasDefinition &def = canvasManager.Default();
+		obs_video_info ovi;
+		if (obs_get_video_info(&ovi)) {
+			ovi.base_width = def.width;
+			ovi.base_height = def.height;
+			ovi.output_width = def.width;
+			ovi.output_height = def.height;
+			ovi.fps_num = def.fpsNum;
+			ovi.fps_den = def.fpsDen;
+			if (obs_reset_video(&ovi) != OBS_VIDEO_SUCCESS) {
+				blog(LOG_WARNING, "Failed to apply Default canvas resolution %ux%u; keeping profile settings",
+				     def.width, def.height);
+			}
+		} else {
+			blog(LOG_WARNING, "obs_get_video_info failed; Default canvas resolution not applied");
+		}
+	}
+
+	/* graphics_module is consumed only at global graphics init; additional canvas
+	 * mixes reuse the existing context, so ToVideoInfo's null is fine here. */
+	for (const CanvasDefinition &def : canvasManager.Definitions()) {
+		if (def.isDefault) {
+			continue;
+		}
+		obs_video_info covi = {};
+		def.ToVideoInfo(covi);
+		AddCanvas(def.name, &covi, ACTIVATE | MIX_AUDIO | SCENE_REF, def.uuid.c_str());
+	}
+
 	/* load audio monitoring */
 	if (obs_audio_monitoring_available()) {
 		const char *device_name = config_get_string(activeConfiguration, "Audio", "MonitoringDeviceName");

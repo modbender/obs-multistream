@@ -24,6 +24,7 @@
 #include <components/AccessibleAlignmentSelector.hpp>
 #include <oauth/Auth.hpp>
 #include <utility/BasicOutputHandler.hpp>
+#include <utility/CanvasManager.hpp>
 #include <utility/OBSCanvas.hpp>
 #include <utility/PreviewProgramSizeObserver.hpp>
 #include <utility/VCamConfig.hpp>
@@ -1143,14 +1144,17 @@ public:
 	 */
 private:
 	std::vector<OBS::Canvas> canvases;
+	CanvasManager canvasManager;
 
 	static void CanvasRemoved(void *data, calldata_t *params);
 	void ClearCanvases();
 
 public:
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }
+	CanvasManager &GetCanvasManager() { return canvasManager; }
 
-	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0);
+	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0,
+				    const char *uuid = nullptr);
 
 public slots:
 	bool RemoveCanvas(OBSCanvas canvas);
