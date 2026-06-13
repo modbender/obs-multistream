@@ -20,6 +20,7 @@
 
 #include "ui_OBSBasicSettings.h"
 
+#include <utility/CanvasDefinition.hpp>
 #include <utility/FFmpegShared.hpp>
 
 #include <QPointer>
@@ -193,6 +194,16 @@ private:
 	void LoadA11ySettings(bool presetChange = false);
 	void LoadAppearanceSettings(bool reload = false);
 	void LoadAdvancedSettings();
+
+	bool canvasChanged = false;
+	void LoadCanvasSettings();
+	void SaveCanvasSettings();
+	void RebuildCanvasList();
+	QWidget *BuildCanvasCard(const CanvasDefinition &def);
+	void AddCanvasClicked();
+	void RemoveCanvasClicked(const std::string &uuid);
+	void EditCanvasClicked(const std::string &uuid);
+
 	void LoadSettings(bool changedOnly);
 
 	OBSPropertiesView *CreateEncoderPropertyView(const char *encoder, const char *path, bool changed = false);
