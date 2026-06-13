@@ -23,6 +23,7 @@
 !.swift-format
 !AUTHORS
 !buildspec.json
+!CLAUDE.md
 !CMakeLists.txt
 !CMakePresets.json
 !COC.rst
