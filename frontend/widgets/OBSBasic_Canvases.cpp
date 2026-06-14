@@ -54,24 +54,19 @@ void OBSBasic::EnsureCanvasHasScene(obs_canvas_t *canvas)
 		return;
 	}
 
-	struct CountCtx {
-		int count = 0;
+	struct Ctx {
 		obs_source_t *first = nullptr;
 	} ctx;
 	obs_canvas_enum_scenes(
 		canvas,
 		[](void *param, obs_source_t *scene) {
-			auto *c = static_cast<CountCtx *>(param);
-			if (!c->first) {
-				c->first = scene;
-			}
-			c->count++;
-			return true;
+			static_cast<Ctx *>(param)->first = scene;
+			return false; // first scene is enough
 		},
 		&ctx);
 
 	obs_source_t *sceneSource = ctx.first;
-	if (ctx.count == 0) {
+	if (!ctx.first) {
 		OBSSceneAutoRelease scene = obs_canvas_scene_create(canvas, Str("Basic.Scene"));
 		sceneSource = obs_scene_get_source(scene);
 	}
@@ -82,9 +77,10 @@ void OBSBasic::EnsureCanvasHasScene(obs_canvas_t *canvas)
 	}
 }
 
-obs_source_t *OBSBasic::GetCanvasCurrentScene(obs_canvas_t *canvas)
+OBSSource OBSBasic::GetCanvasCurrentScene(obs_canvas_t *canvas)
 {
-	return canvas ? obs_canvas_get_channel(canvas, 0) : nullptr;
+	OBSSourceAutoRelease cur = canvas ? obs_canvas_get_channel(canvas, 0) : nullptr;
+	return cur.Get(); // OBSSource takes its own ref; the AutoRelease drops the owned one
 }
 
 void OBSBasic::SetCanvasCurrentScene(obs_canvas_t *canvas, obs_source_t *sceneSource)

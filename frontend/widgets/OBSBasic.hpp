@@ -1158,9 +1158,8 @@ public:
 	const OBS::Canvas &AddCanvas(const std::string &name, obs_video_info *ovi = nullptr, int flags = 0,
 				     const char *uuid = nullptr);
 
-	/* Phase 2a: per-canvas scene lifecycle. */
 	void EnsureCanvasHasScene(obs_canvas_t *canvas);
-	obs_source_t *GetCanvasCurrentScene(obs_canvas_t *canvas);
+	OBSSource GetCanvasCurrentScene(obs_canvas_t *canvas);
 	void SetCanvasCurrentScene(obs_canvas_t *canvas, obs_source_t *sceneSource);
 
 public slots:
