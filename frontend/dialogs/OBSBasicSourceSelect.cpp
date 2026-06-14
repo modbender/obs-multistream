@@ -920,8 +920,6 @@ void OBSBasicSourceSelect::sourceTypeSelected(QListWidgetItem *current, QListWid
 		return;
 	}
 
-	ui->createNewFrame->setVisible(true);
-
 	bool isDeprecatedType = deprecatedData.toBool();
 	ui->deprecatedCreateLabel->setVisible(isDeprecatedType);
 
@@ -940,11 +938,20 @@ void OBSBasicSourceSelect::sourceTypeSelected(QListWidgetItem *current, QListWid
 
 	updateExistingSources();
 
-	if (existingFlowLayout->count() == 0) {
+	ui->createNewFrame->setVisible(true);
+
+	// With the shared-source model a source can be reused across canvases, so reuse is the
+	// natural default. When at least one source of this type already exists, focus the
+	// existing list so reuse is the landing action; create-new stays visible but secondary.
+	// When none exists, focus the new-source field so creation is the default action.
+	if (existingFlowLayout->count() > 0) {
+		ui->existingScrollArea->setFocus();
+	} else {
 		QLabel *noExisting = new QLabel();
 		noExisting->setText(
 			QTStr("Basic.SourceSelect.NoExisting").arg(getDisplayNameForSourceType(selectedTypeId)));
 		noExisting->setProperty("class", "text-muted");
 		existingFlowLayout->addWidget(noExisting);
+		ui->newSourceName->setFocus();
 	}
 }
