@@ -251,6 +251,7 @@ OBSBasicSettings {
     qproperty-hotkeysIcon: url(theme:Light/settings/hotkeys.svg);
     qproperty-accessibilityIcon: url(theme:Light/settings/accessibility.svg);
     qproperty-advancedIcon: url(theme:Light/settings/advanced.svg);
+    qproperty-canvasIcon: url(theme:Light/settings/canvas.svg);
 }
 
 QCheckBox::indicator:unchecked,

@@ -1993,6 +1993,7 @@ OBSBasicSettings {
     qproperty-hotkeysIcon: url(theme:Dark/settings/hotkeys.svg);
     qproperty-accessibilityIcon: url(theme:Dark/settings/accessibility.svg);
     qproperty-advancedIcon: url(theme:Dark/settings/advanced.svg);
+    qproperty-canvasIcon: url(theme:Dark/settings/canvas.svg);
 }
 
 /* Checkboxes */
