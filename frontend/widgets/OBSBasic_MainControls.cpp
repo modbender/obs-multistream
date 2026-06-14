@@ -291,20 +291,12 @@ void OBSBasic::UploadLog(const char *subdir, const char *file, const LogUploadTy
 	   << ((uploadType == OBS::LogFileType::CurrentAppLog) ? " (Active Log)" : " (Complete Log)") << "\n\n"
 	   << fileString;
 
-	if (logUploadThread) {
-		logUploadThread->wait();
-	}
-
-	RemoteTextThread *thread = new RemoteTextThread("https://obsproject.com/logs/upload", "text/plain", ss.str());
-
-	logUploadThread.reset(thread);
-
-	connect(thread, &RemoteTextThread::Result, this,
-		[this, uploadType](const std::string &text, const std::string &error) {
-			logUploadFinished(text, error, uploadType);
-		});
-
-	logUploadThread->start();
+	/* Fork: log upload to OBS Project infrastructure is disabled; the
+	 * payload is built but no longer sent anywhere. */
+	(void)ss;
+	ui->menuLogFiles->setEnabled(true);
+	OBSApp *app = App();
+	emit app->logUploadFailed(uploadType, QTStr("LogUploadDialog.Errors.NoLogFile"));
 }
 
 void OBSBasic::on_actionShowLogs_triggered()
