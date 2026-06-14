@@ -941,11 +941,21 @@ void OBSBasicSourceSelect::sourceTypeSelected(QListWidgetItem *current, QListWid
 	ui->createNewFrame->setVisible(true);
 
 	// With the shared-source model a source can be reused across canvases, so reuse is the
-	// natural default. When at least one source of this type already exists, focus the
-	// existing list so reuse is the landing action; create-new stays visible but secondary.
-	// When none exists, focus the new-source field so creation is the default action.
+	// natural default. When at least one source of this type already exists, preselect the
+	// first existing source so reuse is the landing selection and the primary Add button is
+	// primed; create-new stays visible but secondary. When none exists, focus the new-source
+	// field so creation is the default action.
 	if (existingFlowLayout->count() > 0) {
-		ui->existingScrollArea->setFocus();
+		QLayoutItem *firstItem = existingFlowLayout->itemAt(0);
+		if (firstItem && firstItem->widget()) {
+			SourceSelectButton *firstButton = qobject_cast<SourceSelectButton *>(firstItem->widget());
+			if (firstButton) {
+				// Drive the same path a click uses: setChecked(true) fires the
+				// QButtonGroup buttonToggled signal, which runs sourceButtonToggled
+				// and populates selectedItems, enabling addExistingButton.
+				firstButton->setChecked(true);
+			}
+		}
 	} else {
 		QLabel *noExisting = new QLabel();
 		noExisting->setText(
