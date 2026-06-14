@@ -43,8 +43,55 @@ const OBS::Canvas &OBSBasic::AddCanvas(const std::string &name, obs_video_info *
 	}
 	OBSCanvas canvas = raw;
 	auto &it = canvases.emplace_back(canvas);
+	EnsureCanvasHasScene(raw);
 	OnEvent(OBS_FRONTEND_EVENT_CANVAS_ADDED);
 	return it;
+}
+
+void OBSBasic::EnsureCanvasHasScene(obs_canvas_t *canvas)
+{
+	if (!canvas) {
+		return;
+	}
+
+	struct CountCtx {
+		int count = 0;
+		obs_source_t *first = nullptr;
+	} ctx;
+	obs_canvas_enum_scenes(
+		canvas,
+		[](void *param, obs_source_t *scene) {
+			auto *c = static_cast<CountCtx *>(param);
+			if (!c->first) {
+				c->first = scene;
+			}
+			c->count++;
+			return true;
+		},
+		&ctx);
+
+	obs_source_t *sceneSource = ctx.first;
+	if (ctx.count == 0) {
+		OBSSceneAutoRelease scene = obs_canvas_scene_create(canvas, Str("Basic.Scene"));
+		sceneSource = obs_scene_get_source(scene);
+	}
+
+	OBSSourceAutoRelease cur = obs_canvas_get_channel(canvas, 0);
+	if (!cur && sceneSource) {
+		obs_canvas_set_channel(canvas, 0, sceneSource);
+	}
+}
+
+obs_source_t *OBSBasic::GetCanvasCurrentScene(obs_canvas_t *canvas)
+{
+	return canvas ? obs_canvas_get_channel(canvas, 0) : nullptr;
+}
+
+void OBSBasic::SetCanvasCurrentScene(obs_canvas_t *canvas, obs_source_t *sceneSource)
+{
+	if (canvas && sceneSource) {
+		obs_canvas_set_channel(canvas, 0, sceneSource);
+	}
 }
 
 bool OBSBasic::RemoveCanvas(OBSCanvas canvas)
