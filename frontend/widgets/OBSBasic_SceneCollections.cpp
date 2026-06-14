@@ -911,6 +911,12 @@ void OBSBasic::Save(SceneCollection &collection)
 	}
 	obs_data_set_array(saveData, "canvas_bindings", canvasBindings);
 
+	// Per-collection main->canvas scene link map. Scenes themselves persist via
+	// the shared "sources" array (each records its canvas_uuid); only the link
+	// associations need to be stored here.
+	OBSDataArrayAutoRelease canvasSceneLinks = canvasSceneLink.ToDataArray();
+	obs_data_set_array(saveData, "canvas_scene_links", canvasSceneLinks);
+
 	// Transitions
 	OBSSourceAutoRelease transition = obs_get_output_source(0);
 	OBSDataArrayAutoRelease transitionsData = SaveTransitions();
@@ -1296,6 +1302,11 @@ void OBSBasic::LoadData(obs_data_t *data, SceneCollection &collection)
 			}
 		}
 	}
+
+	// Restore the per-collection main->canvas scene link map (FromDataArray
+	// returns an empty map for a null/absent array).
+	OBSDataArrayAutoRelease canvasSceneLinks = obs_data_get_array(data, "canvas_scene_links");
+	canvasSceneLink = CanvasSceneLink::FromDataArray(canvasSceneLinks);
 
 	if (!sources) {
 		sources = std::move(groups);
