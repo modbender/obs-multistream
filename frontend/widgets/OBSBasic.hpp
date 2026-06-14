@@ -25,6 +25,7 @@
 #include <oauth/Auth.hpp>
 #include <utility/BasicOutputHandler.hpp>
 #include <utility/CanvasManager.hpp>
+#include <utility/CanvasSceneLink.hpp>
 #include <utility/OBSCanvas.hpp>
 #include <utility/PreviewProgramSizeObserver.hpp>
 #include <utility/VCamConfig.hpp>
@@ -1147,6 +1148,7 @@ public:
 private:
 	std::vector<OBS::Canvas> canvases;
 	CanvasManager canvasManager;
+	CanvasSceneLink canvasSceneLink; // per-collection main->canvas scene-switch map
 
 	static void CanvasRemoved(void *data, calldata_t *params);
 	void ClearCanvases();
@@ -1161,6 +1163,9 @@ public:
 	void EnsureCanvasHasScene(obs_canvas_t *canvas);
 	OBSSource GetCanvasCurrentScene(obs_canvas_t *canvas);
 	void SetCanvasCurrentScene(obs_canvas_t *canvas, obs_source_t *sceneSource);
+
+	void ApplyCanvasSceneLinks();
+	obs_source_t *FindCanvasSceneByUuid(obs_canvas_t *canvas, const std::string &uuid);
 
 public slots:
 	bool RemoveCanvas(OBSCanvas canvas);

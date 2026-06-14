@@ -90,6 +90,52 @@ void OBSBasic::SetCanvasCurrentScene(obs_canvas_t *canvas, obs_source_t *sceneSo
 	}
 }
 
+obs_source_t *OBSBasic::FindCanvasSceneByUuid(obs_canvas_t *canvas, const std::string &uuid)
+{
+	struct Ctx {
+		std::string want;
+		obs_source_t *found = nullptr;
+	} ctx{uuid, nullptr};
+	obs_canvas_enum_scenes(
+		canvas,
+		[](void *param, obs_source_t *scene) {
+			auto *c = static_cast<Ctx *>(param);
+			const char *u = obs_source_get_uuid(scene);
+			if (u && c->want == u) {
+				c->found = scene;
+				return false; // stop
+			}
+			return true;
+		},
+		&ctx);
+	return ctx.found;
+}
+
+void OBSBasic::ApplyCanvasSceneLinks()
+{
+	OBSSource mainScene = GetCurrentSceneSource();
+	const char *mainUuid = mainScene ? obs_source_get_uuid(mainScene) : nullptr;
+	if (!mainUuid) {
+		return;
+	}
+
+	for (const OBS::Canvas &canvas : canvases) {
+		obs_canvas_t *c = canvas; // implicit operator obs_canvas_t*
+		const char *canvasUuid = obs_canvas_get_uuid(c);
+		if (!canvasUuid) {
+			continue;
+		}
+		std::string target = canvasSceneLink.Resolve(mainUuid, canvasUuid);
+		if (target.empty()) {
+			continue; // unlinked: canvas keeps its own current scene
+		}
+		obs_source_t *match = FindCanvasSceneByUuid(c, target);
+		if (match) {
+			SetCanvasCurrentScene(c, match);
+		}
+	}
+}
+
 bool OBSBasic::RemoveCanvas(OBSCanvas canvas)
 {
 	bool removed = false;

@@ -2130,6 +2130,10 @@ void OBSBasic::SetDisplayAffinity(QWindow *window)
 
 void OBSBasic::OnEvent(enum obs_frontend_event event)
 {
+	if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
+		ApplyCanvasSceneLinks();
+	}
+
 	if (api) {
 		api->on_event(event);
 	}
