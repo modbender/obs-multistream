@@ -88,16 +88,21 @@ static bool add_aap_perms(const wchar_t *dir)
 
 	success = true;
 fail:
-	if (sd)
+	if (sd) {
 		LocalFree(sd);
-	if (new_dacl1)
+	}
+	if (new_dacl1) {
 		LocalFree(new_dacl1);
-	if (new_dacl2)
+	}
+	if (new_dacl2) {
 		LocalFree(new_dacl2);
-	if (aap_sid)
+	}
+	if (aap_sid) {
 		LocalFree(aap_sid);
-	if (bu_sid)
+	}
+	if (bu_sid) {
 		LocalFree(bu_sid);
+	}
 	return success;
 }
 
@@ -105,8 +110,9 @@ static inline bool file_exists(const wchar_t *path)
 {
 	WIN32_FIND_DATAW wfd;
 	HANDLE h = FindFirstFileW(path, &wfd);
-	if (h == INVALID_HANDLE_VALUE)
+	if (h == INVALID_HANDLE_VALUE) {
 		return false;
+	}
 	FindClose(h);
 	return true;
 }
@@ -151,7 +157,7 @@ char *get_hook_path(bool b64)
 {
 	wchar_t path[MAX_PATH];
 
-	get_programdata_path(path, L"obs-studio-hook\\");
+	get_programdata_path(path, L"obs-multistream-hook\\");
 	make_filename(path, L"graphics-hook", L".dll");
 
 	if ((b64 && programdata64_hook_exists) || (!b64 && programdata32_hook_exists)) {
@@ -181,18 +187,20 @@ static bool update_hook_file(bool b64)
 		      L"win-capture\\");
 	make_filename(temp, L"obs-vulkan", L".json");
 
-	if (_wfullpath(src_json, temp, MAX_PATH) == NULL)
+	if (_wfullpath(src_json, temp, MAX_PATH) == NULL) {
 		return false;
+	}
 
 	StringCbCopyW(temp, sizeof(temp),
 		      L"..\\..\\data\\obs-plugins\\"
 		      L"win-capture\\");
 	make_filename(temp, L"graphics-hook", L".dll");
 
-	if (_wfullpath(src, temp, MAX_PATH) == NULL)
+	if (_wfullpath(src, temp, MAX_PATH) == NULL) {
 		return false;
+	}
 
-	get_programdata_path(temp, L"obs-studio-hook\\");
+	get_programdata_path(temp, L"obs-multistream-hook\\");
 	StringCbCopyW(dst_json, sizeof(dst_json), temp);
 	StringCbCopyW(dst, sizeof(dst), temp);
 	make_filename(dst_json, L"obs-vulkan", L".json");
@@ -206,36 +214,45 @@ static bool update_hook_file(bool b64)
 	}
 	if (!file_exists(dst) || !file_exists(dst_json)) {
 		CreateDirectoryW(temp, NULL);
-		if (has_elevation())
+		if (has_elevation()) {
 			add_aap_perms(temp);
-		if (!CopyFileW(src_json, dst_json, false))
+		}
+		if (!CopyFileW(src_json, dst_json, false)) {
 			return false;
-		if (!CopyFileW(src, dst, false))
+		}
+		if (!CopyFileW(src, dst, false)) {
 			return false;
+		}
 		return true;
 	}
 
-	if (has_elevation())
+	if (has_elevation()) {
 		add_aap_perms(temp);
+	}
 
 	struct win_version_info ver_src = {0};
 	struct win_version_info ver_dst = {0};
-	if (!get_dll_ver(src, &ver_src))
+	if (!get_dll_ver(src, &ver_src)) {
 		return false;
+	}
 #ifndef _DEBUG
-	if (!get_dll_ver(dst, &ver_dst))
+	if (!get_dll_ver(dst, &ver_dst)) {
 		return false;
+	}
 #endif
 
 	/* if source is greater than dst, overwrite new file  */
 	while (win_version_compare(&ver_dst, &ver_src) < 0) {
-		if (!CopyFileW(src_json, dst_json, false))
+		if (!CopyFileW(src_json, dst_json, false)) {
 			return false;
-		if (!CopyFileW(src, dst, false))
+		}
+		if (!CopyFileW(src, dst, false)) {
 			return false;
+		}
 
-		if (!get_dll_ver(dst, &ver_dst))
+		if (!get_dll_ver(dst, &ver_dst)) {
 			return false;
+		}
 	}
 
 	/* do not use if major version incremented in target compared to
@@ -257,7 +274,7 @@ static void init_vulkan_registry(bool b64)
 	LSTATUS s;
 
 	wchar_t path[MAX_PATH];
-	get_programdata_path(path, L"obs-studio-hook\\");
+	get_programdata_path(path, L"obs-multistream-hook\\");
 	make_filename(path, L"obs-vulkan", L".json");
 
 	s = get_reg(HKEY_LOCAL_MACHINE, IMPLICIT_LAYERS, path, b64);
@@ -304,8 +321,9 @@ static void init_vulkan_registry(bool b64)
 	}
 
 finish:
-	if (key)
+	if (key) {
 		RegCloseKey(key);
+	}
 }
 
 void init_hook_files()

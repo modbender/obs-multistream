@@ -7,12 +7,11 @@
 
 #include <filesystem>
 
-static constexpr std::string_view CanvasesRelPath = "/obs-studio/basic/canvases.json";
+static constexpr std::string_view CanvasesRelPath = "/obs-multistream/basic/canvases.json";
 
 std::string CanvasManager::FilePath()
 {
-	std::filesystem::path p =
-		std::filesystem::u8path(App()->userProfilesLocation.u8string());
+	std::filesystem::path p = std::filesystem::u8path(App()->userProfilesLocation.u8string());
 	p += std::filesystem::u8path(std::string(CanvasesRelPath));
 	return p.u8string();
 }
@@ -21,8 +20,7 @@ void CanvasManager::Load()
 {
 	definitions.clear();
 
-	OBSDataAutoRelease root =
-		obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
 	if (root) {
 		OBSDataArrayAutoRelease arr = obs_data_get_array(root, "canvases");
 		const size_t count = arr ? obs_data_array_count(arr) : 0;

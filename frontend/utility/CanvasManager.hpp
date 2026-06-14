@@ -15,8 +15,8 @@ public:
 	 * construction — Default()/Definitions() are valid even before Load(). */
 	CanvasManager() { EnsureDefault(); }
 
-	void Load();                // read canvases.json (replaces contents; re-seeds Default if absent)
-	void Save() const;          // write canvases.json atomically
+	void Load();       // read canvases.json (replaces contents; re-seeds Default if absent)
+	void Save() const; // write canvases.json atomically
 
 	const std::vector<CanvasDefinition> &Definitions() const { return definitions; }
 	const CanvasDefinition &Default() const; // always present (see invariant above)
@@ -32,8 +32,8 @@ public:
 	void Remove(const std::string &uuid);        // no-op for the Default
 
 private:
-	static std::string FilePath();   // <userProfilesLocation>/obs-studio/basic/canvases.json
-	void EnsureDefault();            // append a 1080p60 Default if none present
+	static std::string FilePath(); // <userProfilesLocation>/obs-multistream/basic/canvases.json
+	void EnsureDefault();          // append a 1080p60 Default if none present
 
 	std::vector<CanvasDefinition> definitions;
 };

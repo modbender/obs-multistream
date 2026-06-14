@@ -52,16 +52,21 @@ static bool add_aap_perms(const wchar_t *dir)
 
 	success = true;
 fail:
-	if (sd)
+	if (sd) {
 		LocalFree(sd);
-	if (new_dacl1)
+	}
+	if (new_dacl1) {
 		LocalFree(new_dacl1);
-	if (new_dacl2)
+	}
+	if (new_dacl2) {
 		LocalFree(new_dacl2);
-	if (aap_sid)
+	}
+	if (aap_sid) {
 		LocalFree(aap_sid);
-	if (bu_sid)
+	}
+	if (bu_sid) {
 		LocalFree(bu_sid);
+	}
 	return success;
 }
 
@@ -69,8 +74,9 @@ static inline bool file_exists(const wchar_t *path)
 {
 	WIN32_FIND_DATAW wfd;
 	HANDLE h = FindFirstFileW(path, &wfd);
-	if (h == INVALID_HANDLE_VALUE)
+	if (h == INVALID_HANDLE_VALUE) {
 		return false;
+	}
 	FindClose(h);
 	return true;
 }
@@ -124,7 +130,7 @@ static bool update_hook_file(bool b64)
 	StringCbCat(src, sizeof(src), HOOK_LOCATION);
 	make_filename(src, L"graphics-hook", L".dll");
 
-	get_programdata_path(temp, L"obs-studio-hook\\");
+	get_programdata_path(temp, L"obs-multistream-hook\\");
 	StringCbCopyW(dst_json, sizeof(dst_json), temp);
 	StringCbCopyW(dst, sizeof(dst), temp);
 	make_filename(dst_json, L"obs-vulkan", L".json");
@@ -149,7 +155,7 @@ static void update_vulkan_registry(bool b64)
 	LSTATUS s;
 	HKEY key;
 
-	get_programdata_path(path, L"obs-studio-hook\\");
+	get_programdata_path(path, L"obs-multistream-hook\\");
 	make_filename(path, L"obs-vulkan", L".json");
 
 	s = get_reg(HKEY_CURRENT_USER, IMPLICIT_LAYERS, path, b64);
@@ -180,14 +186,17 @@ static void update_vulkan_registry(bool b64)
 	}
 
 finish:
-	if (key)
+	if (key) {
 		RegCloseKey(key);
+	}
 }
 
 void UpdateHookFiles(void)
 {
-	if (update_hook_file(true))
+	if (update_hook_file(true)) {
 		update_vulkan_registry(true);
-	if (update_hook_file(false))
+	}
+	if (update_hook_file(false)) {
 		update_vulkan_registry(false);
+	}
 }
