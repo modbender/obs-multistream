@@ -10,6 +10,8 @@ target_sources(
     utility/CanvasDefinition.hpp
     utility/CanvasManager.cpp
     utility/CanvasManager.hpp
+    utility/CanvasSceneLink.cpp
+    utility/CanvasSceneLink.hpp
     utility/CrashHandler.cpp
     utility/CrashHandler.hpp
     utility/FFmpegCodec.cpp
