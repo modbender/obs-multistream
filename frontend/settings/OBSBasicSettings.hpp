@@ -49,7 +49,7 @@ class OBSBasicSettings : public QDialog {
 	Q_PROPERTY(QIcon advancedIcon READ GetAdvancedIcon WRITE SetAdvancedIcon DESIGNABLE true)
 	Q_PROPERTY(QIcon canvasIcon READ GetCanvasIcon WRITE SetCanvasIcon DESIGNABLE true)
 
-	enum Pages { GENERAL, APPEARANCE, STREAM, AUDIO, HOTKEYS, ACCESSIBILITY, ADVANCED, CANVAS, NUM_PAGES };
+	enum Pages { GENERAL, APPEARANCE, STREAM, CANVAS, AUDIO, HOTKEYS, ACCESSIBILITY, ADVANCED, NUM_PAGES };
 
 private:
 	OBSBasic *main;
