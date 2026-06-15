@@ -2257,6 +2257,11 @@ void OBSBasicSettings::on_buttonBox_clicked(QAbstractButton *button)
 			if (savedTheme != App()->GetTheme()) {
 				App()->SetTheme(savedTheme->id);
 			}
+			/* Stream-profile field edits accumulate in the manager in memory as
+			 * the user switches profiles; only Apply/OK flushes them to disk.
+			 * Reload streams.json so the Cancel button discards them too (the
+			 * reject() override covers the Esc/close-button path). */
+			main->GetStreamProfileManager().Load();
 		}
 		ClearChanged();
 		close();
