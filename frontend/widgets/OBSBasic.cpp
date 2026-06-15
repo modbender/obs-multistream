@@ -30,6 +30,7 @@
 #ifdef YOUTUBE_ENABLED
 #include <docks/YouTubeAppDock.hpp>
 #endif
+#include <docks/MultistreamDock.hpp>
 #include <dialogs/NameDialog.hpp>
 #include <dialogs/OBSAbout.hpp>
 #include <dialogs/OBSBasicAdvAudio.hpp>
@@ -376,6 +377,16 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	statsDock->setFloating(true);
 	statsDock->resize(700, 200);
 
+	multistreamDock = new OBSDock();
+	multistreamDock->setObjectName(QStringLiteral("multistreamDock"));
+	multistreamDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
+				     QDockWidget::DockWidgetFloatable);
+	multistreamDock->setWindowTitle(QTStr("Basic.Multistream"));
+	addDockWidget(Qt::RightDockWidgetArea, multistreamDock);
+	multistreamDock->setVisible(false);
+	multistreamDock->setFloating(true);
+	multistreamDock->resize(400, 500);
+
 	copyActionsDynamicProperties();
 
 	qRegisterMetaType<int64_t>("int64_t");
@@ -536,6 +547,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(ui->transitionsDock);
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
+	SETUP_DOCK(multistreamDock);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1111,6 +1123,17 @@ void OBSBasic::OBSInit()
 	/* Fan-out engine: encode-once-per-canvas, stream-to-many. Constructed after
 	 * profiles and outputs are ready; the Multistream dock drives it. */
 	multistreamOutput = std::make_unique<MultistreamOutput>(this);
+
+	/* The dock host was created in the ctor (for layout/menu persistence); its
+	 * content + status wiring are deferred to here so the engine is guaranteed
+	 * live when onStatusChanged is assigned. */
+	multistreamDockWidget = new MultistreamDock(this);
+	multistreamDock->setWidget(multistreamDockWidget);
+	multistreamOutput->onStatusChanged = [this]() {
+		if (multistreamDockWidget) {
+			multistreamDockWidget->Refresh();
+		}
+	};
 
 	CreateHotkeys();
 

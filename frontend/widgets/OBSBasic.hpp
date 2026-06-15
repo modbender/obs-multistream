@@ -62,6 +62,7 @@ class OBSBasicTransform;
 class OBSLogViewer;
 class OBSMissingFiles;
 class OBSProjector;
+class MultistreamDock;
 class VolumeControl;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
@@ -447,6 +448,8 @@ public slots:
 	 */
 private:
 	QPointer<QDockWidget> statsDock;
+	QPointer<QDockWidget> multistreamDock;
+	MultistreamDock *multistreamDockWidget = nullptr;
 	QByteArray startingDockLayout;
 	QStringList extraDockNames;
 	QList<std::shared_ptr<QDockWidget>> extraDocks;
