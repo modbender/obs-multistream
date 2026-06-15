@@ -54,7 +54,7 @@ class OBSBasicSettings : public QDialog {
 	Q_PROPERTY(QIcon advancedIcon READ GetAdvancedIcon WRITE SetAdvancedIcon DESIGNABLE true)
 	Q_PROPERTY(QIcon canvasIcon READ GetCanvasIcon WRITE SetCanvasIcon DESIGNABLE true)
 
-	enum Pages { GENERAL, APPEARANCE, STREAM, CANVAS, AUDIO, HOTKEYS, ACCESSIBILITY, ADVANCED, NUM_PAGES };
+	enum Pages { GENERAL, APPEARANCE, STREAM, CANVAS, OUTPUTS, AUDIO, HOTKEYS, ACCESSIBILITY, ADVANCED, NUM_PAGES };
 
 private:
 	OBSBasic *main;
@@ -72,6 +72,7 @@ private:
 	bool advancedChanged = false;
 	int pageIndex = 0;
 	bool loading = true;
+	bool loadingOutputs = false;
 	bool forceAuthReload = false;
 	bool forceUpdateCheck = false;
 	int sampleRateIndex = 0;
@@ -162,6 +163,13 @@ private:
 	void RemoveCanvasClicked(const std::string &uuid);
 	void EditCanvasClicked(const std::string &uuid);
 	void ApplyCanvasEdit(CanvasDefinition &def);
+
+	void LoadOutputSettings();
+	void RebuildOutputList();
+	void AddOutputClicked(const std::string &canvasUuid);
+	void RemoveOutputClicked(const std::string &bindingUuid);
+	QWidget *BuildCanvasOutputGroup(const char *canvasUuid, const QString &canvasTitle);
+	QWidget *BuildOutputRow(struct OutputBinding &binding);
 
 	void LoadSettings(bool changedOnly);
 

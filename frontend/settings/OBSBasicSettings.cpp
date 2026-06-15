@@ -1605,6 +1605,9 @@ void OBSBasicSettings::LoadSettings(bool changedOnly)
 	if (!changedOnly) {
 		LoadCanvasSettings();
 	}
+	if (!changedOnly) {
+		LoadOutputSettings();
+	}
 }
 
 void OBSBasicSettings::SaveGeneralSettings()

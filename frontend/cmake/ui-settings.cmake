@@ -4,6 +4,7 @@ target_sources(
     settings/OBSBasicSettings_A11y.cpp
     settings/OBSBasicSettings_Appearance.cpp
     settings/OBSBasicSettings_Canvas.cpp
+    settings/OBSBasicSettings_Outputs.cpp
     settings/OBSBasicSettings_Stream.cpp
     settings/OBSBasicSettings.cpp
     settings/OBSBasicSettings.hpp

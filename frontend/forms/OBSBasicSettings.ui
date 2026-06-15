@@ -98,6 +98,15 @@
        </item>
        <item>
         <property name="text">
+         <string>Basic.Settings.Outputs</string>
+        </property>
+        <property name="icon">
+         <iconset resource="obs.qrc">
+          <normaloff>:/settings/images/settings/output.svg</normaloff>:/settings/images/settings/output.svg</iconset>
+        </property>
+       </item>
+       <item>
+        <property name="text">
          <string>Basic.Settings.Audio</string>
         </property>
         <property name="icon">
@@ -2279,6 +2288,27 @@
            </property>
            <widget class="QWidget" name="canvasScrollContents">
             <layout class="QVBoxLayout" name="canvasPageLayout">
+             <property name="spacing">
+              <number>12</number>
+             </property>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="outputsPage">
+        <layout class="QVBoxLayout" name="outputsPageOuterLayout">
+         <item>
+          <widget class="QScrollArea" name="outputsScrollArea">
+           <property name="frameShape">
+            <enum>QFrame::NoFrame</enum>
+           </property>
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <widget class="QWidget" name="outputsScrollContents">
+            <layout class="QVBoxLayout" name="outputsPageLayout">
              <property name="spacing">
               <number>12</number>
              </property>
