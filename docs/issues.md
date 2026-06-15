@@ -5,6 +5,51 @@ out, and how they were resolved. Newest first.
 
 ---
 
+## #2 — Multistream engine (2e): verified failure path, live-broadcast path unverified
+
+**Status:** OPEN (verification gap, not a defect) — engine and dock verified end-to-end
+short of a real sustained broadcast.
+**Date:** 2026-06-15
+**Affected build:** `32.1.0-37` and later (canvas-foundation), commits `108a7bd4e`,
+`0be82b481`, `b0fc93ddd`, `76355c446`, `51fbdd28c`.
+
+### What was verified (portable sandbox, windows-mcp GUI)
+
+- Multistream dock registers, groups bindings by canvas, shows per-row profile +
+  status dot + live toggle, a per-group cascade toggle, and the Go Live / Stop All
+  footer.
+- "Go Live" / a row toggle drives the real encode-once fan-out: per-canvas x264
+  video + AAC audio encoders are created, an RTMP service + output are created and
+  started, and a connection to the destination ingest is attempted (OBS log
+  confirms `Connecting to RTMP URL …` then the per-binding output name).
+- With a deliberately invalid stream key the connection fails (`Connection … failed:
+  -3`) and the row now shows **Error** (red dot + tooltip), via the
+  `OnOutputStop` non-`OBS_OUTPUT_SUCCESS` path (commit `51fbdd28c`).
+- Single-key guard: a second binding sharing one stream profile is refused while the
+  first occupies it; the toggle bounces back to Idle (log: "profile already live").
+- Stop All clears every live/errored output back to Idle.
+- No crash through repeated start / async-fail / stop cycles — the `liveMutex`
+  (commit `76355c446`) guards the off-thread start/stop signal handlers against the
+  Qt thread's mutation of the `live` vector.
+
+### The gap
+
+A **successful, sustained broadcast** to a real destination was **not** verified —
+that requires valid platform stream keys and actually pushing video to a live
+service, which is out of scope for the isolated portable test (the constraint is to
+never touch real accounts/credentials). The Connecting → **Live** transition
+(`OnOutputStart`) is wired and the single-stream legacy path already exercises the
+same libobs output mechanics, so this is a confidence gap on the last hop only, not
+a known break.
+
+### How to close it
+
+Configure one real stream key on a throwaway account, Go Live for a single binding,
+and confirm the row reaches **Live** (green) and the platform shows the feed; then
+Stop All and confirm a clean return to Idle.
+
+---
+
 ## #1 — Broken / mispositioned preview (native display) on a high-DPI display
 
 **Status:** RESOLVED — environmental (Windows per-application DPI override), not a fork defect.
