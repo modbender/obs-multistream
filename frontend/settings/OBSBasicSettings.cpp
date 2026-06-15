@@ -2217,6 +2217,14 @@ void OBSBasicSettings::on_listWidget_itemSelectionChanged()
 		QTimer::singleShot(1, this, [&]() { LoadHotkeySettings(); });
 	}
 
+	if (row == Pages::OUTPUTS) {
+		/* Canvases can be added or removed on the Canvas page within the same
+		 * Settings session; rebuild the routing list each time the page is
+		 * shown so it reflects the current canvases. Bindings persist
+		 * immediately, so the rebuild is idempotent. */
+		LoadOutputSettings();
+	}
+
 	pageIndex = row;
 }
 
