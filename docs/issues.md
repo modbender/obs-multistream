@@ -5,6 +5,53 @@ out, and how they were resolved. Newest first.
 
 ---
 
+## #3 — Canvas/multistream holistic review: deferred findings
+
+**Status:** OPEN (logged for decision/follow-up) — from the Phase-2 wrap-up review.
+**Date:** 2026-06-15
+
+A full review of the canvas + multistream subsystem (data model, managers,
+engine, docks, settings tabs, persistence). Refcounting, save/load symmetry, and
+the thread/teardown ordering all came back correct. One real latent bug was
+fixed in commit `e39a3b7ac` (the never-invalidated per-canvas encoder cache).
+The items below were deliberately **not** auto-fixed and are recorded here.
+
+- **H1 (potential crash) — editing an additional canvas's resolution while a
+  multistream output is live on it.** `ApplyCanvasEdit`'s non-default branch
+  (OBSBasicSettings_Canvas.cpp) calls `obs_canvas_reset_video` without checking
+  whether a multistream output is currently live on that canvas (the default
+  branch *does* guard with `obs_video_active()`). `reset_video` frees the old
+  video mix; a live encoder still bound to it then reads freed memory. The
+  encoder-cache invalidation (e39a3b7ac) covers the *next* Go Live but not an
+  *already-live* output. Fix: refuse the edit (or stop the affected output
+  first) when `MultistreamOutput` reports the canvas live — mirror the default
+  branch's active-guard. Needs a small UX decision (refuse vs auto-stop).
+
+- **C1 (design decision) — output-binding edits ignore Settings → Cancel.** Every
+  mutation in the Outputs tab calls `SaveProject()` immediately, so editing
+  bindings then pressing Cancel does not revert (unlike the Stream tab, which
+  deliberately discards on Cancel — commit `dbf1752f5`). Canvas add/remove is
+  also immediate-commit but is justified as a management action. Decide
+  intentionally: document bindings as immediate-commit, or route them through the
+  dialog's apply/cancel path.
+
+- **C2 (minor UX) — a binding referencing a deleted stream profile keeps the
+  dangling uuid.** The dock and Outputs row null-check `Find()` and degrade to a
+  blank "—" (no crash), but "profile missing" is not surfaced distinctly from
+  "unset," and the stale uuid persists to disk.
+
+- **P2 (perf, fine at current scale) — `MultistreamDock::Refresh` rebuilds the
+  whole group/row widget tree on every `onStatusChanged`.** Acceptable for a
+  handful of outputs; revisit with an incremental update if binding counts grow.
+
+- **R1 (cleanup) — the "Default canvas first, then non-ephemeral `GetCanvases()`"
+  iteration is re-implemented in ~4 places** (MultistreamDock, Outputs tab,
+  SceneCollections, Stream tab). A single `forEachStreamableCanvas(cb)` helper on
+  OBSBasic would dedupe it; fold in opportunistically when next touching those
+  files.
+
+---
+
 ## #2 — Multistream engine (2e): verified failure path, live-broadcast path unverified
 
 **Status:** OPEN (verification gap, not a defect) — engine and dock verified end-to-end
