@@ -39,6 +39,11 @@ public:
 
 	bool AnyActive() const;
 	bool IsLive(const std::string &bindingUuid) const;
+
+	/* Drop the cached encoder pair for a canvas. Call when the canvas's video is
+	 * reset or the canvas is removed: the cached encoder is bound to the old video
+	 * mix, which obs_canvas_reset_video frees, so reusing it would be a UAF. */
+	void InvalidateCanvasEncoders(const std::string &canvasUuid);
 	/* True if some OTHER currently-live output uses this profile. */
 	bool ProfileLiveElsewhere(const std::string &bindingUuid, const std::string &profileUuid) const;
 
@@ -81,7 +86,9 @@ private:
 	static void OnOutputStop(void *data, calldata_t *cd);
 
 	OBSBasic *main;
-	std::vector<CanvasEncoders> canvasEncoders; // cached, rebuilt lazily
+	/* Built once per canvas on first use and reused until InvalidateCanvasEncoders
+	 * clears the entry; NOT rebuilt automatically when a canvas definition changes. */
+	std::vector<CanvasEncoders> canvasEncoders;
 	/* The off-thread output start/stop signal handlers read `live` while the Qt
 	 * thread inserts/erases it; liveMutex guards every access. It is never held
 	 * across an obs_output_start/stop call (those can fire signals → handler →

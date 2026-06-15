@@ -76,6 +76,16 @@ MultistreamOutput::CanvasEncoders *MultistreamOutput::EnsureCanvasEncoders(const
 	return &canvasEncoders.back();
 }
 
+void MultistreamOutput::InvalidateCanvasEncoders(const std::string &canvasUuid)
+{
+	for (auto it = canvasEncoders.begin(); it != canvasEncoders.end(); ++it) {
+		if (it->canvasUuid == canvasUuid) {
+			canvasEncoders.erase(it);
+			return;
+		}
+	}
+}
+
 bool MultistreamOutput::ProfileLiveElsewhere(const std::string &bindingUuid, const std::string &profileUuid) const
 {
 	if (profileUuid.empty()) {

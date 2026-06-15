@@ -218,6 +218,10 @@ void OBSBasicSettings::ApplyCanvasEdit(CanvasDefinition &def)
 			main->ResizeProgram(def.width, def.height);
 		}
 
+		if (auto *ms = main->GetMultistreamOutput()) {
+			ms->InvalidateCanvasEncoders(def.uuid);
+		}
+
 		CanvasManager &mgr = main->GetCanvasManager();
 		for (const CanvasDefinition &other : mgr.Definitions()) {
 			if (other.isDefault) {
@@ -234,6 +238,9 @@ void OBSBasicSettings::ApplyCanvasEdit(CanvasDefinition &def)
 						blog(LOG_WARNING, "Failed to live-follow Default for canvas '%s'",
 						     other.name.c_str());
 					}
+					if (auto *ms = main->GetMultistreamOutput()) {
+						ms->InvalidateCanvasEncoders(other.uuid);
+					}
 					break;
 				}
 			}
@@ -248,6 +255,9 @@ void OBSBasicSettings::ApplyCanvasEdit(CanvasDefinition &def)
 			if (!obs_canvas_reset_video(static_cast<obs_canvas_t *>(canvas), &ovi)) {
 				blog(LOG_WARNING, "Failed to apply canvas '%s' resolution %ux%u", def.name.c_str(),
 				     def.width, def.height);
+			}
+			if (auto *ms = main->GetMultistreamOutput()) {
+				ms->InvalidateCanvasEncoders(def.uuid);
 			}
 			break;
 		}

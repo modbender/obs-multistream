@@ -144,6 +144,13 @@ bool OBSBasic::RemoveCanvas(OBSCanvas canvas)
 		return removed;
 	}
 
+	if (multistreamOutput) {
+		const char *uuid = obs_canvas_get_uuid(canvas);
+		if (uuid) {
+			multistreamOutput->InvalidateCanvasEncoders(uuid);
+		}
+	}
+
 	auto canvas_it = std::find(std::begin(canvases), std::end(canvases), canvas);
 	if (canvas_it != std::end(canvases)) {
 		// Move canvas to a temporary object to delay removal of the canvas and calls to its signal handlers
