@@ -48,6 +48,7 @@
 #include <QSystemTrayIcon>
 
 #include <deque>
+#include <unordered_map>
 
 extern volatile bool recording_paused;
 
@@ -63,6 +64,7 @@ class OBSLogViewer;
 class OBSMissingFiles;
 class OBSProjector;
 class MultistreamDock;
+class CanvasDock;
 class VolumeControl;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
@@ -1159,8 +1161,17 @@ private:
 	OutputBindings outputBindings;
 	std::unique_ptr<MultistreamOutput> multistreamOutput;
 
+	/* uuid -> dock. Non-owning: AddDockWidget's shared_ptr owns each dock's
+	 * lifetime, so DestroyCanvasDock goes through RemoveDockWidget. */
+	std::unordered_map<std::string, CanvasDock *> canvasDocks;
+
 	static void CanvasRemoved(void *data, calldata_t *params);
 	void ClearCanvases();
+
+	void CreateCanvasDock(const OBS::Canvas &canvas);
+	void DestroyCanvasDock(const std::string &uuid);
+	void ReconcileCanvasDocks();
+	void DestroyAllCanvasDocks();
 
 public:
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }

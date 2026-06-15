@@ -17,6 +17,8 @@
 
 #include "OBSBasic.hpp"
 
+#include <docks/CanvasDock.hpp>
+
 void OBSBasic::CanvasRemoved(void *data, calldata_t *params)
 {
 	obs_canvas_t *canvas = static_cast<obs_canvas_t *>(calldata_ptr(params, "canvas"));
@@ -161,8 +163,84 @@ bool OBSBasic::RemoveCanvas(OBSCanvas canvas)
 
 void OBSBasic::ClearCanvases()
 {
+	// Destroy docks before the canvases they render are freed (draw-callback teardown)
+	DestroyAllCanvasDocks();
+
 	// Delete canvases one-by-one to ensure OBS_FRONTEND_EVENT_CANVAS_REMOVED is sent for each
 	while (!canvases.empty()) {
 		RemoveCanvas(OBSCanvas(canvases.back()));
+	}
+}
+
+void OBSBasic::CreateCanvasDock(const OBS::Canvas &canvas)
+{
+	if (obs_canvas_get_flags(canvas) & EPHEMERAL) {
+		return;
+	}
+
+	const char *uuid = obs_canvas_get_uuid(canvas);
+	if (!uuid) {
+		return;
+	}
+
+	if (canvasDocks.count(uuid)) {
+		return;
+	}
+
+	CanvasDock *dock = new CanvasDock(this, OBSCanvas(canvas), this);
+	AddDockWidget(dock, Qt::RightDockWidgetArea);
+	canvasDocks[uuid] = dock;
+}
+
+void OBSBasic::DestroyCanvasDock(const std::string &uuid)
+{
+	auto it = canvasDocks.find(uuid);
+	if (it == canvasDocks.end()) {
+		return;
+	}
+
+	/* RemoveDockWidget resets the owning shared_ptr, which deletes the dock
+	 * (its destructor removes the draw callback). Do not delete it here. */
+	QString name = it->second->objectName();
+	canvasDocks.erase(it);
+	RemoveDockWidget(name);
+}
+
+void OBSBasic::ReconcileCanvasDocks()
+{
+	for (const OBS::Canvas &canvas : canvases) {
+		CreateCanvasDock(canvas);
+	}
+
+	std::vector<std::string> stale;
+	for (const auto &[uuid, dock] : canvasDocks) {
+		bool present = false;
+		for (const OBS::Canvas &canvas : canvases) {
+			const char *u = obs_canvas_get_uuid(canvas);
+			if (u && uuid == u) {
+				present = true;
+				break;
+			}
+		}
+		if (!present) {
+			stale.push_back(uuid);
+		}
+	}
+
+	for (const std::string &uuid : stale) {
+		DestroyCanvasDock(uuid);
+	}
+}
+
+void OBSBasic::DestroyAllCanvasDocks()
+{
+	std::vector<std::string> uuids;
+	uuids.reserve(canvasDocks.size());
+	for (const auto &[uuid, dock] : canvasDocks) {
+		uuids.push_back(uuid);
+	}
+
+	for (const std::string &uuid : uuids) {
+		DestroyCanvasDock(uuid);
 	}
 }

@@ -1302,6 +1302,10 @@ void OBSBasic::OBSInit()
 	}
 #endif
 
+	/* Guarantee a dock exists for every additional canvas before restoreState
+	 * binds layout by object name; idempotent with the CANVAS_ADDED path. */
+	ReconcileCanvasDocks();
+
 	const char *dockStateStr = config_get_string(App()->GetUserConfig(), "BasicWindow", "DockState");
 
 	if (!dockStateStr) {
@@ -2168,6 +2172,10 @@ void OBSBasic::OnEvent(enum obs_frontend_event event)
 {
 	if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
 		ApplyCanvasSceneLinks();
+	}
+
+	if (event == OBS_FRONTEND_EVENT_CANVAS_ADDED || event == OBS_FRONTEND_EVENT_CANVAS_REMOVED) {
+		ReconcileCanvasDocks();
 	}
 
 	if (api) {
