@@ -316,11 +316,20 @@ void MultistreamOutput::OnOutputStop(void *data, calldata_t *cd)
 {
 	auto self = static_cast<MultistreamOutput *>(data);
 	obs_output_t *out = (obs_output_t *)calldata_ptr(cd, "output");
+	int code = (int)calldata_int(cd, "code");
+	const char *lastError = calldata_string(cd, "last_error");
 	{
 		std::lock_guard<std::mutex> lock(self->liveMutex);
 		for (auto &lo : self->live) {
 			if (lo->output == out) {
-				lo->state = State::Idle;
+				/* A non-success code means the stream dropped or never
+				 * connected (e.g. a bad key); surface it as Error. */
+				if (code != OBS_OUTPUT_SUCCESS) {
+					lo->state = State::Error;
+					lo->lastError = lastError ? lastError : "";
+				} else {
+					lo->state = State::Idle;
+				}
 				break;
 			}
 		}
