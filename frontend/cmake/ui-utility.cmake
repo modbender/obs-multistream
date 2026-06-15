@@ -12,6 +12,8 @@ target_sources(
     utility/CanvasManager.hpp
     utility/CanvasSceneLink.cpp
     utility/CanvasSceneLink.hpp
+    utility/OutputBinding.cpp
+    utility/OutputBinding.hpp
     utility/StreamProfile.cpp
     utility/StreamProfile.hpp
     utility/StreamProfileManager.cpp
