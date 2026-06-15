@@ -22,8 +22,13 @@
 
 #include <utility/CanvasDefinition.hpp>
 #include <utility/FFmpegShared.hpp>
+#include <utility/StreamProfile.hpp>
 
 #include <QPointer>
+
+class QLineEdit;
+class QListWidget;
+class QListWidgetItem;
 
 #define VOLUME_METER_DECAY_FAST 23.53
 #define VOLUME_METER_DECAY_MEDIUM 11.76
@@ -167,6 +172,20 @@ private:
 
 	/* stream */
 	void InitStreamPage();
+
+	/* stream profiles (Streams page master-detail) */
+	void LoadStreamProfiles();
+	void RebuildStreamProfileList();
+	void SelectStreamProfile(const std::string &uuid);
+	void AddStreamProfileClicked();
+	void RemoveStreamProfileClicked(const std::string &uuid);
+	void LoadProfileIntoForm(const std::string &serviceId, obs_data_t *settings, const QString &label);
+	void SaveFormIntoProfile(StreamProfile &p);
+	void StreamProfileSelectionChanged(QListWidgetItem *current);
+	std::string currentProfileUuid;
+	QListWidget *streamProfileList = nullptr;
+	QLineEdit *streamProfileLabel = nullptr;
+
 	bool IsCustomService() const;
 	inline bool IsWHIP() const;
 	void LoadServices(bool showAll);

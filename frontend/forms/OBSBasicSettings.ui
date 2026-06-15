@@ -80,7 +80,7 @@
        </item>
        <item>
         <property name="text">
-         <string>Basic.Settings.Stream</string>
+         <string>Basic.Settings.Streams</string>
         </property>
         <property name="icon">
          <iconset resource="obs.qrc">

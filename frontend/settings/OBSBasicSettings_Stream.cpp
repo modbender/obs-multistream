@@ -8,10 +8,20 @@
 #include <utility/YoutubeApiWrappers.hpp>
 #endif
 #include <widgets/OBSBasic.hpp>
+#include <utility/StreamProfileManager.hpp>
 
 #include <qt-wrappers.hpp>
 
+#include <QFont>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QUuid>
+#include <QVBoxLayout>
 
 static const QUuid &CustomServerUUID()
 {
@@ -87,28 +97,71 @@ void OBSBasicSettings::InitStreamPage()
 		&OBSBasicSettings::UpdateMultitrackVideo);
 	connect(ui->multitrackVideoConfigOverrideEnable, &QCheckBox::toggled, this,
 		&OBSBasicSettings::UpdateMultitrackVideo);
+
+	/* Build the profile address book panel programmatically and insert it at
+	 * the top of the stream page, above the reused service form. The .ui form
+	 * is left untouched; only this list panel and the Label row are new. */
+	QVBoxLayout *panel = new QVBoxLayout();
+
+	streamProfileList = new QListWidget();
+	streamProfileList->setObjectName("streamProfileList");
+	streamProfileList->setMaximumHeight(140);
+	panel->addWidget(streamProfileList);
+
+	QHBoxLayout *buttons = new QHBoxLayout();
+	QPushButton *addProfile = new QPushButton(QTStr("Basic.Settings.Streams.AddProfile"));
+	addProfile->setObjectName("streamProfileAdd");
+	QPushButton *removeProfile = new QPushButton(QTStr("Remove"));
+	removeProfile->setObjectName("streamProfileRemove");
+	buttons->addWidget(addProfile);
+	buttons->addWidget(removeProfile);
+	buttons->addStretch();
+	panel->addLayout(buttons);
+
+	QVBoxLayout *streamPageLayout = qobject_cast<QVBoxLayout *>(ui->streamPage->layout());
+	if (streamPageLayout) {
+		streamPageLayout->insertLayout(0, panel);
+	}
+
+	/* Per-profile Label field, inserted as the first row of the service form. */
+	streamProfileLabel = new QLineEdit();
+	streamProfileLabel->setObjectName("streamProfileLabel");
+	ui->topStreamLayout->insertRow(0, QTStr("Basic.Settings.Streams.Label"), streamProfileLabel);
+
+	connect(streamProfileLabel, &QLineEdit::textChanged, this, &OBSBasicSettings::Stream1Changed);
+
+	connect(streamProfileList, &QListWidget::currentItemChanged, this,
+		[this](QListWidgetItem *current, QListWidgetItem *) { StreamProfileSelectionChanged(current); });
+	connect(addProfile, &QPushButton::clicked, this, &OBSBasicSettings::AddStreamProfileClicked);
+	connect(removeProfile, &QPushButton::clicked, this, [this]() {
+		if (!currentProfileUuid.empty()) {
+			RemoveStreamProfileClicked(currentProfileUuid);
+		}
+	});
 }
 
-void OBSBasicSettings::LoadStream1Settings()
+void OBSBasicSettings::LoadProfileIntoForm(const std::string &serviceId, obs_data_t *profileSettings,
+					   const QString &label)
 {
-	bool ignoreRecommended = config_get_bool(main->Config(), "Stream1", "IgnoreRecommended");
-	int whipSimulcastTotalLayers = config_get_int(main->Config(), "Stream1", "WHIPSimulcastTotalLayers");
+	bool is_rtmp_custom = (serviceId == "rtmp_custom");
+	bool is_rtmp_common = (serviceId == "rtmp_common");
+	bool is_whip = (serviceId == "whip_custom");
 
-	obs_service_t *service_obj = main->GetService();
-	const char *type = obs_service_get_type(service_obj);
-	bool is_rtmp_custom = (strcmp(type, "rtmp_custom") == 0);
-	bool is_rtmp_common = (strcmp(type, "rtmp_common") == 0);
-	bool is_whip = (strcmp(type, "whip_custom") == 0);
+	streamProfileLabel->setText(label);
 
-	loading = true;
-
-	OBSDataAutoRelease settings = obs_service_get_settings(service_obj);
+	/* A fresh profile may carry a null blob; treat it as an empty default
+	 * rtmp_common service (the form fields tolerate empty strings). */
+	OBSDataAutoRelease settings = obs_data_create();
+	if (profileSettings) {
+		obs_data_apply(settings, profileSettings);
+	}
 
 	const char *service = obs_data_get_string(settings, "service");
 	const char *server = obs_data_get_string(settings, "server");
 	const char *key = obs_data_get_string(settings, "key");
 	bool use_custom_server = obs_data_get_bool(settings, "using_custom_server");
-	protocol = QT_UTF8(obs_service_get_protocol(service_obj));
+	const char *storedProtocol = obs_data_get_string(settings, "protocol");
+	protocol = (storedProtocol && *storedProtocol) ? QT_UTF8(storedProtocol) : QString("RTMP");
 	const char *bearer_token = obs_data_get_string(settings, "bearer_token");
 
 	if (is_rtmp_custom || is_whip) {
@@ -144,6 +197,63 @@ void OBSBasicSettings::LoadStream1Settings()
 		ui->twitchAddonDropdown->setCurrentIndex(idx);
 	}
 
+	UpdateServerList();
+
+	if (is_rtmp_common) {
+		int idx = -1;
+		if (use_custom_server) {
+			idx = ui->server->findData(CustomServerUUID());
+		} else {
+			idx = ui->server->findData(QString::fromUtf8(server));
+		}
+
+		if (idx == -1) {
+			if (server && *server) {
+				ui->server->insertItem(0, server, server);
+			}
+			idx = 0;
+		}
+		ui->server->setCurrentIndex(idx);
+	}
+
+	if (use_custom_server) {
+		ui->serviceCustomServer->setText(server);
+	}
+
+	if (is_whip) {
+		ui->key->setText(bearer_token);
+		ui->whipSimulcastGroupBox->show();
+	} else {
+		ui->key->setText(key);
+		ui->whipSimulcastGroupBox->hide();
+	}
+
+	ServiceChanged(true);
+
+	/* Custom/WHIP profiles don't persist a "protocol" key; recompute it from
+	 * the now-populated form so recommendations and the multitrack panel match
+	 * the actual server URL. */
+	if (is_rtmp_custom || is_whip) {
+		protocol = FindProtocol();
+	}
+
+	UpdateKeyLink();
+	UpdateMoreInfoLink();
+	UpdateVodTrackSetting();
+	UpdateServiceRecommendations();
+	UpdateMultitrackVideo();
+}
+
+void OBSBasicSettings::LoadStream1Settings()
+{
+	bool ignoreRecommended = config_get_bool(main->Config(), "Stream1", "IgnoreRecommended");
+	int whipSimulcastTotalLayers = config_get_int(main->Config(), "Stream1", "WHIPSimulcastTotalLayers");
+
+	loading = true;
+
+	/* Multitrack video is a global (per-config) setting, not per-profile in
+	 * 2c, so it is still read from main->Config() here rather than from the
+	 * selected profile's blob. */
 	ui->enableMultitrackVideo->setChecked(config_get_bool(main->Config(), "Stream1", "EnableMultitrackVideo"));
 
 	ui->multitrackVideoMaximumAggregateBitrateAuto->setChecked(
@@ -191,128 +301,72 @@ void OBSBasicSettings::LoadStream1Settings()
 		}
 	}
 
-	UpdateServerList();
-
-	if (is_rtmp_common) {
-		int idx = -1;
-		if (use_custom_server) {
-			idx = ui->server->findData(CustomServerUUID());
-		} else {
-			idx = ui->server->findData(QString::fromUtf8(server));
-		}
-
-		if (idx == -1) {
-			if (server && *server) {
-				ui->server->insertItem(0, server, server);
-			}
-			idx = 0;
-		}
-		ui->server->setCurrentIndex(idx);
-	}
-
-	if (use_custom_server) {
-		ui->serviceCustomServer->setText(server);
-	}
-
-	if (is_whip) {
-		ui->key->setText(bearer_token);
-		ui->whipSimulcastGroupBox->show();
-	} else {
-		ui->key->setText(key);
-		ui->whipSimulcastGroupBox->hide();
-	}
-
-	ServiceChanged(true);
-
-	UpdateKeyLink();
-	UpdateMoreInfoLink();
-	UpdateVodTrackSetting();
-	UpdateServiceRecommendations();
-	UpdateMultitrackVideo();
-
 	bool streamActive = obs_frontend_streaming_active();
 	ui->streamPage->setEnabled(!streamActive);
 
 	ui->ignoreRecommended->setChecked(ignoreRecommended);
 	ui->whipSimulcastTotalLayers->setValue(whipSimulcastTotalLayers);
 
+	/* Populate the service form from the selected (primary) profile's blob. */
+	LoadStreamProfiles();
+
 	loading = false;
 }
 
 void OBSBasicSettings::SaveStream1Settings()
 {
-	bool customServer = IsCustomService();
-	bool whip = IsWHIP();
-	const char *service_id = "rtmp_common";
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	StreamProfile *current = mgr.Find(currentProfileUuid);
 
-	if (customServer) {
-		service_id = "rtmp_custom";
-	} else if (whip) {
-		service_id = "whip_custom";
+	/* Persist the form into the currently selected profile's blob. */
+	if (current) {
+		SaveFormIntoProfile(*current);
 	}
 
-	obs_service_t *oldService = main->GetService();
-	OBSDataAutoRelease hotkeyData = obs_hotkeys_save_service(oldService);
+	/* Only the primary profile is mirrored into OBS's single global service,
+	 * which drives the live single-stream output (Phase 1). Editing a
+	 * non-primary profile touches streams.json only — no SetService, no auth
+	 * bookkeeping, no OAuth side effects. */
+	if (current && current->isPrimary) {
+		const char *service_id = current->serviceId.c_str();
 
-	OBSDataAutoRelease settings = obs_data_create();
+		obs_service_t *oldService = main->GetService();
+		OBSDataAutoRelease hotkeyData = obs_hotkeys_save_service(oldService);
 
-	if (!customServer && !whip) {
-		obs_data_set_string(settings, "service", QT_TO_UTF8(ui->service->currentText()));
-		obs_data_set_string(settings, "protocol", QT_TO_UTF8(protocol));
-		if (ui->server->currentData() == CustomServerUUID()) {
-			obs_data_set_bool(settings, "using_custom_server", true);
+		OBSDataAutoRelease settings = obs_data_create();
+		obs_data_apply(settings, current->settings);
 
-			obs_data_set_string(settings, "server", QT_TO_UTF8(ui->serviceCustomServer->text()));
+		if (!!auth && strcmp(auth->service(), "Twitch") == 0) {
+			bool choiceExists = config_has_user_value(main->Config(), "Twitch", "AddonChoice");
+			int currentChoice = config_get_int(main->Config(), "Twitch", "AddonChoice");
+			int newChoice = ui->twitchAddonDropdown->currentIndex();
+
+			config_set_int(main->Config(), "Twitch", "AddonChoice", newChoice);
+
+			if (choiceExists && currentChoice != newChoice) {
+				forceAuthReload = true;
+			}
+		}
+
+		OBSServiceAutoRelease newService =
+			obs_service_create(service_id, "default_service", settings, hotkeyData);
+
+		if (!newService) {
+			return;
+		}
+
+		main->SetService(newService);
+		main->SaveService();
+		main->auth = auth;
+		if (!!main->auth) {
+			main->auth->LoadUI();
+			main->SetBroadcastFlowEnabled(main->auth->broadcastFlow());
 		} else {
-			obs_data_set_string(settings, "server", QT_TO_UTF8(ui->server->currentData().toString()));
-		}
-	} else {
-		obs_data_set_string(settings, "server", QT_TO_UTF8(ui->customServer->text().trimmed()));
-		obs_data_set_bool(settings, "use_auth", ui->useAuth->isChecked());
-		if (ui->useAuth->isChecked()) {
-			obs_data_set_string(settings, "username", QT_TO_UTF8(ui->authUsername->text()));
-			obs_data_set_string(settings, "password", QT_TO_UTF8(ui->authPw->text()));
+			main->SetBroadcastFlowEnabled(false);
 		}
 	}
 
-	if (!!auth && strcmp(auth->service(), "Twitch") == 0) {
-		bool choiceExists = config_has_user_value(main->Config(), "Twitch", "AddonChoice");
-		int currentChoice = config_get_int(main->Config(), "Twitch", "AddonChoice");
-		int newChoice = ui->twitchAddonDropdown->currentIndex();
-
-		config_set_int(main->Config(), "Twitch", "AddonChoice", newChoice);
-
-		if (choiceExists && currentChoice != newChoice) {
-			forceAuthReload = true;
-		}
-
-		obs_data_set_bool(settings, "bwtest", ui->bandwidthTestEnable->isChecked());
-	} else {
-		obs_data_set_bool(settings, "bwtest", false);
-	}
-
-	if (whip) {
-		obs_data_set_string(settings, "service", "WHIP");
-		obs_data_set_string(settings, "bearer_token", QT_TO_UTF8(ui->key->text()));
-	} else {
-		obs_data_set_string(settings, "key", QT_TO_UTF8(ui->key->text()));
-	}
-
-	OBSServiceAutoRelease newService = obs_service_create(service_id, "default_service", settings, hotkeyData);
-
-	if (!newService) {
-		return;
-	}
-
-	main->SetService(newService);
-	main->SaveService();
-	main->auth = auth;
-	if (!!main->auth) {
-		main->auth->LoadUI();
-		main->SetBroadcastFlowEnabled(main->auth->broadcastFlow());
-	} else {
-		main->SetBroadcastFlowEnabled(false);
-	}
+	mgr.Save();
 
 	SaveCheckBox(ui->ignoreRecommended, "Stream1", "IgnoreRecommended");
 
@@ -350,6 +404,192 @@ void OBSBasicSettings::SaveStream1Settings()
 	if (oldMultitrackVideoSetting != ui->enableMultitrackVideo->isChecked() ||
 	    oldWHIPSimulcastTotalLayers != ui->whipSimulcastTotalLayers->value()) {
 		main->ResetOutputs();
+	}
+}
+
+void OBSBasicSettings::SaveFormIntoProfile(StreamProfile &p)
+{
+	bool customServer = IsCustomService();
+	bool whip = IsWHIP();
+	const char *service_id = "rtmp_common";
+
+	if (customServer) {
+		service_id = "rtmp_custom";
+	} else if (whip) {
+		service_id = "whip_custom";
+	}
+
+	OBSDataAutoRelease settings = obs_data_create();
+
+	if (!customServer && !whip) {
+		obs_data_set_string(settings, "service", QT_TO_UTF8(ui->service->currentText()));
+		obs_data_set_string(settings, "protocol", QT_TO_UTF8(protocol));
+		if (ui->server->currentData() == CustomServerUUID()) {
+			obs_data_set_bool(settings, "using_custom_server", true);
+			obs_data_set_string(settings, "server", QT_TO_UTF8(ui->serviceCustomServer->text()));
+		} else {
+			obs_data_set_string(settings, "server", QT_TO_UTF8(ui->server->currentData().toString()));
+		}
+	} else {
+		obs_data_set_string(settings, "server", QT_TO_UTF8(ui->customServer->text().trimmed()));
+		obs_data_set_bool(settings, "use_auth", ui->useAuth->isChecked());
+		if (ui->useAuth->isChecked()) {
+			obs_data_set_string(settings, "username", QT_TO_UTF8(ui->authUsername->text()));
+			obs_data_set_string(settings, "password", QT_TO_UTF8(ui->authPw->text()));
+		}
+	}
+
+	if (!!auth && strcmp(auth->service(), "Twitch") == 0) {
+		obs_data_set_bool(settings, "bwtest", ui->bandwidthTestEnable->isChecked());
+	} else {
+		obs_data_set_bool(settings, "bwtest", false);
+	}
+
+	if (whip) {
+		obs_data_set_string(settings, "service", "WHIP");
+		obs_data_set_string(settings, "bearer_token", QT_TO_UTF8(ui->key->text()));
+	} else {
+		obs_data_set_string(settings, "key", QT_TO_UTF8(ui->key->text()));
+	}
+
+	p.serviceId = service_id;
+	p.settings = std::move(settings);
+	p.label = QT_TO_UTF8(streamProfileLabel->text());
+}
+
+void OBSBasicSettings::RebuildStreamProfileList()
+{
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	streamProfileList->blockSignals(true);
+	streamProfileList->clear();
+	for (const StreamProfile &p : mgr.Profiles()) {
+		QListWidgetItem *item = new QListWidgetItem(QString::fromStdString(p.DisplayName()));
+		item->setData(Qt::UserRole, QString::fromStdString(p.uuid));
+		if (p.isPrimary) {
+			QFont f = item->font();
+			f.setBold(true);
+			item->setFont(f); /* primary drives the live single stream */
+		}
+		streamProfileList->addItem(item);
+	}
+	streamProfileList->blockSignals(false);
+}
+
+void OBSBasicSettings::SelectStreamProfile(const std::string &uuid)
+{
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	StreamProfile *p = mgr.Find(uuid);
+	if (!p) {
+		return;
+	}
+
+	bool wasLoading = loading;
+	loading = true;
+	currentProfileUuid = uuid;
+	LoadProfileIntoForm(p->serviceId, p->settings, QString::fromStdString(p->label));
+	loading = wasLoading;
+
+	for (int i = 0; i < streamProfileList->count(); i++) {
+		if (streamProfileList->item(i)->data(Qt::UserRole).toString().toStdString() == uuid) {
+			streamProfileList->blockSignals(true);
+			streamProfileList->setCurrentRow(i);
+			streamProfileList->blockSignals(false);
+			break;
+		}
+	}
+}
+
+void OBSBasicSettings::StreamProfileSelectionChanged(QListWidgetItem *current)
+{
+	if (loading || !current) {
+		return;
+	}
+
+	std::string newUuid = current->data(Qt::UserRole).toString().toStdString();
+	if (newUuid == currentProfileUuid) {
+		return;
+	}
+
+	/* Save the outgoing profile's form edits before loading the new one, so
+	 * switching the selection never silently discards in-progress changes. */
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	StreamProfile *outgoing = mgr.Find(currentProfileUuid);
+	if (outgoing) {
+		std::string oldName = outgoing->DisplayName();
+		SaveFormIntoProfile(*outgoing);
+		if (outgoing->DisplayName() != oldName) {
+			RebuildStreamProfileList();
+		}
+	}
+
+	SelectStreamProfile(newUuid);
+}
+
+void OBSBasicSettings::LoadStreamProfiles()
+{
+	RebuildStreamProfileList();
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	StreamProfile *primary = mgr.Primary();
+	if (primary) {
+		SelectStreamProfile(primary->uuid);
+	} else if (!mgr.Empty()) {
+		SelectStreamProfile(mgr.Profiles().front().uuid);
+	}
+}
+
+void OBSBasicSettings::AddStreamProfileClicked()
+{
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+
+	/* Persist the current form first so adding never discards in-progress
+	 * edits to the previously selected profile. */
+	StreamProfile *outgoing = mgr.Find(currentProfileUuid);
+	if (outgoing) {
+		SaveFormIntoProfile(*outgoing);
+	}
+
+	StreamProfile p;
+	p.serviceId = "rtmp_common";
+	p.label = QT_TO_UTF8(QTStr("Basic.Settings.Streams.NewName"));
+	std::string newUuid = mgr.Add(std::move(p)).uuid;
+	mgr.Save();
+
+	RebuildStreamProfileList();
+	SelectStreamProfile(newUuid);
+}
+
+void OBSBasicSettings::RemoveStreamProfileClicked(const std::string &uuid)
+{
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+	StreamProfile *p = mgr.Find(uuid);
+	if (!p) {
+		return;
+	}
+
+	if (mgr.Profiles().size() <= 1) {
+		QMessageBox::information(this, QTStr("Basic.Settings.Streams.RemoveConfirm.Title"),
+					 QTStr("Basic.Settings.Streams.CannotRemoveLast"));
+		return;
+	}
+
+	QMessageBox::StandardButton confirm = QMessageBox::question(
+		this, QTStr("Basic.Settings.Streams.RemoveConfirm.Title"),
+		QTStr("Basic.Settings.Streams.RemoveConfirm.Text").arg(QString::fromStdString(p->DisplayName())));
+	if (confirm != QMessageBox::Yes) {
+		return;
+	}
+
+	mgr.Remove(uuid);
+	mgr.Save();
+
+	RebuildStreamProfileList();
+	StreamProfile *primary = mgr.Primary();
+	if (primary) {
+		SelectStreamProfile(primary->uuid);
+	} else if (!mgr.Empty()) {
+		SelectStreamProfile(mgr.Profiles().front().uuid);
+	} else {
+		currentProfileUuid.clear();
 	}
 }
 
