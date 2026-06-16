@@ -1989,7 +1989,6 @@ OBSBasicSettings {
     qproperty-streamIcon: url(theme:Dark/settings/stream.svg);
     qproperty-outputIcon: url(theme:Dark/settings/output.svg);
     qproperty-audioIcon: url(theme:Dark/settings/audio.svg);
-    qproperty-videoIcon: url(theme:Dark/settings/video.svg);
     qproperty-hotkeysIcon: url(theme:Dark/settings/hotkeys.svg);
     qproperty-accessibilityIcon: url(theme:Dark/settings/accessibility.svg);
     qproperty-advancedIcon: url(theme:Dark/settings/advanced.svg);
