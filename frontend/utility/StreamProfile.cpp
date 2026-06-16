@@ -28,6 +28,15 @@ std::string StreamProfile::DisplayName() const
 	return platform + " - " + label;
 }
 
+std::string StreamProfile::Key() const
+{
+	if (!settings) {
+		return "";
+	}
+	const char *key = obs_data_get_string(settings, serviceId == "whip_custom" ? "bearer_token" : "key");
+	return key ? key : "";
+}
+
 OBSDataAutoRelease StreamProfile::ToData() const
 {
 	OBSDataAutoRelease data = obs_data_create();

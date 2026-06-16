@@ -22,6 +22,9 @@ struct StreamProfile {
 	[[nodiscard]] std::string PlatformName() const;
 	/* "{platform} - {label}", or just platform when label is empty. */
 	[[nodiscard]] std::string DisplayName() const;
+	/* The stream credential: "bearer_token" for WHIP, otherwise "key". Empty
+	 * when settings is null or the credential is unset. */
+	[[nodiscard]] std::string Key() const;
 
 	[[nodiscard]] OBSDataAutoRelease ToData() const;
 	static StreamProfile FromData(obs_data_t *data);

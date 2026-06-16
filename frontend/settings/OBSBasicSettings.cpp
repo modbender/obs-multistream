@@ -2257,6 +2257,12 @@ void OBSBasicSettings::on_buttonBox_clicked(QAbstractButton *button)
 			return;
 		}
 
+		QString streamConflict = CheckStreamProfileConflicts();
+		if (!streamConflict.isEmpty()) {
+			OBSMessageBox::warning(this, QTStr("Basic.Settings.Streams.Duplicate.Title"), streamConflict);
+			return;
+		}
+
 		SaveSettings();
 
 		UpdateYouTubeAppDockSettings();

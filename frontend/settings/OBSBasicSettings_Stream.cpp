@@ -110,10 +110,14 @@ void OBSBasicSettings::InitStreamPage()
 	panel->addWidget(streamProfileList, 1);
 
 	QHBoxLayout *buttons = new QHBoxLayout();
-	QPushButton *addProfile = new QPushButton(QTStr("Basic.Settings.Streams.AddProfile"));
+	QPushButton *addProfile = new QPushButton(QTStr("Add"));
 	addProfile->setObjectName("streamProfileAdd");
 	QPushButton *removeProfile = new QPushButton(QTStr("Remove"));
 	removeProfile->setObjectName("streamProfileRemove");
+	/* The panel column is a fixed 230px; let the two buttons split it evenly so
+	 * their labels never clip. */
+	addProfile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	removeProfile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 	buttons->addWidget(addProfile);
 	buttons->addWidget(removeProfile);
 	panel->addLayout(buttons);
@@ -363,6 +367,18 @@ void OBSBasicSettings::SaveStream1Settings()
 
 	mgr.Save();
 
+	/* Apply (unlike Add) otherwise leaves the left list showing the stale name;
+	 * rebuild it and re-highlight the current row without reloading the form. */
+	RebuildStreamProfileList();
+	for (int i = 0; i < streamProfileList->count(); i++) {
+		if (streamProfileList->item(i)->data(Qt::UserRole).toString().toStdString() == currentProfileUuid) {
+			streamProfileList->blockSignals(true);
+			streamProfileList->setCurrentRow(i);
+			streamProfileList->blockSignals(false);
+			break;
+		}
+	}
+
 	SaveCheckBox(ui->ignoreRecommended, "Stream1", "IgnoreRecommended");
 
 	auto oldWHIPSimulcastTotalLayers = config_get_int(main->Config(), "Stream1", "WHIPSimulcastTotalLayers");
@@ -461,6 +477,38 @@ void OBSBasicSettings::SaveFormIntoProfile(StreamProfile &p)
 	p.label = QT_TO_UTF8(streamProfileLabel->text());
 }
 
+QString OBSBasicSettings::CheckStreamProfileConflicts()
+{
+	StreamProfileManager &mgr = main->GetStreamProfileManager();
+
+	/* The current form's pending edits aren't yet written back to its stored
+	 * profile, so validate the live form against every other profile. */
+	StreamProfile form;
+	SaveFormIntoProfile(form);
+	std::string formKey = form.Key();
+	std::string formName = form.DisplayName();
+
+	for (const StreamProfile &other : mgr.Profiles()) {
+		if (other.uuid == currentProfileUuid) {
+			continue;
+		}
+
+		/* Only non-empty keys collide; two unset credentials aren't a clash. */
+		if (!formKey.empty() && formKey == other.Key()) {
+			return QTStr("Basic.Settings.Streams.DuplicateKey.Text")
+				.arg(QString::fromStdString(other.DisplayName()));
+		}
+
+		if (QString::compare(QString::fromStdString(formName), QString::fromStdString(other.DisplayName()),
+				     Qt::CaseInsensitive) == 0) {
+			return QTStr("Basic.Settings.Streams.DuplicateName.Text")
+				.arg(QString::fromStdString(other.DisplayName()));
+		}
+	}
+
+	return QString();
+}
+
 void OBSBasicSettings::RebuildStreamProfileList()
 {
 	StreamProfileManager &mgr = main->GetStreamProfileManager();
@@ -514,6 +562,23 @@ void OBSBasicSettings::StreamProfileSelectionChanged(QListWidgetItem *current)
 		return;
 	}
 
+	QString conflict = CheckStreamProfileConflicts();
+	if (!conflict.isEmpty()) {
+		OBSMessageBox::warning(this, QTStr("Basic.Settings.Streams.Duplicate.Title"), conflict);
+		/* Keep the user on the current profile; re-selecting must not re-enter
+		 * this handler, hence the signal block. */
+		streamProfileList->blockSignals(true);
+		for (int i = 0; i < streamProfileList->count(); i++) {
+			if (streamProfileList->item(i)->data(Qt::UserRole).toString().toStdString() ==
+			    currentProfileUuid) {
+				streamProfileList->setCurrentRow(i);
+				break;
+			}
+		}
+		streamProfileList->blockSignals(false);
+		return;
+	}
+
 	/* Save the outgoing profile's form edits before loading the new one, so
 	 * switching the selection never silently discards in-progress changes. */
 	StreamProfileManager &mgr = main->GetStreamProfileManager();
@@ -543,6 +608,12 @@ void OBSBasicSettings::LoadStreamProfiles()
 
 void OBSBasicSettings::AddStreamProfileClicked()
 {
+	QString conflict = CheckStreamProfileConflicts();
+	if (!conflict.isEmpty()) {
+		OBSMessageBox::warning(this, QTStr("Basic.Settings.Streams.Duplicate.Title"), conflict);
+		return;
+	}
+
 	StreamProfileManager &mgr = main->GetStreamProfileManager();
 
 	/* Persist the current form first so adding never discards in-progress

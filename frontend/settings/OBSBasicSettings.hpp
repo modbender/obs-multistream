@@ -192,6 +192,9 @@ private:
 	void LoadProfileIntoForm(const std::string &serviceId, obs_data_t *settings, const QString &label);
 	void SaveFormIntoProfile(StreamProfile &p);
 	void StreamProfileSelectionChanged(QListWidgetItem *current);
+	/* Body text of a duplicate-key/duplicate-name error if committing the
+	 * current form would collide with another profile; empty QString if OK. */
+	QString CheckStreamProfileConflicts();
 	std::string currentProfileUuid;
 	QListWidget *streamProfileList = nullptr;
 	QLineEdit *streamProfileLabel = nullptr;
