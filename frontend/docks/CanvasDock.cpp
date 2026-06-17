@@ -348,6 +348,11 @@ void CanvasDock::RefreshScenes()
 			QPushButton *link = new QPushButton(QString::fromUtf8("\xF0\x9F\x94\x97"));
 			link->setCheckable(true);
 			link->setFlat(true);
+			/* The emoji glyph renders taller than the row and clips; shrink the
+			 * button font so it fits without growing the row height. */
+			QFont linkFont = link->font();
+			linkFont.setPointSizeF(linkFont.pointSizeF() > 0 ? linkFont.pointSizeF() * 0.8 : 9.0);
+			link->setFont(linkFont);
 			link->setToolTip(QTStr("Basic.CanvasDock.LinkScene"));
 			link->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 			/* No program scene -> nothing to follow; show but inert. */
