@@ -107,20 +107,3 @@ void StreamProfileManager::Remove(const std::string &uuid)
 		}
 	}
 }
-
-void StreamProfileManager::SetPrimary(const std::string &uuid)
-{
-	bool found = false;
-	for (StreamProfile &p : profiles) {
-		if (p.uuid == uuid) {
-			found = true;
-			break;
-		}
-	}
-	if (!found) {
-		return;
-	}
-	for (StreamProfile &p : profiles) {
-		p.isPrimary = (p.uuid == uuid);
-	}
-}

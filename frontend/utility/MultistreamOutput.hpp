@@ -17,6 +17,10 @@ class MultistreamOutput {
 public:
 	enum class State { Idle, Connecting, Live, Error };
 
+	/* Status-dot color (hex) for a state. Single source of truth for the palette
+	 * shared by the Multistream dock and the canvas-dock footer. */
+	static const char *StateColor(State state);
+
 	struct OutputStatus {
 		std::string bindingUuid;
 		std::string canvasUuid;
@@ -37,7 +41,6 @@ public:
 	bool StartOutput(const std::string &bindingUuid);
 	void StopOutput(const std::string &bindingUuid);
 
-	bool AnyActive() const;
 	bool IsLive(const std::string &bindingUuid) const;
 
 	/* Drop the cached encoder pair for a canvas. Call when the canvas's video is

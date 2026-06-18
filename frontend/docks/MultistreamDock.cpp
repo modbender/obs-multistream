@@ -29,21 +29,22 @@ struct StateStyle {
 	const char *color;
 };
 
-/* Single source of truth for State -> (localized text, dot color). Indexed by
- * the State enum value so adding a state is a one-line table edit. */
+/* Localized status text per State. The dot color comes from
+ * MultistreamOutput::StateColor, the shared palette also used by the canvas dock.
+ * Indexed by the State enum value so adding a state is a one-line table edit. */
 StateStyle StyleFor(MultistreamOutput::State state)
 {
-	static const std::array<StateStyle, 4> table = {{
-		{"Basic.Multistream.Status.Idle", "#888888"},
-		{"Basic.Multistream.Status.Connecting", "#e0a000"},
-		{"Basic.Multistream.Status.Live", "#2ecc40"},
-		{"Basic.Multistream.Status.Error", "#ff4136"},
+	static const std::array<const char *, 4> textKeys = {{
+		"Basic.Multistream.Status.Idle",
+		"Basic.Multistream.Status.Connecting",
+		"Basic.Multistream.Status.Live",
+		"Basic.Multistream.Status.Error",
 	}};
 	size_t idx = static_cast<size_t>(state);
-	if (idx >= table.size()) {
+	if (idx >= textKeys.size()) {
 		idx = 0;
 	}
-	return table[idx];
+	return {textKeys[idx], MultistreamOutput::StateColor(state)};
 }
 
 } // namespace

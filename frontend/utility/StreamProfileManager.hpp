@@ -21,7 +21,6 @@ public:
 	StreamProfile *Find(const std::string &uuid);
 	StreamProfile &Add(StreamProfile p);  // assigns uuid if empty; first add becomes primary
 	void Remove(const std::string &uuid); // re-points primary if the primary was removed
-	void SetPrimary(const std::string &uuid);
 
 private:
 	static std::string FilePath(); // <userProfilesLocation>/obs-multistream/basic/streams.json

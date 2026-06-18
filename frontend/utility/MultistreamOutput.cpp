@@ -8,6 +8,15 @@
 
 #include <QMetaObject>
 
+#include <array>
+
+const char *MultistreamOutput::StateColor(State state)
+{
+	static constexpr std::array<const char *, 4> kColors = {{"#888888", "#e0a000", "#2ecc40", "#ff4136"}};
+	size_t idx = static_cast<size_t>(state);
+	return kColors[idx < kColors.size() ? idx : 0];
+}
+
 MultistreamOutput::MultistreamOutput(OBSBasic *main_) : main(main_) {}
 
 MultistreamOutput::~MultistreamOutput()
@@ -232,12 +241,6 @@ void MultistreamOutput::StopAll()
 	/* Encoders are released when the handler is destroyed or rebuilt; keep the
 	 * cache so a quick restart reuses them, but they hold no output refs now. */
 	NotifyChanged();
-}
-
-bool MultistreamOutput::AnyActive() const
-{
-	std::lock_guard<std::mutex> lock(liveMutex);
-	return !live.empty();
 }
 
 bool MultistreamOutput::IsLive(const std::string &bindingUuid) const

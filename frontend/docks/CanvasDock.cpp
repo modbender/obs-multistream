@@ -29,7 +29,6 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <array>
 #include <cstring>
 
 #include "moc_CanvasDock.cpp"
@@ -741,13 +740,8 @@ void CanvasDock::UpdateStatusDot()
 		}
 	}
 
-	/* Match MultistreamDock's StyleFor palette, indexed by State. */
-	static const std::array<const char *, 4> kStateColors = {{"#888888", "#e0a000", "#2ecc40", "#ff4136"}};
-	size_t idx = static_cast<size_t>(state);
-	if (idx >= kStateColors.size()) {
-		idx = 0;
-	}
-	statusDot->setStyleSheet(QString("border-radius:6px; background:%1;").arg(kStateColors[idx]));
+	statusDot->setStyleSheet(
+		QString("border-radius:6px; background:%1;").arg(MultistreamOutput::StateColor(state)));
 }
 
 void CanvasDock::ApplyOrientation()

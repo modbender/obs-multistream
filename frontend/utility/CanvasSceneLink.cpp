@@ -16,18 +16,6 @@ void CanvasSceneLink::Set(const std::string &mainSceneUuid, const std::string &c
 	map[mainSceneUuid][canvasUuid] = canvasSceneUuid;
 }
 
-void CanvasSceneLink::Unset(const std::string &mainSceneUuid, const std::string &canvasUuid)
-{
-	auto it = map.find(mainSceneUuid);
-	if (it == map.end()) {
-		return;
-	}
-	it->second.erase(canvasUuid);
-	if (it->second.empty()) {
-		map.erase(it);
-	}
-}
-
 void CanvasSceneLink::UnsetByCanvasScene(const std::string &canvasUuid, const std::string &canvasSceneUuid)
 {
 	for (auto it = map.begin(); it != map.end();) {
