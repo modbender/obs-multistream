@@ -1185,6 +1185,15 @@ private:
 public:
 	const std::vector<OBS::Canvas> &GetCanvases() const noexcept { return canvases; }
 	CanvasManager &GetCanvasManager() { return canvasManager; }
+
+	/* Iterate canvases eligible for streaming in display order: the Default canvas
+	 * first (it drives the main pipeline and is not part of the canvases vector),
+	 * then each non-ephemeral additional canvas. Width/height are the canvas base
+	 * resolution. */
+	void ForEachStreamableCanvas(
+		const std::function<void(const std::string &uuid, const std::string &name, uint32_t width,
+					 uint32_t height)> &cb);
+
 	StreamProfileManager &GetStreamProfileManager() { return streamProfileManager; }
 	OutputBindings &GetOutputBindings() { return outputBindings; }
 	CanvasSceneLink &GetCanvasSceneLink() { return canvasSceneLink; }

@@ -27,6 +27,29 @@ void OBSBasic::CanvasRemoved(void *data, calldata_t *params)
 	QMetaObject::invokeMethod(static_cast<OBSBasic *>(data), "RemoveCanvas", Q_ARG(OBSCanvas, OBSCanvas(canvas)));
 }
 
+void OBSBasic::ForEachStreamableCanvas(
+	const std::function<void(const std::string &, const std::string &, uint32_t, uint32_t)> &cb)
+{
+	const CanvasDefinition &def = GetCanvasManager().Default();
+	cb(def.uuid, def.name, def.width, def.height);
+
+	for (const OBS::Canvas &canvas : GetCanvases()) {
+		if (obs_canvas_get_flags(canvas) & EPHEMERAL) {
+			continue;
+		}
+		const char *uuid = obs_canvas_get_uuid(canvas);
+		const char *name = obs_canvas_get_name(canvas);
+		uint32_t width = 0;
+		uint32_t height = 0;
+		obs_video_info ovi = {};
+		if (obs_canvas_get_video_info(canvas, &ovi)) {
+			width = ovi.base_width;
+			height = ovi.base_height;
+		}
+		cb(std::string(uuid ? uuid : ""), std::string(name ? name : ""), width, height);
+	}
+}
+
 const OBS::Canvas &OBSBasic::AddCanvas(const std::string &name, obs_video_info *ovi, int flags, const char *uuid)
 {
 	obs_canvas_t *raw;

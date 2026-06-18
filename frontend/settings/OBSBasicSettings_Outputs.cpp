@@ -182,28 +182,11 @@ void OBSBasicSettings::RebuildOutputList()
 		return QString("%1  ·  %2x%3").arg(name).arg(width).arg(height);
 	};
 
-	/* The Default canvas drives the main pipeline and is not part of the
-	 * additional-canvases vector, so render it explicitly first. */
-	const CanvasDefinition &def = main->GetCanvasManager().Default();
-	layout->addWidget(BuildCanvasOutputGroup(def.uuid.c_str(),
-						 canvasTitle(QString::fromStdString(def.name), def.width, def.height)));
-
-	for (const OBS::Canvas &canvas : main->GetCanvases()) {
-		if (obs_canvas_get_flags(canvas) & EPHEMERAL) {
-			continue;
-		}
-		const char *uuid = obs_canvas_get_uuid(canvas);
-		const char *name = obs_canvas_get_name(canvas);
-		obs_video_info ovi = {};
-		uint32_t width = 0;
-		uint32_t height = 0;
-		if (obs_canvas_get_video_info(canvas, &ovi)) {
-			width = ovi.base_width;
-			height = ovi.base_height;
-		}
-		layout->addWidget(
-			BuildCanvasOutputGroup(uuid, canvasTitle(QString::fromUtf8(name ? name : ""), width, height)));
-	}
+	main->ForEachStreamableCanvas([&](const std::string &uuid, const std::string &name, uint32_t width,
+					  uint32_t height) {
+		layout->addWidget(BuildCanvasOutputGroup(uuid.c_str(),
+							 canvasTitle(QString::fromStdString(name), width, height)));
+	});
 
 	layout->addStretch();
 

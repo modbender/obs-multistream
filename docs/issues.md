@@ -83,11 +83,13 @@ The items below were deliberately **not** auto-fixed and are recorded here.
   whole group/row widget tree on every `onStatusChanged`.** Acceptable for a
   handful of outputs; revisit with an incremental update if binding counts grow.
 
-- **R1 (cleanup) — the "Default canvas first, then non-ephemeral `GetCanvases()`"
-  iteration is re-implemented in ~4 places** (MultistreamDock, Outputs tab,
-  SceneCollections, Stream tab). A single `forEachStreamableCanvas(cb)` helper on
-  OBSBasic would dedupe it; fold in opportunistically when next touching those
-  files.
+- **R1 (cleanup) — RESOLVED.** Added `OBSBasic::ForEachStreamableCanvas(cb)`
+  (Default canvas first, then each non-ephemeral additional canvas; yields
+  uuid/name/width/height) and routed the two true-duplicate sites through it
+  (MultistreamDock, Outputs tab). The SceneCollections and Stream-tab loops were
+  *not* folded in — their intent has drifted (Stream tab prepends a "None" entry
+  and excludes Default; SceneCollections excludes Default by design), so merging
+  them would obscure that difference.
 
 ---
 

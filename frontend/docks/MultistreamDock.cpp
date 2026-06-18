@@ -5,8 +5,6 @@
 #include <utility/OutputBinding.hpp>
 #include <utility/StreamProfile.hpp>
 #include <utility/StreamProfileManager.hpp>
-#include <utility/CanvasManager.hpp>
-#include <utility/CanvasDefinition.hpp>
 
 #include <qt-wrappers.hpp>
 
@@ -246,18 +244,9 @@ void MultistreamDock::Refresh()
 
 	bool anyRow = false;
 
-	/* Default canvas first (not part of the additional-canvases vector). */
-	const CanvasDefinition &def = main->GetCanvasManager().Default();
-	anyRow |= buildGroup(def.uuid, QString::fromStdString(def.name));
-
-	for (const OBS::Canvas &canvas : main->GetCanvases()) {
-		if (obs_canvas_get_flags(canvas) & EPHEMERAL) {
-			continue;
-		}
-		const char *uuid = obs_canvas_get_uuid(canvas);
-		const char *name = obs_canvas_get_name(canvas);
-		anyRow |= buildGroup(std::string(uuid ? uuid : ""), QString::fromUtf8(name ? name : ""));
-	}
+	main->ForEachStreamableCanvas([&](const std::string &uuid, const std::string &name, uint32_t, uint32_t) {
+		anyRow |= buildGroup(uuid, QString::fromStdString(name));
+	});
 
 	if (!anyRow) {
 		QLabel *empty = new QLabel(QTStr("Basic.Multistream.Empty"));
