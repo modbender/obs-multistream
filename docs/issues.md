@@ -40,7 +40,17 @@ fully editable in its own (floating) dock. This is preferable to the rejected
 reparenting of the main preview — invasive, marginal gain). **Needs a spike:**
 `OBSBasicPreview` assumes the main program canvas in several places
 (`obs_get_video()`, scene-item resolution), so binding it to an arbitrary canvas
-is non-trivial and must be scoped before committing.
+is non-trivial and must be scoped before committing. Tracked as **Phase 3a** in
+`docs/roadmap.md`.
+
+**Related deferred decision (roadmap Phase 3c).** When the Default canvas is
+output-gated, the central preview currently shows an in-place "Preview Disabled"
+placeholder (occupies space — CSS `visibility:hidden`-style). Whether to instead
+`hide()` it (Qt's `display:none` equivalent) so the space is reclaimed is left for
+later: the catch is it's the QMainWindow central widget (dock widgets can't occupy
+it), so hiding makes surrounding docks reflow/balloon into the gap — the point-4
+"starved layout" risk. Worth a quick reversible `hide()` experiment to judge the
+reflow before committing.
 
 ---
 

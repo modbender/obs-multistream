@@ -188,25 +188,45 @@ A low-risk cleanup + the high-value items from the Phase-2 holistic review
 
 ---
 
+## Phase 3 — Per-canvas editing & studio mode 🔭 PLANNED (not started)
+
+The Phase-2 model lets an additional canvas be *populated* but not visually
+*laid out*, and studio mode / the central editable stage are Default-only. Phase
+3 closes that. Each item needs a scoping spike before planning — the central
+preview (`OBSBasicPreview`) is OBS's most load-bearing widget and assumes the
+main program canvas in several places.
+
+- 🔭 **3a — Editable canvas-dock previews (keystone).** Today the canvas dock
+  preview is a plain `OBSQTDisplay` with no mouse/transform interaction — only the
+  central `OBSBasicPreview` supports source drag/select/transform. So a scene on an
+  additional canvas can be populated (Add Source) but its sources can't be
+  positioned by dragging; this matters most when an *additional* canvas (e.g. a
+  vertical/Shorts canvas) is the user's primary surface. Fix = give each dock an
+  `OBSBasicPreview`-class surface bound to its own canvas. **Spike first:**
+  `OBSBasicPreview` assumes the main canvas (`obs_get_video()`, scene-item
+  resolution) in places. See `docs/issues.md` #4. This is the prerequisite for 3b.
+- 🔭 **3b — Per-canvas Studio Mode.** Make preview/program staging + transitions
+  work per canvas, not Default-only. Superset of 3a (adds per-canvas transition +
+  program staging on top of an editable surface); the hardest item. Do after 3a.
+- 💭 **3c — Default-preview / canvas-in-center layout (decision deferred).** Two
+  related questions about the QMainWindow **central widget** (which dock widgets
+  can't occupy):
+  - When the Default canvas is output-gated (disabled), should the central
+    "Preview Disabled" placeholder *collapse* (`hide()` it — Qt's `display:none`
+    equivalent) so the space is reclaimed, accepting that surrounding docks reflow
+    into it (Scenes/Sources may balloon — the point-4 "starved layout" risk)? Left
+    as today's in-place placeholder for now; **decide later**, ideally with a quick
+    reversible `hide()` experiment to judge the reflow in a real layout.
+  - **"First-enabled canvas wins the center" — shelved.** Letting any canvas occupy
+    the central editable stage via runtime reparenting + a primary-canvas state
+    machine. Rejected as invasive surgery for marginal gain; the real need (editing
+    a non-default canvas) is better served by 3a's editable docks. Default-in-center
+    + additionals-floating is the shipped model.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
-- 🐛 **Additional canvas previews are view-only (no layout editing).** The canvas
-  dock preview is a plain `OBSQTDisplay` with no mouse/transform interaction —
-  only the central `OBSBasicPreview` supports source drag/select/transform. So a
-  scene belonging to an additional canvas can be populated (Add Source) but its
-  sources cannot be **visually positioned** by dragging; this matters most for a
-  workflow where an *additional* canvas (e.g. a vertical/Shorts canvas) is the
-  user's primary surface. The right fix is **editable canvas-dock previews**
-  (give each dock an `OBSBasicPreview`-class surface bound to its canvas), not the
-  shelved "first-enabled-wins-center" reparenting (see below). Feasibility needs a
-  spike — `OBSBasicPreview` assumes the main canvas in places. See `docs/issues.md`
-  #4.
-- ⏸ **"First-enabled canvas wins the center" (step 3) — shelved.** Considered
-  generalizing so any canvas could occupy the central editable preview via runtime
-  reparenting + a primary-canvas state machine. Rejected as invasive surgery on
-  OBS's most load-bearing widget for marginal gain; the real need it was meant to
-  serve (editing a non-default canvas) is better met by editable canvas docks
-  above. Default-in-center + additionals-floating is the shipped model.
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
   Broadcasting (many quality renditions → one Twitch ingest), orthogonal to our
   many-platforms goal. Decision at the multi-destination phase: delete the
