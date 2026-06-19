@@ -159,6 +159,33 @@ of truth**, plus supporting fixes. All build-green and GUI-verified by the user.
   Q_PROPERTY since the Video tab was folded into Canvas) that logged on every
   Settings open.
 
+### Hardening & cleanup pass ✅ 2026-06-19
+
+A low-risk cleanup + the high-value items from the Phase-2 holistic review
+(`docs/issues.md` #3). All build-green; runtime-unverified items noted.
+
+- ✅ **Cleanup pass** — deduped the State→color status palette into
+  `MultistreamOutput::StateColor`; removed dead members (`SetPrimary`,
+  `AnyActive`, 2-arg `Unset`) and two dead locale keys.
+- ✅ **R1 — `OBSBasic::ForEachStreamableCanvas`** — hoisted the duplicated
+  "Default-first then non-ephemeral canvases" walk; routed the two true-dup sites
+  (Multistream dock, Outputs tab) through it. The Stream-tab / SceneCollections
+  walks were left alone (drifted intent).
+- ✅ **C2 — deleted-profile surfaced distinctly** — a binding pointing at a
+  deleted stream profile now reads as "profile deleted" (dock row + Outputs badge)
+  rather than identically to an unset one.
+- ✅ **P2 — incremental dock refresh** — split `MultistreamDock` into structural
+  `Refresh` vs. status-only `UpdateStatuses`; status ticks no longer rebuild the
+  tree. Also fixed a latent staleness bug (dock didn't refresh on binding edits
+  while visible) via a new `OutputBindingsChanged → Refresh` connection.
+- ✅ **H1 — live canvas-edit crash guard** — editing an additional canvas's
+  resolution while it was live on a multistream output called
+  `obs_canvas_reset_video` unguarded (UAF). Added `MultistreamOutput::IsCanvasLive`
+  and guarded both reset sites (direct edit + Default-branch follower loop);
+  warn/revert gated to actual resolution/FPS changes. The editor dialog also
+  **locks** the resolution/FPS inputs while the canvas is live, with the guard as a
+  backstop. Runtime-unverified (needs a live output, same constraint as #2).
+
 ---
 
 ## Backlog & deferred decisions ⏸
@@ -186,6 +213,13 @@ of truth**, plus supporting fixes. All build-green and GUI-verified by the user.
   Twitch-specific `GoLiveAPI`/config, or harvest `MultitrackVideoOutput`'s
   multi-output/encoder-sharing plumbing for our fan-out handler.
 - ⏸ **WHIP simulcast encoder-id divergence** — conscious deferral from 4b.
-- ⏸ **Canvas-editor input clamping** — guard FPS and SDR-white-level against 0.
+- 💭 **C1 — output-binding edits ignore Settings → Cancel.** Every Outputs-tab
+  mutation calls `SaveProject()` immediately, so editing bindings then pressing
+  Cancel does not revert (unlike the Stream tab, which discards on Cancel). Needs a
+  decision: document bindings as immediate-commit, or route them through the
+  apply/cancel path. See `docs/issues.md` #3 C1.
+- ✅ **Canvas-editor input clamping** — FPS num/den (`setRange(1, …)`), SDR white
+  level (`setRange(80, 480)`), and the `WxH` parse (`cx > 0 && cy > 0`) already
+  floor every numeric input above 0 through the dialog; no separate guard needed.
 - 🔭 **Finish the `canvas-foundation` branch** — merge/PR/cleanup once the open
   items above are resolved.
