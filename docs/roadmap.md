@@ -213,11 +213,10 @@ A low-risk cleanup + the high-value items from the Phase-2 holistic review
   Twitch-specific `GoLiveAPI`/config, or harvest `MultitrackVideoOutput`'s
   multi-output/encoder-sharing plumbing for our fan-out handler.
 - ⏸ **WHIP simulcast encoder-id divergence** — conscious deferral from 4b.
-- 💭 **C1 — output-binding edits ignore Settings → Cancel.** Every Outputs-tab
-  mutation calls `SaveProject()` immediately, so editing bindings then pressing
-  Cancel does not revert (unlike the Stream tab, which discards on Cancel). Needs a
-  decision: document bindings as immediate-commit, or route them through the
-  apply/cancel path. See `docs/issues.md` #3 C1.
+- ✅ **C1 — output-binding edits now honor Settings → Cancel.** Edits still commit
+  live (previews react immediately), but the dialog snapshots the bindings on open,
+  reverts on Cancel/Esc, and re-baselines on Apply/OK — mirroring the Stream tab.
+  See `docs/issues.md` #3 C1.
 - ✅ **Canvas-editor input clamping** — FPS num/den (`setRange(1, …)`), SDR white
   level (`setRange(80, 480)`), and the `WxH` parse (`cx > 0 && cy > 0`) already
   floor every numeric input above 0 through the dialog; no separate guard needed.

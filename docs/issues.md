@@ -78,13 +78,15 @@ The items below were deliberately **not** auto-fixed and are recorded here.
   can't be attempted in the first place; the `ApplyCanvasEdit` guard remains as a
   backstop.
 
-- **C1 (design decision) — output-binding edits ignore Settings → Cancel.** Every
-  mutation in the Outputs tab calls `SaveProject()` immediately, so editing
-  bindings then pressing Cancel does not revert (unlike the Stream tab, which
-  deliberately discards on Cancel — commit `dbf1752f5`). Canvas add/remove is
-  also immediate-commit but is justified as a management action. Decide
-  intentionally: document bindings as immediate-commit, or route them through the
-  dialog's apply/cancel path.
+- **C1 (design decision) — RESOLVED: routed through apply/cancel.** Output-binding
+  edits still commit immediately (so the canvas previews/docks react live while
+  editing), but the dialog now snapshots `OutputBindings` on open
+  (`outputBindingsBackup`), restores it on Cancel — both the Cancel button
+  (`RejectRole`) and the Esc/close path (`reject()`), mirroring the Stream tab —
+  and re-baselines the snapshot on Apply/OK. `RevertOutputBindings()` is a no-op
+  when nothing changed (guarded by `OutputBinding::operator==`). Note: canvas
+  add/remove remains immediate-commit by design (a management action), so a Cancel
+  that follows a canvas removal won't resurrect the canvas, only its bindings.
 
 - **C2 (minor UX) — RESOLVED.** A binding whose `profileUuid` is non-empty but
   resolves to no profile now reads as a distinct "profile deleted" state, separate

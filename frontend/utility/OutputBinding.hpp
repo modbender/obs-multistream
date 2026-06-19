@@ -12,6 +12,12 @@ struct OutputBinding {
 	std::string profileUuid; // -> StreamProfile::uuid (may be empty = unset)
 	std::string canvasUuid;  // -> obs_canvas uuid
 	bool enabled = false;
+
+	bool operator==(const OutputBinding &o) const
+	{
+		return uuid == o.uuid && profileUuid == o.profileUuid && canvasUuid == o.canvasUuid &&
+		       enabled == o.enabled;
+	}
 };
 
 /* Collection of bindings, serialized inside the scene-collection JSON as an

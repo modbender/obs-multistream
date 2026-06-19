@@ -517,6 +517,10 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	InitAppearancePage();
 	LoadSettings(false);
 
+	/* Snapshot the output bindings so Cancel can discard Outputs-page edits, which
+	 * otherwise commit immediately. Re-baselined whenever Apply/OK flushes. */
+	outputBindingsBackup = main->GetOutputBindings();
+
 	ui->snappingEnabled->setAccessibleName(QTStr("Basic.Settings.General.Snapping"));
 	ui->systemTrayEnabled->setAccessibleName(QTStr("Basic.Settings.General.SysTray"));
 	ui->streamDelayEnable->setAccessibleName(QTStr("Basic.Settings.Advanced.StreamDelay"));
@@ -2182,6 +2186,16 @@ void OBSBasicSettings::showEvent(QShowEvent *event)
 	}
 }
 
+void OBSBasicSettings::RevertOutputBindings()
+{
+	if (main->GetOutputBindings().bindings == outputBindingsBackup.bindings) {
+		return;
+	}
+	main->GetOutputBindings() = outputBindingsBackup;
+	main->SaveProject();
+	main->NotifyOutputBindingsChanged();
+}
+
 void OBSBasicSettings::reject()
 {
 	if (AskIfCanCloseSettings()) {
@@ -2191,6 +2205,7 @@ void OBSBasicSettings::reject()
 		 * edits. (Add/Remove are immediate management actions, matching the
 		 * canvas pattern, and already persisted to disk.) */
 		main->GetStreamProfileManager().Load();
+		RevertOutputBindings();
 		close();
 	}
 }
@@ -2265,6 +2280,10 @@ void OBSBasicSettings::on_buttonBox_clicked(QAbstractButton *button)
 
 		SaveSettings();
 
+		/* Outputs commit live, so Apply/OK just re-baselines the revert snapshot
+		 * to the now-current bindings. */
+		outputBindingsBackup = main->GetOutputBindings();
+
 		UpdateYouTubeAppDockSettings();
 		ClearChanged();
 	}
@@ -2279,6 +2298,7 @@ void OBSBasicSettings::on_buttonBox_clicked(QAbstractButton *button)
 			 * Reload streams.json so the Cancel button discards them too (the
 			 * reject() override covers the Esc/close-button path). */
 			main->GetStreamProfileManager().Load();
+			RevertOutputBindings();
 		}
 		ClearChanged();
 		close();

@@ -22,6 +22,7 @@
 
 #include <utility/CanvasDefinition.hpp>
 #include <utility/FFmpegShared.hpp>
+#include <utility/OutputBinding.hpp>
 #include <utility/StreamProfile.hpp>
 
 #include <QPointer>
@@ -74,6 +75,9 @@ private:
 	int pageIndex = 0;
 	bool loading = true;
 	bool loadingOutputs = false;
+	/* Output-binding edits commit immediately for live preview feedback; this is
+	 * the dialog-open snapshot, restored on Cancel and re-baselined on Apply. */
+	OutputBindings outputBindingsBackup;
 	bool forceAuthReload = false;
 	bool forceUpdateCheck = false;
 	int sampleRateIndex = 0;
@@ -172,6 +176,9 @@ private:
 	void CascadeCanvasOutputs(const std::string &canvasUuid, bool enabled);
 	QWidget *BuildCanvasOutputGroup(const char *canvasUuid, const QString &canvasTitle);
 	QWidget *BuildOutputRow(struct OutputBinding &binding);
+	/* Discard uncommitted Outputs-page edits by restoring the dialog-open
+	 * snapshot. No-op when nothing changed. */
+	void RevertOutputBindings();
 
 	void LoadSettings(bool changedOnly);
 
