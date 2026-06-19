@@ -107,6 +107,10 @@ void MultistreamDock::Refresh()
 {
 	refreshing = true;
 
+	/* Drop handles into the about-to-be-destroyed tree before tearing it down. */
+	rowWidgets.clear();
+	cascadeBoxes.clear();
+
 	/* Clear the existing groups. deleteLater (not delete) so any in-flight Qt
 	 * events targeting these widgets unwind safely. */
 	QLayoutItem *item;
@@ -158,6 +162,7 @@ void MultistreamDock::Refresh()
 		cascade->setObjectName("multistreamCascade");
 		cascade->setToolTip(QTStr("Basic.Multistream.Cascade.Tooltip"));
 		cascade->setChecked(allLive);
+		cascadeBoxes[canvasUuid] = cascade;
 		connect(cascade, &QCheckBox::toggled, this, [this, canvasUuid](bool on) {
 			if (refreshing) {
 				return;
@@ -185,9 +190,14 @@ void MultistreamDock::Refresh()
 			QHBoxLayout *rowLayout = new QHBoxLayout(row);
 
 			StreamProfile *p = main->GetStreamProfileManager().Find(binding->profileUuid);
+			const bool profileMissing = !p && !binding->profileUuid.empty();
 			QString profileText = p ? QString::fromStdString(p->DisplayName())
-						: QString::fromUtf8("\xE2\x80\x94");
+						: profileMissing ? QTStr("Basic.Settings.Outputs.ProfileMissing")
+								 : QString::fromUtf8("\xE2\x80\x94");
 			QLabel *profileLabel = new QLabel(profileText);
+			if (profileMissing) {
+				profileLabel->setToolTip(QTStr("Basic.Settings.Outputs.ProfileMissing.Tooltip"));
+			}
 			rowLayout->addWidget(profileLabel);
 
 			QLabel *canvasLabel = new QLabel(canvasName);
@@ -235,6 +245,8 @@ void MultistreamDock::Refresh()
 			});
 			rowLayout->addWidget(toggle);
 
+			rowWidgets[bindingUuid] = {dot, stateText, toggle};
+
 			groupLayout->addWidget(row);
 		}
 
@@ -256,6 +268,55 @@ void MultistreamDock::Refresh()
 	}
 
 	groupsLayout->addStretch();
+
+	refreshing = false;
+}
+
+void MultistreamDock::UpdateStatuses()
+{
+	MultistreamOutput *engine = main->GetMultistreamOutput();
+
+	std::unordered_map<std::string, MultistreamOutput::OutputStatus> byBinding;
+	if (engine) {
+		for (const MultistreamOutput::OutputStatus &s : engine->Statuses()) {
+			byBinding[s.bindingUuid] = s;
+		}
+	}
+
+	/* setChecked below must not re-enter the toggle/cascade handlers. */
+	refreshing = true;
+
+	for (const auto &[bindingUuid, w] : rowWidgets) {
+		MultistreamOutput::State state = MultistreamOutput::State::Idle;
+		QString lastError;
+		auto it = byBinding.find(bindingUuid);
+		if (it != byBinding.end()) {
+			state = it->second.state;
+			lastError = QString::fromStdString(it->second.lastError);
+		}
+		StateStyle style = StyleFor(state);
+
+		w.dot->setStyleSheet(QString("border-radius:6px; background:%1;").arg(style.color));
+		w.stateText->setText(QTStr(style.textKey));
+
+		const bool showError = state == MultistreamOutput::State::Error && !lastError.isEmpty();
+		w.dot->setToolTip(showError ? lastError : QString());
+		w.stateText->setToolTip(showError ? lastError : QString());
+
+		w.toggle->setChecked(engine && engine->IsLive(bindingUuid));
+	}
+
+	for (const auto &[canvasUuid, cascade] : cascadeBoxes) {
+		std::vector<OutputBinding *> bindings = main->GetOutputBindings().ForCanvas(canvasUuid);
+		bool allLive = !bindings.empty();
+		for (OutputBinding *b : bindings) {
+			if (!engine || !engine->IsLive(b->uuid)) {
+				allLive = false;
+				break;
+			}
+		}
+		cascade->setChecked(allLive);
+	}
 
 	refreshing = false;
 }

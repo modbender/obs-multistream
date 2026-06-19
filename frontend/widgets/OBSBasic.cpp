@@ -1131,9 +1131,12 @@ void OBSBasic::OBSInit()
 	multistreamDock->setWidget(multistreamDockWidget);
 	multistreamOutput->onStatusChanged = [this]() {
 		if (multistreamDockWidget) {
-			multistreamDockWidget->Refresh();
+			multistreamDockWidget->UpdateStatuses();
 		}
 	};
+	/* A status tick only changes live state; the binding set changes via the
+	 * Outputs tab, so rebuild the tree on that signal instead. */
+	connect(this, &OBSBasic::OutputBindingsChanged, multistreamDockWidget, &MultistreamDock::Refresh);
 
 	CreateHotkeys();
 

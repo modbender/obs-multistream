@@ -51,6 +51,10 @@ QWidget *OBSBasicSettings::BuildOutputRow(OutputBinding &binding)
 		profileCombo->setCurrentText(QString());
 	}
 
+	/* A non-empty profileUuid that resolves to no profile is a dangling reference
+	 * (the profile was deleted) — distinct from a never-picked binding. */
+	const bool profileMissing = current < 0 && !binding.profileUuid.empty();
+
 	connect(profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		[this, bindingUuid, profileCombo](int) {
 			if (loadingOutputs) {
@@ -65,6 +69,13 @@ QWidget *OBSBasicSettings::BuildOutputRow(OutputBinding &binding)
 			RebuildOutputList();
 		});
 	layout->addWidget(profileCombo, 1);
+
+	if (profileMissing) {
+		QLabel *badge = new QLabel(QTStr("Basic.Settings.Outputs.ProfileMissing"));
+		badge->setObjectName("outputMissingBadge");
+		badge->setToolTip(QTStr("Basic.Settings.Outputs.ProfileMissing.Tooltip"));
+		layout->addWidget(badge);
+	}
 
 	const bool inUse = main->GetOutputBindings().ProfileEnabledElsewhere(binding.uuid, binding.profileUuid);
 	if (inUse) {

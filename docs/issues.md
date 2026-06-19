@@ -74,14 +74,21 @@ The items below were deliberately **not** auto-fixed and are recorded here.
   intentionally: document bindings as immediate-commit, or route them through the
   dialog's apply/cancel path.
 
-- **C2 (minor UX) — a binding referencing a deleted stream profile keeps the
-  dangling uuid.** The dock and Outputs row null-check `Find()` and degrade to a
-  blank "—" (no crash), but "profile missing" is not surfaced distinctly from
-  "unset," and the stale uuid persists to disk.
+- **C2 (minor UX) — RESOLVED.** A binding whose `profileUuid` is non-empty but
+  resolves to no profile now reads as a distinct "profile deleted" state, separate
+  from an unset "—": the Multistream dock row shows the labeled text with an
+  explanatory tooltip, and the Outputs tab shows an `outputMissingBadge` next to
+  the (blank) profile combo. The stale uuid still persists until the user re-picks
+  or removes the output — surfacing it is the fix; auto-clearing it is not, since
+  the user may want to recreate the named profile.
 
-- **P2 (perf, fine at current scale) — `MultistreamDock::Refresh` rebuilds the
-  whole group/row widget tree on every `onStatusChanged`.** Acceptable for a
-  handful of outputs; revisit with an incremental update if binding counts grow.
+- **P2 (perf) — RESOLVED.** Split `MultistreamDock` refresh into structural
+  (`Refresh`, full rebuild) and status-only (`UpdateStatuses`, updates the dot /
+  text / toggles / cascade in place). The engine's `onStatusChanged` tick — which
+  never alters the binding set — now calls `UpdateStatuses`; the binding set is
+  rebuilt via a new `OutputBindingsChanged -> Refresh` connection. That connection
+  also closes a latent staleness bug: editing bindings in Settings while the dock
+  was visible previously left it stale until the next status tick or re-show.
 
 - **R1 (cleanup) — RESOLVED.** Added `OBSBasic::ForEachStreamableCanvas(cb)`
   (Default canvas first, then each non-ephemeral additional canvas; yields
