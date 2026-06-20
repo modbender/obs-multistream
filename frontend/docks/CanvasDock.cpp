@@ -1,13 +1,12 @@
 #include "CanvasDock.hpp"
 
-#include <components/Multiview.hpp>
 #include <dialogs/CanvasEditorDialog.hpp>
 #include <dialogs/NameDialog.hpp>
 #include <utility/CanvasDefinition.hpp>
 #include <utility/CanvasManager.hpp>
 #include <utility/MultistreamOutput.hpp>
-#include <utility/display-helpers.hpp>
 #include <widgets/OBSBasic.hpp>
+#include <widgets/OBSBasicPreview.hpp>
 #include <widgets/OBSQTDisplay.hpp>
 
 #include <qt-wrappers.hpp>
@@ -35,8 +34,6 @@
 
 namespace {
 constexpr uint32_t kPreviewBackground = 0x000000;
-constexpr uint32_t kFallbackWidth = 1920;
-constexpr uint32_t kFallbackHeight = 1080;
 } // namespace
 
 CanvasDock::CanvasDock(OBSBasic *main_, OBSCanvas canvas_, QWidget *parent)
@@ -124,7 +121,9 @@ CanvasDock::CanvasDock(OBSBasic *main_, OBSCanvas canvas_, QWidget *parent)
 	sourceToolbar->addStretch();
 	sceneLayout->addLayout(sourceToolbar);
 
-	preview = new OBSQTDisplay();
+	preview = new OBSBasicPreview(nullptr);
+	preview->SetTargetCanvas(canvas);
+	preview->Init();
 
 	QWidget *placeholder = new QWidget();
 	QVBoxLayout *placeholderLayout = new QVBoxLayout(placeholder);
@@ -188,7 +187,7 @@ CanvasDock::CanvasDock(OBSBasic *main_, OBSCanvas canvas_, QWidget *parent)
 		menu.exec(sceneList->mapToGlobal(pos));
 	});
 	auto addDrawCallback = [this]() {
-		obs_display_add_draw_callback(preview->GetDisplay(), OBSRender, this);
+		obs_display_add_draw_callback(preview->GetDisplay(), OBSBasicPreview::CanvasPreviewRender, preview);
 		obs_display_set_background_color(preview->GetDisplay(), kPreviewBackground);
 		/* The display is created async, possibly after the initial gate compute;
 		 * re-apply so a gated canvas stops its GPU render rather than just
@@ -235,41 +234,7 @@ CanvasDock::~CanvasDock()
 
 	/* libobs blocks until the graphics thread is out of the callback, so the
 	 * canvas ref is safe to drop after this returns. */
-	obs_display_remove_draw_callback(preview->GetDisplay(), OBSRender, this);
-}
-
-void CanvasDock::OBSRender(void *data, uint32_t cx, uint32_t cy)
-{
-	CanvasDock *window = static_cast<CanvasDock *>(data);
-
-	if (!window->ready) {
-		return;
-	}
-
-	/* No enabled output for this canvas: the placeholder is shown, so skip the
-	 * canvas render entirely rather than draw behind it. */
-	if (window->previewGated) {
-		return;
-	}
-
-	uint32_t targetCX = kFallbackWidth;
-	uint32_t targetCY = kFallbackHeight;
-	struct obs_video_info ovi;
-	if (obs_canvas_get_video_info(window->canvas, &ovi)) {
-		targetCX = std::max(ovi.base_width, 1u);
-		targetCY = std::max(ovi.base_height, 1u);
-	}
-
-	int x, y;
-	float scale;
-	GetScaleAndCenterPos(targetCX, targetCY, cx, cy, x, y, scale);
-
-	int newCX = int(scale * float(targetCX));
-	int newCY = int(scale * float(targetCY));
-
-	startRegion(x, y, newCX, newCY, 0.0f, float(targetCX), 0.0f, float(targetCY));
-	obs_canvas_render(window->canvas);
-	endRegion();
+	obs_display_remove_draw_callback(preview->GetDisplay(), OBSBasicPreview::CanvasPreviewRender, preview);
 }
 
 void CanvasDock::SceneListChanged(void *data, calldata_t *)

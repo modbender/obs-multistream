@@ -8,7 +8,7 @@
 #include <vector>
 
 class OBSBasic;
-class OBSQTDisplay;
+class OBSBasicPreview;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
@@ -41,8 +41,6 @@ protected:
 	void resizeEvent(QResizeEvent *event) override;
 
 private:
-	static void OBSRender(void *data, uint32_t cx, uint32_t cy);
-
 	static void SceneListChanged(void *data, calldata_t *params);
 	static void ChannelChanged(void *data, calldata_t *params);
 	static void SourceListChanged(void *data, calldata_t *params);
@@ -74,7 +72,7 @@ private:
 	OBSCanvas canvas;
 	std::string canvasUuid;
 
-	OBSQTDisplay *preview = nullptr;
+	OBSBasicPreview *preview = nullptr;
 	QStackedWidget *previewStack = nullptr;
 	QListWidget *sceneList = nullptr;
 	QListWidget *sourceList = nullptr;
