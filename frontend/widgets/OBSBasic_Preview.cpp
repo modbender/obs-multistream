@@ -141,6 +141,9 @@ void OBSBasic::RenderMain(void *data, uint32_t, uint32_t)
 	window->previewCX = int(window->previewScale * float(ovi.base_width));
 	window->previewCY = int(window->previewScale * float(ovi.base_height));
 
+	window->ui->preview->SetViewport(window->previewX, window->previewY, window->previewCX,
+					 window->previewCY, window->previewScale);
+
 	gs_viewport_push();
 	gs_projection_push();
 
@@ -235,6 +238,11 @@ void OBSBasic::ResizePreview(uint32_t cx, uint32_t cy)
 
 	previewX += float(PREVIEW_EDGE_SIZE);
 	previewY += float(PREVIEW_EDGE_SIZE);
+
+	/* previewCX/CY are computed only in RenderMain, so on the resize path they carry
+	 * the previous frame's values; RenderMain re-mirrors fresh ones before any reader
+	 * (DrawSpacingHelpers) runs. Don't read surfaceCX/CY off the resize path. */
+	ui->preview->SetViewport(previewX, previewY, previewCX, previewCY, previewScale);
 }
 
 void OBSBasic::on_preview_customContextMenuRequested()

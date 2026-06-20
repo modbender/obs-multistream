@@ -84,7 +84,7 @@ private:
 	std::vector<obs_sceneitem_t *> selectedItems;
 	std::mutex selectMutex;
 
-	static vec2 GetMouseEventPos(QMouseEvent *event);
+	vec2 GetMouseEventPos(QMouseEvent *event);
 	static bool FindSelected(obs_scene_t *scene, obs_sceneitem_t *item, void *param);
 	static bool DrawSelectedOverflow(obs_scene_t *scene, obs_sceneitem_t *item, void *param);
 	static bool DrawSelectedItem(obs_scene_t *scene, obs_sceneitem_t *item, void *param);
@@ -125,6 +125,15 @@ private:
 	 * (the per-canvas dock surface). */
 	obs_canvas_t *targetCanvas = nullptr;
 
+	/* This surface's own viewport mapping (px<->canvas). For the main preview these
+	 * mirror OBSBasic::previewX/Y/CX/CY/Scale every frame (kept in lockstep by
+	 * RenderMain/ResizePreview) so behavior is unchanged; for a canvas dock surface
+	 * only these are written, by the widget's own draw/resize path. Paint and
+	 * hit-test both read THESE, never OBSBasic's copy, so they always agree. */
+	int surfaceX = 0, surfaceY = 0;
+	int surfaceCX = 0, surfaceCY = 0;
+	float surfaceScale = 0.0f;
+
 	/* The scene this surface edits: main current scene when targetCanvas is null,
 	 * else the target canvas's current scene. Every scene-touching helper routes
 	 * through here so the null path stays identical to the main preview. */
@@ -158,6 +167,15 @@ public:
 
 	void DrawOverflow();
 	void DrawSceneEditing();
+
+	inline void SetViewport(int x, int y, int cx, int cy, float scale)
+	{
+		surfaceX = x;
+		surfaceY = y;
+		surfaceCX = cx;
+		surfaceCY = cy;
+		surfaceScale = scale;
+	}
 
 	inline void SetLocked(bool newLockedVal) { locked = newLockedVal; }
 	inline void ToggleLocked() { locked = !locked; }

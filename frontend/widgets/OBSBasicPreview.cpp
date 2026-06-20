@@ -70,11 +70,11 @@ vec2 OBSBasicPreview::GetMouseEventPos(QMouseEvent *event)
 {
 	OBSBasic *main = OBSBasic::Get();
 	float pixelRatio = main->GetDevicePixelRatio();
-	float scale = pixelRatio / main->previewScale;
+	float scale = pixelRatio / surfaceScale;
 	QPoint qtPos = event->pos();
 	vec2 pos;
-	vec2_set(&pos, (qtPos.x() - main->previewX / pixelRatio) * scale,
-		 (qtPos.y() - main->previewY / pixelRatio) * scale);
+	vec2_set(&pos, (qtPos.x() - surfaceX / pixelRatio) * scale,
+		 (qtPos.y() - surfaceY / pixelRatio) * scale);
 
 	return pos;
 }
@@ -183,7 +183,6 @@ static vec3 GetTransformedPos(float x, float y, const matrix4 &mat)
 
 vec3 OBSBasicPreview::GetSnapOffset(const vec3 &tl, const vec3 &br)
 {
-	OBSBasic *main = OBSBasic::Get();
 	vec2 screenSize;
 	vec2_zero(&screenSize);
 
@@ -205,7 +204,7 @@ vec3 OBSBasicPreview::GetSnapOffset(const vec3 &tl, const vec3 &br)
 	const bool centerSnap = config_get_bool(App()->GetUserConfig(), "BasicWindow", "CenterSnapping");
 
 	const float clampDist =
-		config_get_double(App()->GetUserConfig(), "BasicWindow", "SnapDistance") / main->previewScale;
+		config_get_double(App()->GetUserConfig(), "BasicWindow", "SnapDistance") / surfaceScale;
 	const float centerX = br.x - (br.x - tl.x) / 2.0f;
 	const float centerY = br.y - (br.y - tl.y) / 2.0f;
 
@@ -466,7 +465,7 @@ void OBSBasicPreview::GetStretchHandleData(const vec2 &pos, bool ignoreGroup)
 		return;
 	}
 
-	float scale = main->previewScale / main->GetDevicePixelRatio();
+	float scale = surfaceScale / main->GetDevicePixelRatio();
 	vec2 scaled_pos = pos;
 	vec2_divf(&scaled_pos, &scaled_pos, scale);
 	HandleFindData data(scaled_pos, scale);
@@ -590,8 +589,8 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 
 	OBSBasic *main = OBSBasic::Get();
 	float pixelRatio = main->GetDevicePixelRatio();
-	float x = pos.x() - main->previewX / pixelRatio;
-	float y = pos.y() - main->previewY / pixelRatio;
+	float x = pos.x() - surfaceX / pixelRatio;
+	float y = pos.y() - surfaceY / pixelRatio;
 	Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
 	bool altDown = (modifiers & Qt::AltModifier);
 	bool shiftDown = (modifiers & Qt::ShiftModifier);
@@ -629,7 +628,7 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 	vec2_set(&startPos, x, y);
 	GetStretchHandleData(startPos, false);
 
-	vec2_divf(&startPos, &startPos, main->previewScale / pixelRatio);
+	vec2_divf(&startPos, &startPos, surfaceScale / pixelRatio);
 	startPos.x = std::round(startPos.x);
 	startPos.y = std::round(startPos.y);
 
@@ -949,7 +948,6 @@ static bool GetSourceSnapOffset(obs_scene_t * /* scene */, obs_sceneitem_t *item
 
 void OBSBasicPreview::SnapItemMovement(vec2 &offset)
 {
-	OBSBasic *main = OBSBasic::Get();
 	OBSScene scene = TargetScene();
 
 	SelectedItemBounds data;
@@ -974,7 +972,7 @@ void OBSBasicPreview::SnapItemMovement(vec2 &offset)
 	}
 
 	const float clampDist =
-		config_get_double(App()->GetUserConfig(), "BasicWindow", "SnapDistance") / main->previewScale;
+		config_get_double(App()->GetUserConfig(), "BasicWindow", "SnapDistance") / surfaceScale;
 
 	OffsetData offsetData;
 	offsetData.clampDist = clampDist;
@@ -1686,8 +1684,8 @@ void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 			mousePos = pos;
 			OBSBasic *main = OBSBasic::Get();
 			float scale = main->GetDevicePixelRatio();
-			float x = qtPos.x() - main->previewX / scale;
-			float y = qtPos.y() - main->previewY / scale;
+			float x = qtPos.x() - surfaceX / scale;
+			float y = qtPos.y() - surfaceY / scale;
 			vec2_set(&startPos, x, y);
 			updateCursor = true;
 		}
@@ -2198,13 +2196,11 @@ void OBSBasicPreview::DrawOverflow()
 		overflow = gs_texture_create_from_file(path.c_str());
 	}
 
-	OBSBasic *main = OBSBasic::Get();
-
 	OBSScene scene = TargetScene();
 
 	if (scene) {
 		gs_matrix_push();
-		gs_matrix_scale3f(main->previewScale, main->previewScale, 1.0f);
+		gs_matrix_scale3f(surfaceScale, surfaceScale, 1.0f);
 		obs_scene_enum_items(scene, DrawSelectedOverflow, this);
 		gs_matrix_pop();
 	}
@@ -2222,13 +2218,11 @@ void OBSBasicPreview::DrawSceneEditing()
 
 	GS_DEBUG_MARKER_BEGIN(GS_DEBUG_COLOR_DEFAULT, "DrawSceneEditing");
 
-	OBSBasic *main = OBSBasic::Get();
-
 	OBSScene scene = TargetScene();
 
 	if (scene) {
 		gs_matrix_push();
-		gs_matrix_scale3f(main->previewScale, main->previewScale, 1.0f);
+		gs_matrix_scale3f(surfaceScale, surfaceScale, 1.0f);
 		obs_scene_enum_items(scene, DrawSelectedItem, this);
 		gs_matrix_pop();
 	}
@@ -2246,8 +2240,8 @@ void OBSBasicPreview::DrawSceneEditing()
 		}
 
 		while (gs_effect_loop(solidEffect, "Solid")) {
-			DrawSelectionBox(startPos.x * main->previewScale, startPos.y * main->previewScale,
-					 mousePos.x * main->previewScale, mousePos.y * main->previewScale, rectFill);
+			DrawSelectionBox(startPos.x * surfaceScale, startPos.y * surfaceScale,
+					 mousePos.x * surfaceScale, mousePos.y * surfaceScale, rectFill);
 		}
 	}
 
@@ -2611,17 +2605,17 @@ void OBSBasicPreview::DrawSpacingHelpers()
 
 	// Init viewport
 	vec3 viewport;
-	vec3_set(&viewport, main->previewCX, main->previewCY, 1.0f);
+	vec3_set(&viewport, surfaceCX, surfaceCY, 1.0f);
 
 	vec3_div(&left, &left, &viewport);
 	vec3_div(&right, &right, &viewport);
 	vec3_div(&top, &top, &viewport);
 	vec3_div(&bottom, &bottom, &viewport);
 
-	vec3_mulf(&left, &left, main->previewScale);
-	vec3_mulf(&right, &right, main->previewScale);
-	vec3_mulf(&top, &top, main->previewScale);
-	vec3_mulf(&bottom, &bottom, main->previewScale);
+	vec3_mulf(&left, &left, surfaceScale);
+	vec3_mulf(&right, &right, surfaceScale);
+	vec3_mulf(&top, &top, surfaceScale);
+	vec3_mulf(&bottom, &bottom, surfaceScale);
 
 	// Draw spacer lines and labels
 	vec3 start, end;
