@@ -196,6 +196,10 @@ void CanvasEditorDialog::BuildUI()
 	QWidget *advTab = new QWidget();
 	QVBoxLayout *advTabLayout = new QVBoxLayout(advTab);
 	QFormLayout *advForm = new QFormLayout();
+	/* Match the Video/Audio tabs (whose OBSPropertiesView right-aligns labels and
+	 * grows fields) so the labels hug their fields instead of floating left. */
+	advForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	advForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
 	colorFormat = new QComboBox();
 	colorFormat->addItem(QTStr("Basic.Settings.Advanced.Video.ColorFormat.NV12"), "NV12");
@@ -244,6 +248,10 @@ void CanvasEditorDialog::BuildUI()
 	advForm->addRow(QTStr("Basic.Settings.Advanced.Video.HdrNominalPeakLevel"), hdrNominalPeak);
 
 	advTabLayout->addLayout(advForm);
+	/* The Video/Audio tabs end in an Expanding OBSPropertiesView that packs their
+	 * controls to the top; this form has no such item, so absorb the slack here to
+	 * avoid the rows spreading vertically across the tab. */
+	advTabLayout->addStretch();
 	if (!def.isDefault) {
 		colorUseDefault = new idian::ToggleSwitch(def.color.useDefault);
 		QWidget *row = new QWidget();
