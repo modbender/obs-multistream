@@ -225,10 +225,16 @@ std::optional<OBSSource> setupNewSource(QWidget *parent, const char *id, const c
 } // namespace
 
 OBSBasicSourceSelect::OBSBasicSourceSelect(OBSBasic *parent, undo_stack &undo_s)
+	: OBSBasicSourceSelect(parent, undo_s, OBSScene())
+{
+}
+
+OBSBasicSourceSelect::OBSBasicSourceSelect(OBSBasic *parent, undo_stack &undo_s, OBSScene targetScene_)
 	: QDialog(parent),
 	  ui(new Ui::OBSBasicSourceSelect),
-	  undo_s(undo_s),
 	  selectedTypeId(kRecentTypeId.toString()),
+	  undo_s(undo_s),
+	  targetScene(targetScene_),
 	  sourceButtons(new QButtonGroup(this))
 {
 	setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
@@ -757,7 +763,8 @@ void OBSBasicSourceSelect::createNew()
 		return;
 	}
 
-	std::optional<OBSSceneItem> addResult = setupExistingSource(obs_source_get_uuid(newSource), visible, false);
+	std::optional<OBSSceneItem> addResult =
+		setupExistingSource(obs_source_get_uuid(newSource), visible, false, nullptr, targetScene);
 	if (!addResult.has_value()) {
 		return;
 	}
@@ -765,40 +772,49 @@ void OBSBasicSourceSelect::createNew()
 	OBSSceneItem item = addResult.value();
 
 	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
-	std::string sceneUuid = obs_source_get_uuid(main->GetCurrentSceneSource());
-	auto undo = [sceneUuid](const std::string &data) {
+	OBSScene actionScene = targetScene ? targetScene : main->GetCurrentScene();
+	std::string sceneUuid = obs_source_get_uuid(obs_scene_get_source(actionScene));
+	const bool isCanvas = (bool)targetScene;
+
+	auto undo = [sceneUuid, isCanvas](const std::string &data) {
 		OBSBasic *main = OBSBasic::Get();
 
 		OBSSourceAutoRelease source = obs_get_source_by_uuid(data.c_str());
 		obs_source_remove(source);
 
-		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.c_str());
-		main->SetCurrentScene(sceneSource.Get(), true);
+		if (!isCanvas) {
+			OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.c_str());
+			main->SetCurrentScene(sceneSource.Get(), true);
+		}
 	};
 	OBSDataAutoRelease wrapper = obs_data_create();
 	obs_data_set_string(wrapper, "id", id);
 	obs_data_set_int(wrapper, "item_id", obs_sceneitem_get_id(item));
 	obs_data_set_string(wrapper, "name", ui->newSourceName->text().toUtf8().constData());
 	obs_data_set_bool(wrapper, "visible", visible);
+	obs_data_set_string(wrapper, "scene_uuid", sceneUuid.c_str());
 
-	auto redo = [sceneUuid](const std::string &data) {
+	auto redo = [isCanvas](const std::string &data) {
 		OBSBasic *main = OBSBasic::Get();
-
-		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.c_str());
-		main->SetCurrentScene(sceneSource.Get(), true);
 
 		OBSDataAutoRelease dat = obs_data_create_from_json(data.c_str());
 
-		std::optional<OBSSource> createResult =
-			setupNewSource(NULL, obs_data_get_string(dat, "id"), obs_data_get_string(dat, "name"));
+		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(obs_data_get_string(dat, "scene_uuid"));
+		OBSScene redoScene = obs_scene_from_source(sceneSource);
+		if (!isCanvas) {
+			main->SetCurrentScene(sceneSource.Get(), true);
+		}
+
+		std::optional<OBSSource> createResult = setupNewSource(NULL, obs_data_get_string(dat, "id"),
+								       obs_data_get_string(dat, "name"), redoScene);
 		if (!createResult.has_value()) {
 			return;
 		}
 
 		OBSSource source = createResult.value();
 
-		std::optional<OBSSceneItem> addResult =
-			setupExistingSource(obs_source_get_uuid(source), obs_data_get_bool(dat, "visible"), false);
+		std::optional<OBSSceneItem> addResult = setupExistingSource(
+			obs_source_get_uuid(source), obs_data_get_bool(dat, "visible"), false, nullptr, redoScene);
 		if (!addResult.has_value()) {
 			return;
 		}
@@ -823,19 +839,23 @@ void OBSBasicSourceSelect::addExisting(const std::string &uuid, bool visible)
 	}
 
 	QString name = obs_source_get_name(source);
-	setupExistingSource(uuid, visible, false);
+	setupExistingSource(uuid, visible, false, nullptr, targetScene);
 
 	OBSBasic *main = OBSBasic::Get();
-	const char *sceneUuidPtr = obs_source_get_uuid(main->GetCurrentSceneSource());
+	OBSScene actionScene = targetScene ? targetScene : main->GetCurrentScene();
+	const char *sceneUuidPtr = obs_source_get_uuid(obs_scene_get_source(actionScene));
 	if (!sceneUuidPtr) {
 		return;
 	}
 
 	std::string sceneUuid{sceneUuidPtr};
+	const bool isCanvas = (bool)targetScene;
 
-	auto undo = [sceneUuid, main](const std::string &) {
+	auto undo = [sceneUuid, isCanvas, main](const std::string &) {
 		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.c_str());
-		main->SetCurrentScene(sceneSource.Get(), true);
+		if (!isCanvas) {
+			main->SetCurrentScene(sceneSource.Get(), true);
+		}
 
 		OBSScene scene = obs_scene_from_source(sceneSource);
 		OBSSceneItem item;
@@ -849,11 +869,14 @@ void OBSBasicSourceSelect::addExisting(const std::string &uuid, bool visible)
 		obs_sceneitem_remove(item);
 	};
 
-	auto redo = [sceneUuid, main, uuid, visible](const std::string &) {
+	auto redo = [sceneUuid, isCanvas, main, uuid, visible](const std::string &) {
 		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.c_str());
-		main->SetCurrentScene(sceneSource.Get(), true);
+		OBSScene scene = obs_scene_from_source(sceneSource);
+		if (!isCanvas) {
+			main->SetCurrentScene(sceneSource.Get(), true);
+		}
 
-		setupExistingSource(uuid, visible, false);
+		setupExistingSource(uuid, visible, false, nullptr, scene);
 	};
 
 	undo_s.add_action(QTStr("Undo.Add").arg(name), undo, redo, "", "");

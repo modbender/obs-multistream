@@ -34,6 +34,7 @@ class OBSBasicSourceSelect : public QDialog {
 
 public:
 	OBSBasicSourceSelect(OBSBasic *parent, undo_stack &undo_s);
+	OBSBasicSourceSelect(OBSBasic *parent, undo_stack &undo_s, OBSScene targetScene);
 	~OBSBasicSourceSelect();
 
 	OBSSource newSource;
@@ -47,6 +48,7 @@ private:
 	std::unique_ptr<Ui::OBSBasicSourceSelect> ui;
 	QString selectedTypeId;
 	undo_stack &undo_s;
+	OBSScene targetScene; // empty = program current scene (unchanged behavior)
 
 	QPointer<QButtonGroup> sourceButtons;
 
