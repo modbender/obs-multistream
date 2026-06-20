@@ -222,6 +222,38 @@ main program canvas in several places.
     machine. Rejected as invasive surgery for marginal gain; the real need (editing
     a non-default canvas) is better served by 3a's editable docks. Default-in-center
     + additionals-floating is the shipped model.
+- 🔭 **3d — Canvas-dock editor parity (scenes & sources lists).** The canvas dock's
+  scene/source lists are stripped down vs the main window's; bring them to parity:
+  - **Add Source** — the dock's `+` (`CanvasDock::AddSource`) only lists *existing*
+    global input sources to attach (Model 1: shared sources), so it shows however
+    many inputs already exist. The main window's `+` opens the source-*type* picker
+    to *create* a new source. Add a "create new source" path to the dock (likely
+    reuse `OBSBasicSourceSelect`, scoped to the canvas scene) so new sources can be
+    made from the dock, not just attached.
+  - **Source-list context menu** — the dock's `sourceList` has no
+    `CustomContextMenu` wired at all (only `sceneList` does), so right-click is dead.
+    Add a context menu reaching parity with the main Sources tree: Edit Transform /
+    reset / fit / center / flip, order, scale filtering, blending, deinterlacing,
+    Filters, Properties, Rename, Remove. Most of this is tied to the main window's
+    current scene today, so it shares 3a's parameterization work.
+  - **Edit Transform** — numeric transform dialog wired to the dock's selected
+    scene item (complements 3a's drag-to-transform in the preview).
+  - **Scene-list context menu** — the dock's scene menu is only Add/Rename/Remove;
+    the main Scenes menu adds Duplicate, copy/paste filters, order, Filters,
+    Projector, Show in Multiview, etc. Bring to parity where it makes sense per
+    canvas.
+  Sequence after 3a (the editable preview is the foundation; the context menus and
+  add-source reuse the same main-scene-decoupling).
+- 🔭 **3e — Stats dock: multi-stream monitoring (needs design).** OBS's stock Stats
+  dock reports a single output (the main stream/recording). With the encode-once
+  fan-out engine, the user wants to monitor **all** outputs at once — per-binding
+  bitrate / dropped frames / reconnects / CPU-GPU, grouped by canvas, plus the
+  shared per-canvas encode stats. **Open design question (no approach yet):**
+  whether to extend/replace the stock `OBSBasicStats` dock or build a new
+  multistream-stats panel reading `MultistreamOutput`'s per-`obs_output` handles
+  (it already tracks them); how to present N outputs compactly; and what libobs
+  per-output stats (`obs_output_get_total_frames`/`_frames_dropped`/congestion) map
+  cleanly per binding. Brainstorm before planning.
 
 ---
 
