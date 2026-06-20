@@ -48,6 +48,24 @@ void OBSBasicPreview::Init()
 	obs_leave_graphics();
 }
 
+OBSScene OBSBasicPreview::TargetScene() const
+{
+	OBSBasic *main = OBSBasic::Get();
+	if (!targetCanvas) {
+		return main->GetCurrentScene();
+	}
+	OBSSource source = main->GetCanvasCurrentScene(targetCanvas);
+	return obs_scene_from_source(source);
+}
+
+bool OBSBasicPreview::TargetVideoInfo(obs_video_info &ovi) const
+{
+	if (!targetCanvas) {
+		return obs_get_video_info(&ovi);
+	}
+	return obs_canvas_get_video_info(targetCanvas, &ovi);
+}
+
 vec2 OBSBasicPreview::GetMouseEventPos(QMouseEvent *event)
 {
 	OBSBasic *main = OBSBasic::Get();
@@ -163,24 +181,17 @@ static vec3 GetTransformedPos(float x, float y, const matrix4 &mat)
 	return result;
 }
 
-static inline vec2 GetOBSScreenSize()
-{
-	obs_video_info ovi;
-	vec2 size;
-	vec2_zero(&size);
-
-	if (obs_get_video_info(&ovi)) {
-		size.x = float(ovi.base_width);
-		size.y = float(ovi.base_height);
-	}
-
-	return size;
-}
-
 vec3 OBSBasicPreview::GetSnapOffset(const vec3 &tl, const vec3 &br)
 {
 	OBSBasic *main = OBSBasic::Get();
-	vec2 screenSize = GetOBSScreenSize();
+	vec2 screenSize;
+	vec2_zero(&screenSize);
+
+	obs_video_info ovi;
+	if (TargetVideoInfo(ovi)) {
+		screenSize.x = float(ovi.base_width);
+		screenSize.y = float(ovi.base_height);
+	}
 	vec3 clampOffset;
 
 	vec3_zero(&clampOffset);
@@ -231,9 +242,7 @@ vec3 OBSBasicPreview::GetSnapOffset(const vec3 &tl, const vec3 &br)
 
 OBSSceneItem OBSBasicPreview::GetItemAtPos(const vec2 &pos, bool selectBelow)
 {
-	OBSBasic *main = OBSBasic::Get();
-
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	if (!scene) {
 		return OBSSceneItem();
 	}
@@ -289,9 +298,7 @@ static bool CheckItemSelected(obs_scene_t * /* scene */, obs_sceneitem_t *item, 
 
 bool OBSBasicPreview::SelectedAtPos(const vec2 &pos)
 {
-	OBSBasic *main = OBSBasic::Get();
-
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	if (!scene) {
 		return false;
 	}
@@ -454,7 +461,7 @@ void OBSBasicPreview::GetStretchHandleData(const vec2 &pos, bool ignoreGroup)
 {
 	OBSBasic *main = OBSBasic::Get();
 
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	if (!scene) {
 		return;
 	}
@@ -613,7 +620,7 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 		vec2 s;
 		SceneFindBoxData data(s, s);
 
-		obs_scene_enum_items(main->GetCurrentScene(), FindSelected, &data);
+		obs_scene_enum_items(TargetScene(), FindSelected, &data);
 
 		std::lock_guard<std::mutex> lock(selectMutex);
 		selectedItems = data.sceneItems;
@@ -630,7 +637,7 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 	vec2_zero(&lastMoveOffset);
 
 	mousePos = startPos;
-	wrapper = obs_scene_save_transform_states(main->GetCurrentScene(), true);
+	wrapper = obs_scene_save_transform_states(TargetScene(), true);
 	changed = false;
 }
 
@@ -713,9 +720,7 @@ static bool select_one(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *p
 
 void OBSBasicPreview::DoSelect(const vec2 &pos)
 {
-	OBSBasic *main = OBSBasic::Get();
-
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	OBSSceneItem item = GetItemAtPos(pos, true);
 
 	obs_scene_enum_items(scene, select_one, (obs_sceneitem_t *)item);
@@ -809,7 +814,7 @@ void OBSBasicPreview::mouseReleaseEvent(QMouseEvent *event)
 		selectedItems.clear();
 	}
 	OBSBasic *main = OBSBasic::Get();
-	OBSDataAutoRelease rwrapper = obs_scene_save_transform_states(main->GetCurrentScene(), true);
+	OBSDataAutoRelease rwrapper = obs_scene_save_transform_states(TargetScene(), true);
 
 	auto undo_redo = [](const std::string &data) {
 		OBSDataAutoRelease dat = obs_data_create_from_json(data.c_str());
@@ -945,7 +950,7 @@ static bool GetSourceSnapOffset(obs_scene_t * /* scene */, obs_sceneitem_t *item
 void OBSBasicPreview::SnapItemMovement(vec2 &offset)
 {
 	OBSBasic *main = OBSBasic::Get();
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 
 	SelectedItemBounds data;
 	obs_scene_enum_items(scene, AddItemBounds, &data);
@@ -1022,8 +1027,7 @@ static bool move_items(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *p
 void OBSBasicPreview::MoveItems(const vec2 &pos)
 {
 	Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
-	OBSBasic *main = OBSBasic::Get();
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 
 	vec2 offset, moveOffset;
 	vec2_sub(&offset, &pos, &startPos);
@@ -1199,9 +1203,7 @@ static bool FindItemsInBox(obs_scene_t * /* scene */, obs_sceneitem_t *item, voi
 
 void OBSBasicPreview::BoxItems(const vec2 &startPos, const vec2 &pos)
 {
-	OBSBasic *main = OBSBasic::Get();
-
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	if (!scene) {
 		return;
 	}
@@ -1551,8 +1553,6 @@ void OBSBasicPreview::StretchItem(const vec2 &pos)
 
 void OBSBasicPreview::RotateItem(const vec2 &pos)
 {
-	OBSBasic *main = OBSBasic::Get();
-	OBSScene scene = main->GetCurrentScene();
 	Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
 	bool shiftDown = (modifiers & Qt::ShiftModifier);
 	bool ctrlDown = (modifiers & Qt::ControlModifier);
@@ -1639,7 +1639,7 @@ void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 
 			selectionBox = false;
 
-			OBSScene scene = main->GetCurrentScene();
+			OBSScene scene = TargetScene();
 			obs_sceneitem_t *group = obs_sceneitem_get_group(scene, stretchItem);
 			if (group) {
 				vec3 group_pos;
@@ -2200,7 +2200,7 @@ void OBSBasicPreview::DrawOverflow()
 
 	OBSBasic *main = OBSBasic::Get();
 
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 
 	if (scene) {
 		gs_matrix_push();
@@ -2224,7 +2224,7 @@ void OBSBasicPreview::DrawSceneEditing()
 
 	OBSBasic *main = OBSBasic::Get();
 
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 
 	if (scene) {
 		gs_matrix_push();
@@ -2353,23 +2353,21 @@ static obs_source_t *CreateLabel(float pixelRatio, int i)
 	return obs_source_create_private(text_source_id, name, settings);
 }
 
-static void SetLabelText(int sourceIndex, int px)
+void OBSBasicPreview::SetLabelText(int sourceIndex, int px)
 {
-	OBSBasicPreview *prev = OBSBasicPreview::Get();
-
-	if (px == prev->spacerPx[sourceIndex]) {
+	if (px == spacerPx[sourceIndex]) {
 		return;
 	}
 
 	std::string text = std::to_string(px) + " px";
 
-	obs_source_t *source = prev->spacerLabel[sourceIndex];
+	obs_source_t *source = spacerLabel[sourceIndex];
 
 	OBSDataAutoRelease settings = obs_source_get_settings(source);
 	obs_data_set_string(settings, "text", text.c_str());
 	obs_source_update(source, settings);
 
-	prev->spacerPx[sourceIndex] = px;
+	spacerPx[sourceIndex] = px;
 }
 
 static void DrawLabel(OBSSource source, vec3 &pos, vec3 &viewport)
@@ -2424,7 +2422,7 @@ static void DrawSpacingLine(vec3 &start, vec3 &end, vec3 &viewport, float pixelR
 	gs_technique_end(tech);
 }
 
-static void RenderSpacingHelper(int sourceIndex, vec3 &start, vec3 &end, vec3 &viewport, float pixelRatio)
+void OBSBasicPreview::RenderSpacingHelper(int sourceIndex, vec3 &start, vec3 &end, vec3 &viewport, float pixelRatio)
 {
 	bool horizontal = (sourceIndex == 2 || sourceIndex == 3);
 
@@ -2436,7 +2434,7 @@ static void RenderSpacingHelper(int sourceIndex, vec3 &start, vec3 &end, vec3 &v
 	float length = vec3_dist(&start, &end);
 
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	TargetVideoInfo(ovi);
 
 	float px;
 
@@ -2450,8 +2448,7 @@ static void RenderSpacingHelper(int sourceIndex, vec3 &start, vec3 &end, vec3 &v
 		return;
 	}
 
-	OBSBasicPreview *prev = OBSBasicPreview::Get();
-	obs_source_t *source = prev->spacerLabel[sourceIndex];
+	obs_source_t *source = spacerLabel[sourceIndex];
 	vec3 labelSize, labelPos;
 	vec3_set(&labelSize, obs_source_get_width(source), obs_source_get_height(source), 1.0f);
 
@@ -2488,7 +2485,7 @@ void OBSBasicPreview::DrawSpacingHelpers()
 	vec2 s;
 	SceneFindBoxData data(s, s);
 
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = TargetScene();
 	obs_scene_enum_items(scene, FindSelected, &data);
 
 	if (data.sceneItems.size() != 1) {
@@ -2521,7 +2518,7 @@ void OBSBasicPreview::DrawSpacingHelpers()
 	obs_sceneitem_get_info2(item, &oti);
 
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	TargetVideoInfo(ovi);
 
 	vec3 size;
 	vec3_set(&size, ovi.base_width, ovi.base_height, 1.0f);
@@ -2656,7 +2653,7 @@ void OBSBasicPreview::DrawSpacingHelpers()
 void OBSBasicPreview::ClampScrollingOffsets()
 {
 	obs_video_info ovi;
-	obs_get_video_info(&ovi);
+	TargetVideoInfo(ovi);
 
 	QSize targetSize = GetPixelSize(this);
 

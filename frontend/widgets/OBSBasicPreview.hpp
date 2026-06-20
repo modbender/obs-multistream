@@ -90,13 +90,13 @@ private:
 	static bool DrawSelectedItem(obs_scene_t *scene, obs_sceneitem_t *item, void *param);
 	static bool DrawSelectionBox(float x1, float y1, float x2, float y2, gs_vertbuffer_t *box);
 
-	static OBSSceneItem GetItemAtPos(const vec2 &pos, bool selectBelow);
-	static bool SelectedAtPos(const vec2 &pos);
+	OBSSceneItem GetItemAtPos(const vec2 &pos, bool selectBelow);
+	bool SelectedAtPos(const vec2 &pos);
 
-	static void DoSelect(const vec2 &pos);
-	static void DoCtrlSelect(const vec2 &pos);
+	void DoSelect(const vec2 &pos);
+	void DoCtrlSelect(const vec2 &pos);
 
-	static vec3 GetSnapOffset(const vec3 &tl, const vec3 &br);
+	vec3 GetSnapOffset(const vec3 &tl, const vec3 &br);
 
 	void GetStretchHandleData(const vec2 &pos, bool ignoreGroup);
 
@@ -109,7 +109,7 @@ private:
 	void StretchItem(const vec2 &pos);
 	void RotateItem(const vec2 &pos);
 
-	static void SnapItemMovement(vec2 &offset);
+	void SnapItemMovement(vec2 &offset);
 	void MoveItems(const vec2 &pos);
 	void BoxItems(const vec2 &startPos, const vec2 &pos);
 
@@ -119,6 +119,24 @@ private:
 
 	OBSDataAutoRelease wrapper = nullptr;
 	bool changed;
+
+	/* nullptr = drive the main/program scene (today's behavior, the central
+	 * preview). Non-null = drive this canvas's current scene and base resolution
+	 * (the per-canvas dock surface). */
+	obs_canvas_t *targetCanvas = nullptr;
+
+	/* The scene this surface edits: main current scene when targetCanvas is null,
+	 * else the target canvas's current scene. Every scene-touching helper routes
+	 * through here so the null path stays identical to the main preview. */
+	OBSScene TargetScene() const;
+
+	/* The base/output resolution this surface maps against: obs_get_video_info
+	 * when targetCanvas is null, else this canvas's video info. Returns false (and
+	 * leaves ovi untouched) when no info is available, matching obs_get_video_info. */
+	bool TargetVideoInfo(obs_video_info &ovi) const;
+
+	void RenderSpacingHelper(int sourceIndex, vec3 &start, vec3 &end, vec3 &viewport, float pixelRatio);
+	void SetLabelText(int sourceIndex, int px);
 
 public:
 	OBSBasicPreview(QWidget *parent, Qt::WindowFlags flags = Qt::WindowFlags());
