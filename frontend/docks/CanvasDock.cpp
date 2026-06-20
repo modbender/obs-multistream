@@ -7,6 +7,7 @@
 #include <utility/CanvasDefinition.hpp>
 #include <utility/CanvasManager.hpp>
 #include <utility/MultistreamOutput.hpp>
+#include <utility/scene-item-transform.hpp>
 #include <widgets/OBSBasic.hpp>
 #include <widgets/OBSBasicPreview.hpp>
 #include <widgets/OBSQTDisplay.hpp>
@@ -611,28 +612,10 @@ void CanvasDock::EditSourceTransform()
 void CanvasDock::ResetSourceTransform()
 {
 	obs_sceneitem_t *item = SelectedSceneItem();
-	if (!item || obs_sceneitem_locked(item)) {
+	if (!item) {
 		return;
 	}
-
-	obs_sceneitem_defer_update_begin(item);
-
-	obs_transform_info info;
-	vec2_set(&info.pos, 0.0f, 0.0f);
-	vec2_set(&info.scale, 1.0f, 1.0f);
-	info.rot = 0.0f;
-	info.alignment = OBS_ALIGN_TOP | OBS_ALIGN_LEFT;
-	info.bounds_type = OBS_BOUNDS_NONE;
-	info.bounds_alignment = OBS_ALIGN_CENTER;
-	info.crop_to_bounds = false;
-	vec2_set(&info.bounds, 0.0f, 0.0f);
-	obs_sceneitem_set_info2(item, &info);
-
-	obs_sceneitem_crop crop = {};
-	obs_sceneitem_set_crop(item, &crop);
-
-	obs_sceneitem_defer_update_end(item);
-
+	ResetSceneItemTransform(item);
 	main->SaveProject();
 }
 

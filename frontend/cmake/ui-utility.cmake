@@ -89,6 +89,8 @@ target_sources(
     utility/obf.c
     utility/obf.h
     utility/platform.hpp
+    utility/scene-item-transform.cpp
+    utility/scene-item-transform.hpp
     utility/system-info.hpp
     utility/undo_stack.cpp
     utility/undo_stack.hpp
