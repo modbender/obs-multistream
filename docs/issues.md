@@ -13,8 +13,11 @@ hosts an editable `OBSBasicPreview` bound to its canvas (Approach A:
 `targetCanvas` parameterization, null = unchanged central preview). Sources in a
 canvas dock are now draggable / selectable / transformable, scoped to that
 canvas's scene. Plan + design below remain for context. Still owed: the manual
-GUI acceptance pass; and the related context-menu / create-new-source parity is
-tracked separately as roadmap **3d**.
+GUI acceptance pass; the related context-menu / create-new-source parity
+(roadmap **3d**) is now also IMPLEMENTED (2026-06-20, commits `873846694`..
+`c624fdca7` — full add-source picker, source/scene right-click menus, canvas-scoped
+Edit Transform, all with canvas-aware undo; build-green + holistic review = SHIP,
+GUI acceptance owed).
 
 **Original status:** OPEN (design decision / future work) — surfaced 2026-06-16
 from an edge-case question: "what if a user mainly uses an additional canvas, with

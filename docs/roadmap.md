@@ -228,7 +228,27 @@ main program canvas in several places.
     machine. Rejected as invasive surgery for marginal gain; the real need (editing
     a non-default canvas) is better served by 3a's editable docks. Default-in-center
     + additionals-floating is the shipped model.
-- 🔭 **3d — Canvas-dock editor parity (scenes & sources lists).** The canvas dock's
+- ✅ **3d — Canvas-dock editor parity (scenes & sources lists) — IMPLEMENTED
+  (build-green + reviewed, GUI acceptance owed) 2026-06-20.** Commits `873846694`
+  (add-source core gains optional `targetScene`), `6f1e99ec1` (`OBSBasicSourceSelect`
+  3-arg ctor + canvas-aware undo — `SetCurrentScene` gated behind `!isCanvas`),
+  `3537d61f` (dock `+` opens the full picker scoped to the canvas scene), `69f011d82`
+  (`OBSBasicTransform` derives its scene from the item, not `GetCurrentScene`;
+  item-scoped Reset; canvas detection via owned `obs_source_get_canvas` refs),
+  `570a4268c` (source + scene right-click menus on `CanvasDock`), `c624fdca7`
+  (extracted shared `ResetSceneItemTransform` into `frontend/utility/`). Plan:
+  `docs/superpowers/plans/2026-06-20-canvas-dock-editor-parity.md` (gitignored).
+  Reuse-not-rewrite: threaded an optional target scene through OBS's existing
+  add-source/transform dialogs (program path byte-for-byte unchanged) and
+  reimplemented only the context-menu shells, all canvas-scoped via 3a's
+  `SelectedSceneItem()` / `GetCanvasCurrentScene(canvas)` seam. Holistic review =
+  SHIP (no program-scene leak — every `GetCurrentScene`-family hit is a program
+  fallback or `!isCanvas`-gated; multi-dock isolation sound; teardown safe). **GUI
+  acceptance owed** (headless-undriveable): two-dock isolation, canvas add undo/redo,
+  Edit-Transform-open-then-destroy-dock, full type-picker attaches to canvas scene.
+  Excluded by design (main-window-only): Multiview, projectors, grouping/multi-select,
+  copy/paste, interact, grid mode, Studio Mode. Original scope below:
+- 🔭 **3d (original scope).** The canvas dock's
   scene/source lists are stripped down vs the main window's; bring them to parity:
   - **Add Source** — the dock's `+` (`CanvasDock::AddSource`) only lists *existing*
     global input sources to attach (Model 1: shared sources), so it shows however
