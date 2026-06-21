@@ -375,6 +375,19 @@ at cutover (4.6). A CMake flag (e.g. `USE_LEGACY_FRONTEND`, default ON until the
 new frontend reaches MVP) keeps `frontend_old` buildable through the transition
 so a working app is always available; only one frontend ever builds at a time.
 
+**Build progress (sub-projects):** 4.0 CEF-host spike ✅ GO · 4.0b headless
+frontend-api spike ✅ GO · **4.1 (shell + bridge + frontend-api layer) ✅ COMPLETE
+2026-06-21** — all 6 milestones built, verified, pushed: migration scaffold
+(`frontend`→`frontend_old`, `USE_LEGACY_FRONTEND` flag); CEF UI exe serving an
+offline `app://` bundle; single-`CefInitialize` obs-browser coexistence (obs-browser
+forked to `modbender/obs-browser` with an env-gated CEF-deferral patch); full
+20-plugin curated load via a non-Qt `obs_frontend_callbacks` shim; a typed JS↔C++
+bridge (`window.obs.call`/`.on`) with event push; and a Svelte 5 + Vite + TS shell
+(bun-built, offline). Next: **4.2** preview embedding (UI-positioned native
+`obs_display` overlay) → **4.3** core UI parity + generic `obs_properties` renderer →
+**4.4** multistream UI → **4.5** new features (3b Studio Mode, 3e Stats) → **4.6**
+cutover (flip default, retire `frontend_old`).
+
 **Deferred within Phase 4 (required later — roadmap as found):**
 
 - 🔭 **Cross-platform preview** — the spike and initial build are **Windows-only**
