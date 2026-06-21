@@ -5,6 +5,9 @@
 
 #include "preview_window.hpp"
 
+#include "multistream/CanvasRuntime.hpp"
+#include "obs_bootstrap.hpp"
+
 #include <obs.h>
 
 #include <graphics/matrix4.h>
@@ -33,9 +36,9 @@ namespace {
 
 constexpr wchar_t kPreviewClassName[] = L"ObsMultiStreamPreview";
 
-constexpr float kHandleRadius = 4.0f;        // handle half-size in screen px
-constexpr float kHandleSelRadius = 6.0f;     // hit-test radius (kHandleRadius * 1.5)
-constexpr float kBoxLineThickness = 2.0f;    // selection outline thickness in screen px
+constexpr float kHandleRadius = 4.0f;     // handle half-size in screen px
+constexpr float kHandleSelRadius = 6.0f;  // hit-test radius (kHandleRadius * 1.5)
+constexpr float kBoxLineThickness = 2.0f; // selection outline thickness in screen px
 
 enum class ItemHandle : uint32_t {
 	None = 0,
@@ -50,19 +53,7 @@ enum class ItemHandle : uint32_t {
 	Rot = ITEM_ROT,
 };
 
-obs_display_t *g_display = nullptr;
 PreviewWindow *g_instance = nullptr;
-
-// Unit-quad TRISTRIP vertbuffer for the selection handles, created lazily on the
-// render thread and destroyed under a graphics context in Destroy().
-gs_vertbuffer_t *g_boxBuffer = nullptr;
-
-// Shared editor state. Mouse handling + selection mutation happen on the UI
-// thread (WndProc); the draw callback (render thread) only reads g_selectedId and
-// the letterbox transform. Guard both with one mutex; copy out under the lock and
-// never hold it across libobs render calls.
-std::mutex g_stateMutex;
-int64_t g_selectedId = -1;
 
 // The letterbox transform the draw callback computed last frame, in HWND device
 // px. Mouse client px -> canvas: (px - drawOrigin) / scale.
@@ -73,7 +64,6 @@ struct PreviewTransform {
 	float baseCX = 0.0f;
 	float baseCY = 0.0f;
 };
-PreviewTransform g_transform;
 
 // Per-drag state, all captured at mousedown on the UI thread and only touched on
 // the UI thread, so a drag is atomic. We store the int64 id (re-resolved each
@@ -82,24 +72,14 @@ enum class DragMode { None, Move, Resize };
 struct DragState {
 	DragMode mode = DragMode::None;
 	int64_t id = -1;
-	vec2 startCanvasPos = {};  // mouse canvas pos at mousedown
-	vec2 startItemPos = {};    // item pos at mousedown (move)
+	vec2 startCanvasPos = {}; // mouse canvas pos at mousedown
+	vec2 startItemPos = {};   // item pos at mousedown (move)
 	ItemHandle handle = ItemHandle::None;
 	matrix4 itemToScreen = {};
 	matrix4 screenToItem = {};
 	vec2 stretchItemSize = {};
 	obs_sceneitem_crop startCrop = {};
 };
-DragState g_drag;
-
-// --- scene resolution -------------------------------------------------------
-
-// The editor's authoritative scene is always output channel 0. Returns the scene
-// source addref'd (caller releases) or null when nothing is bound.
-obs_source_t *AcquireOutputSceneSource()
-{
-	return obs_get_output_source(0); // addref'd; null if unbound
-}
 
 // --- hit-testing (ported from legacy FindItemAtPos) -------------------------
 
@@ -209,9 +189,9 @@ ItemHandle FindHandleAtPos(obs_sceneitem_t *item, const vec2 &canvasPos, float r
 		ItemHandle handle;
 	};
 	static const HandleCoord kHandles[] = {
-		{0.0f, 0.0f, ItemHandle::TopLeft},     {0.5f, 0.0f, ItemHandle::TopCenter},
-		{1.0f, 0.0f, ItemHandle::TopRight},    {0.0f, 0.5f, ItemHandle::CenterLeft},
-		{1.0f, 0.5f, ItemHandle::CenterRight}, {0.0f, 1.0f, ItemHandle::BottomLeft},
+		{0.0f, 0.0f, ItemHandle::TopLeft},      {0.5f, 0.0f, ItemHandle::TopCenter},
+		{1.0f, 0.0f, ItemHandle::TopRight},     {0.0f, 0.5f, ItemHandle::CenterLeft},
+		{1.0f, 0.5f, ItemHandle::CenterRight},  {0.0f, 1.0f, ItemHandle::BottomLeft},
 		{0.5f, 1.0f, ItemHandle::BottomCenter}, {1.0f, 1.0f, ItemHandle::BottomRight},
 	};
 	for (const auto &h : kHandles) {
@@ -322,17 +302,17 @@ void ClampAspect(ItemHandle handle, vec3 &tl, vec3 &br, vec2 &size, const vec2 &
 // Resize the active drag item to the current mouse canvas pos. Single-select,
 // OBS_BOUNDS_NONE (scale) and bounds paths; aspect is preserved on corner drags.
 // TODO(deferred): Shift = free aspect / Ctrl = no snap, crop (Alt) drag.
-void StretchItem(obs_sceneitem_t *item, const vec2 &canvasPos)
+void StretchItem(const DragState &drag, obs_sceneitem_t *item, const vec2 &canvasPos)
 {
 	const obs_bounds_type boundsType = obs_sceneitem_get_bounds_type(item);
-	const uint32_t flags = uint32_t(g_drag.handle);
+	const uint32_t flags = uint32_t(drag.handle);
 
 	vec3 tl, br, pos3;
 	vec3_zero(&tl);
-	vec3_set(&br, g_drag.stretchItemSize.x, g_drag.stretchItemSize.y, 0.0f);
+	vec3_set(&br, drag.stretchItemSize.x, drag.stretchItemSize.y, 0.0f);
 
 	vec3_set(&pos3, canvasPos.x, canvasPos.y, 0.0f);
-	vec3_transform(&pos3, &pos3, &g_drag.screenToItem);
+	vec3_transform(&pos3, &pos3, &drag.screenToItem);
 
 	if (flags & ITEM_LEFT) {
 		tl.x = pos3.x;
@@ -372,14 +352,14 @@ void StretchItem(obs_sceneitem_t *item, const vec2 &canvasPos)
 		baseSize.x -= float(crop.left + crop.right);
 		baseSize.y -= float(crop.top + crop.bottom);
 
-		ClampAspect(g_drag.handle, tl, br, size, baseSize);
+		ClampAspect(drag.handle, tl, br, size, baseSize);
 
 		vec2_div(&size, &size, &baseSize);
 		obs_sceneitem_set_scale(item, &size);
 	}
 
 	pos3 = CalculateStretchPos(item, tl, br);
-	vec3_transform(&pos3, &pos3, &g_drag.itemToScreen);
+	vec3_transform(&pos3, &pos3, &drag.itemToScreen);
 	vec2 newPos;
 	vec2_set(&newPos, std::round(pos3.x), std::round(pos3.y));
 	obs_sceneitem_set_pos(item, &newPos);
@@ -387,31 +367,31 @@ void StretchItem(obs_sceneitem_t *item, const vec2 &canvasPos)
 
 // Capture the matrices/sizes a resize drag needs (legacy GetStretchHandleData,
 // no-group path) for the chosen item + handle.
-void BeginResize(obs_sceneitem_t *item, ItemHandle handle, const vec2 &startCanvasPos)
+void BeginResize(DragState &drag, obs_sceneitem_t *item, ItemHandle handle, const vec2 &startCanvasPos)
 {
 	matrix4 boxTransform;
 	vec3 itemUL;
 
-	g_drag.mode = DragMode::Resize;
-	g_drag.id = obs_sceneitem_get_id(item);
-	g_drag.handle = handle;
-	g_drag.startCanvasPos = startCanvasPos;
-	g_drag.stretchItemSize = GetItemSize(item);
+	drag.mode = DragMode::Resize;
+	drag.id = obs_sceneitem_get_id(item);
+	drag.handle = handle;
+	drag.startCanvasPos = startCanvasPos;
+	drag.stretchItemSize = GetItemSize(item);
 
 	obs_sceneitem_get_box_transform(item, &boxTransform);
 	const float itemRot = obs_sceneitem_get_rot(item);
 	vec3_from_vec4(&itemUL, &boxTransform.t);
 
-	matrix4_identity(&g_drag.itemToScreen);
-	matrix4_rotate_aa4f(&g_drag.itemToScreen, &g_drag.itemToScreen, 0.0f, 0.0f, 1.0f, RAD(itemRot));
-	matrix4_translate3f(&g_drag.itemToScreen, &g_drag.itemToScreen, itemUL.x, itemUL.y, 0.0f);
+	matrix4_identity(&drag.itemToScreen);
+	matrix4_rotate_aa4f(&drag.itemToScreen, &drag.itemToScreen, 0.0f, 0.0f, 1.0f, RAD(itemRot));
+	matrix4_translate3f(&drag.itemToScreen, &drag.itemToScreen, itemUL.x, itemUL.y, 0.0f);
 
-	matrix4_identity(&g_drag.screenToItem);
-	matrix4_translate3f(&g_drag.screenToItem, &g_drag.screenToItem, -itemUL.x, -itemUL.y, 0.0f);
-	matrix4_rotate_aa4f(&g_drag.screenToItem, &g_drag.screenToItem, 0.0f, 0.0f, 1.0f, RAD(-itemRot));
+	matrix4_identity(&drag.screenToItem);
+	matrix4_translate3f(&drag.screenToItem, &drag.screenToItem, -itemUL.x, -itemUL.y, 0.0f);
+	matrix4_rotate_aa4f(&drag.screenToItem, &drag.screenToItem, 0.0f, 0.0f, 1.0f, RAD(-itemRot));
 
-	obs_sceneitem_get_crop(item, &g_drag.startCrop);
-	obs_sceneitem_get_pos(item, &g_drag.startItemPos);
+	obs_sceneitem_get_crop(item, &drag.startCrop);
+	obs_sceneitem_get_pos(item, &drag.startItemPos);
 }
 
 // --- selection -------------------------------------------------------------
@@ -434,43 +414,7 @@ void SelectOnly(obs_scene_t *scene, int64_t id)
 	obs_scene_enum_items(scene, SelectOnlyCb, &ctx);
 }
 
-// Emit sceneItem.selected to JS. `id` < 0 -> {scene:null,id:null}. Posts to the
-// UI thread internally so this is safe from WndProc.
-void EmitSelection(int64_t id)
-{
-	std::string sceneName;
-	if (id >= 0) {
-		obs_source_t *sceneSource = AcquireOutputSceneSource();
-		if (sceneSource) {
-			const char *n = obs_source_get_name(sceneSource);
-			if (n) {
-				sceneName = n;
-			}
-			obs_source_release(sceneSource);
-		}
-	}
-	using Bridge::json;
-	json payload = json{
-		{"scene", id >= 0 && !sceneName.empty() ? json(sceneName) : json(nullptr)},
-		{"id", id >= 0 ? json(id) : json(nullptr)},
-	};
-	Bridge::EmitEvent("sceneItem.selected", payload);
-}
-
 // --- drawing (ported from legacy DrawLine/DrawSquareAtPos/DrawRect) ----------
-
-void EnsureBoxBuffer()
-{
-	if (g_boxBuffer) {
-		return;
-	}
-	gs_render_start(true);
-	gs_vertex2f(0.0f, 0.0f);
-	gs_vertex2f(1.0f, 0.0f);
-	gs_vertex2f(0.0f, 1.0f);
-	gs_vertex2f(1.0f, 1.0f);
-	g_boxBuffer = gs_render_save();
-}
 
 // Draw a thin line (as a quad) in the current matrix space; thickness in canvas
 // units, divided by the per-axis box scale so the on-screen width is constant.
@@ -532,7 +476,8 @@ void DrawSquareAtPos(float x, float y, float halfSize)
 // Draw the selection box + 8 handles for `item`. Runs inside the draw callback's
 // canvas ortho/viewport, so canvas coords map to the screen. `scale` = letterbox
 // screen-px-per-canvas-unit, used to keep outline/handles a constant pixel size.
-void DrawSelection(obs_sceneitem_t *item, float scale)
+// `boxBuffer` is the shared unit-quad TRISTRIP vertbuffer.
+void DrawSelection(gs_vertbuffer_t *boxBuffer, obs_sceneitem_t *item, float scale)
 {
 	if (scale <= 0.0f) {
 		return;
@@ -568,7 +513,7 @@ void DrawSelection(obs_sceneitem_t *item, float scale)
 	gs_technique_t *tech = gs_effect_get_technique(solid, "Solid");
 	gs_technique_begin(tech);
 	gs_technique_begin_pass(tech, 0);
-	gs_load_vertexbuffer(g_boxBuffer);
+	gs_load_vertexbuffer(boxBuffer);
 	gs_effect_set_vec4(colParam, &green);
 
 	DrawSquareAtPos(0.0f, 0.0f, halfSize);
@@ -585,226 +530,11 @@ void DrawSelection(obs_sceneitem_t *item, float scale)
 	gs_technique_end(tech);
 }
 
-// Draw callback: fired by libobs once per frame on the render thread. cx/cy are
-// the display (HWND) pixel size. Fit the base canvas into it with letterboxing so
-// the composited scene keeps its aspect ratio, then overlay the selection box for
-// the currently-selected item (re-resolved by id from output 0's scene).
-void RenderPreview(void *, uint32_t cx, uint32_t cy)
-{
-	obs_video_info ovi;
-	if (!obs_get_video_info(&ovi)) {
-		return;
-	}
-
-	const float baseCX = float(ovi.base_width);
-	const float baseCY = float(ovi.base_height);
-	if (baseCX <= 0.0f || baseCY <= 0.0f || cx == 0 || cy == 0) {
-		return;
-	}
-
-	const float scale = (float(cx) / baseCX < float(cy) / baseCY) ? float(cx) / baseCX : float(cy) / baseCY;
-	const int drawCX = int(baseCX * scale);
-	const int drawCY = int(baseCY * scale);
-	const int drawX = (int(cx) - drawCX) / 2;
-	const int drawY = (int(cy) - drawCY) / 2;
-
-	{
-		std::lock_guard<std::mutex> lock(g_stateMutex);
-		g_transform.scale = scale;
-		g_transform.drawX = drawX;
-		g_transform.drawY = drawY;
-		g_transform.baseCX = baseCX;
-		g_transform.baseCY = baseCY;
-	}
-
-	gs_viewport_push();
-	gs_projection_push();
-
-	gs_ortho(0.0f, baseCX, 0.0f, baseCY, -100.0f, 100.0f);
-	gs_set_viewport(drawX, drawY, drawCX, drawCY);
-
-	obs_render_main_texture();
-
-	int64_t selectedId;
-	{
-		std::lock_guard<std::mutex> lock(g_stateMutex);
-		selectedId = g_selectedId;
-	}
-
-	if (selectedId >= 0) {
-		obs_source_t *sceneSource = AcquireOutputSceneSource();
-		if (sceneSource) {
-			obs_scene_t *scene = obs_scene_from_source(sceneSource);
-			obs_sceneitem_t *item = FindItemById(scene, selectedId);
-			if (item && SceneItemHasVideo(item) && !obs_sceneitem_locked(item)) {
-				EnsureBoxBuffer();
-				DrawSelection(item, scale);
-			}
-			obs_source_release(sceneSource);
-		}
-	}
-
-	gs_projection_pop();
-	gs_viewport_pop();
-}
-
-// Client px (device) -> canvas coords using the last-rendered letterbox transform.
-// Returns false when the transform is not yet known (no frame drawn).
-bool ClientToCanvas(int mx, int my, vec2 &out)
-{
-	std::lock_guard<std::mutex> lock(g_stateMutex);
-	if (g_transform.scale <= 0.0f) {
-		return false;
-	}
-	out.x = (float(mx) - float(g_transform.drawX)) / g_transform.scale;
-	out.y = (float(my) - float(g_transform.drawY)) / g_transform.scale;
-	return true;
-}
-
-float CurrentScale()
-{
-	std::lock_guard<std::mutex> lock(g_stateMutex);
-	return g_transform.scale;
-}
-
-// --- WndProc (mouse editing) ------------------------------------------------
-
-void OnLeftDown(HWND hwnd, int mx, int my)
-{
-	SetCapture(hwnd);
-
-	vec2 canvasPos;
-	if (!ClientToCanvas(mx, my, canvasPos)) {
-		return;
-	}
-
-	obs_source_t *sceneSource = AcquireOutputSceneSource();
-	if (!sceneSource) {
-		return;
-	}
-	obs_scene_t *scene = obs_scene_from_source(sceneSource);
-
-	const float scale = CurrentScale();
-
-	// If a handle of the currently-selected item is hit, begin a resize.
-	int64_t selectedId;
-	{
-		std::lock_guard<std::mutex> lock(g_stateMutex);
-		selectedId = g_selectedId;
-	}
-	if (selectedId >= 0 && scale > 0.0f) {
-		obs_sceneitem_t *sel = FindItemById(scene, selectedId);
-		if (sel && !obs_sceneitem_locked(sel)) {
-			const ItemHandle handle = FindHandleAtPos(sel, canvasPos, kHandleSelRadius / scale);
-			if (handle != ItemHandle::None) {
-				BeginResize(sel, handle, canvasPos);
-				HostLog("[preview] resize start id=" + std::to_string(selectedId) +
-					" handle=" + std::to_string(uint32_t(handle)));
-				obs_source_release(sceneSource);
-				return;
-			}
-		}
-	}
-
-	// Otherwise hit-test items and select/move (or deselect on empty).
-	const int64_t hitId = HitTestItemId(scene, canvasPos);
-	HostLog("[preview] click canvas=(" + std::to_string(int(canvasPos.x)) + "," + std::to_string(int(canvasPos.y)) +
-		") hit id=" + std::to_string(hitId));
-
-	if (hitId >= 0) {
-		SelectOnly(scene, hitId);
-
-		obs_sceneitem_t *item = FindItemById(scene, hitId);
-
-		{
-			std::lock_guard<std::mutex> lock(g_stateMutex);
-			g_selectedId = hitId;
-		}
-		g_drag.mode = DragMode::Move;
-		g_drag.id = hitId;
-		g_drag.startCanvasPos = canvasPos;
-		if (item) {
-			obs_sceneitem_get_pos(item, &g_drag.startItemPos);
-		}
-		EmitSelection(hitId);
-	} else {
-		SelectOnly(scene, -1);
-		{
-			std::lock_guard<std::mutex> lock(g_stateMutex);
-			g_selectedId = -1;
-		}
-		g_drag.mode = DragMode::None;
-		EmitSelection(-1);
-	}
-
-	obs_source_release(sceneSource);
-}
-
-void OnMouseMove(int mx, int my)
-{
-	if (g_drag.mode == DragMode::None) {
-		return;
-	}
-	vec2 canvasPos;
-	if (!ClientToCanvas(mx, my, canvasPos)) {
-		return;
-	}
-
-	obs_source_t *sceneSource = AcquireOutputSceneSource();
-	if (!sceneSource) {
-		return;
-	}
-	obs_scene_t *scene = obs_scene_from_source(sceneSource);
-
-	obs_sceneitem_t *item = FindItemById(scene, g_drag.id);
-	if (item && !obs_sceneitem_locked(item)) {
-		if (g_drag.mode == DragMode::Move) {
-			vec2 newPos;
-			newPos.x = std::round(g_drag.startItemPos.x + (canvasPos.x - g_drag.startCanvasPos.x));
-			newPos.y = std::round(g_drag.startItemPos.y + (canvasPos.y - g_drag.startCanvasPos.y));
-			obs_sceneitem_set_pos(item, &newPos);
-		} else if (g_drag.mode == DragMode::Resize) {
-			StretchItem(item, canvasPos);
-		}
-	}
-	obs_source_release(sceneSource);
-}
-
-void OnLeftUp()
-{
-	ReleaseCapture();
-	if (g_drag.mode != DragMode::None) {
-		HostLog("[preview] drag end id=" + std::to_string(g_drag.id));
-	}
-	g_drag.mode = DragMode::None;
-	g_drag.handle = ItemHandle::None;
-}
-
-LRESULT CALLBACK PreviewWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-{
-	switch (msg) {
-	case WM_LBUTTONDOWN:
-		OnLeftDown(hwnd, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
-		return 0;
-	case WM_MOUSEMOVE:
-		OnMouseMove(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
-		return 0;
-	case WM_LBUTTONUP:
-		OnLeftUp();
-		return 0;
-	case WM_CAPTURECHANGED:
-		g_drag.mode = DragMode::None;
-		g_drag.handle = ItemHandle::None;
-		return 0;
-	default:
-		break;
-	}
-	return DefWindowProcW(hwnd, msg, wparam, lparam);
-}
-
 // The overlay HWND uses a no-background class: the obs_display swapchain paints
 // every pixel (the canvas plus its black letterbox bars), so a WM_ERASEBKGND
 // fill would only flicker against it.
+LRESULT CALLBACK PreviewWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
+
 ATOM RegisterPreviewClass(HINSTANCE instance)
 {
 	static ATOM atom = 0;
@@ -824,9 +554,319 @@ ATOM RegisterPreviewClass(HINSTANCE instance)
 
 } // namespace
 
-PreviewWindow::PreviewWindow(HWND host, HINSTANCE instance) : host_(host), instance_(instance) {}
+// Per-surface state shared between the render thread (draw callback) and the UI
+// thread (WndProc + bridge). One mutex guards the selection + letterbox transform;
+// copy out under the lock and never hold it across a libobs render call. The drag
+// state + box buffer are touched only on their owning thread (drag = UI thread,
+// box buffer = render thread under a graphics context), but live here so they are
+// per-surface, not process-global.
+struct PreviewSurface::State {
+	std::mutex stateMutex;
+	int64_t selectedId = -1;
+	PreviewTransform transform;
 
-void PreviewWindow::EnsureCreated()
+	DragState drag; // UI thread only
+
+	// Unit-quad TRISTRIP vertbuffer for the selection handles, created lazily on
+	// the render thread and destroyed under a graphics context in Destroy().
+	gs_vertbuffer_t *boxBuffer = nullptr;
+
+	obs_canvas_t *targetCanvas = nullptr; // mirror of the surface's binding for the callback
+};
+
+namespace {
+
+// Resolve the scene a surface edits, addref'd (caller releases) or null. Null
+// targetCanvas => output channel 0 (the global current scene). A non-null canvas
+// => that canvas's current channel-0 scene via the runtime.
+obs_source_t *AcquireSurfaceSceneSource(obs_canvas_t *targetCanvas)
+{
+	if (!targetCanvas) {
+		return obs_get_output_source(0); // addref'd; null if unbound
+	}
+	const char *uuid = obs_canvas_get_uuid(targetCanvas);
+	if (!uuid) {
+		return nullptr;
+	}
+	return ObsBootstrap::CanvasRuntime().CurrentScene(uuid); // addref'd; null if unbound
+}
+
+// Build the surface's letterbox + base size from its mix. Null targetCanvas =>
+// the global obs_get_video_info; otherwise the canvas's own video info. Returns
+// false when no video info is available.
+bool SurfaceVideoInfo(obs_canvas_t *targetCanvas, obs_video_info &ovi)
+{
+	if (!targetCanvas) {
+		return obs_get_video_info(&ovi);
+	}
+	return obs_canvas_get_video_info(targetCanvas, &ovi);
+}
+
+void EnsureBoxBuffer(PreviewSurface::State *state)
+{
+	if (state->boxBuffer) {
+		return;
+	}
+	gs_render_start(true);
+	gs_vertex2f(0.0f, 0.0f);
+	gs_vertex2f(1.0f, 0.0f);
+	gs_vertex2f(0.0f, 1.0f);
+	gs_vertex2f(1.0f, 1.0f);
+	state->boxBuffer = gs_render_save();
+}
+
+// Emit sceneItem.selected to JS for the surface's scene. `id` < 0 ->
+// {scene:null,id:null}. Posts to the UI thread internally so it is safe from
+// WndProc.
+void EmitSelection(obs_canvas_t *targetCanvas, int64_t id)
+{
+	std::string sceneName;
+	if (id >= 0) {
+		obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas);
+		if (sceneSource) {
+			const char *n = obs_source_get_name(sceneSource);
+			if (n) {
+				sceneName = n;
+			}
+			obs_source_release(sceneSource);
+		}
+	}
+	using Bridge::json;
+	json payload = json{
+		{"scene", id >= 0 && !sceneName.empty() ? json(sceneName) : json(nullptr)},
+		{"id", id >= 0 ? json(id) : json(nullptr)},
+	};
+	Bridge::EmitEvent("sceneItem.selected", payload);
+}
+
+// Draw callback: fired by libobs once per frame on the render thread. cx/cy are
+// the display (HWND) pixel size. Fit the surface's base canvas into it with
+// letterboxing so the composited scene keeps its aspect ratio, then overlay the
+// selection box for the currently-selected item (re-resolved by id from the
+// surface's scene). `data` is the PreviewSurface::State.
+void RenderPreview(void *data, uint32_t cx, uint32_t cy)
+{
+	auto *state = static_cast<PreviewSurface::State *>(data);
+	obs_canvas_t *targetCanvas = state->targetCanvas;
+
+	obs_video_info ovi;
+	if (!SurfaceVideoInfo(targetCanvas, ovi)) {
+		return;
+	}
+
+	const float baseCX = float(ovi.base_width);
+	const float baseCY = float(ovi.base_height);
+	if (baseCX <= 0.0f || baseCY <= 0.0f || cx == 0 || cy == 0) {
+		return;
+	}
+
+	const float scale = (float(cx) / baseCX < float(cy) / baseCY) ? float(cx) / baseCX : float(cy) / baseCY;
+	const int drawCX = int(baseCX * scale);
+	const int drawCY = int(baseCY * scale);
+	const int drawX = (int(cx) - drawCX) / 2;
+	const int drawY = (int(cy) - drawCY) / 2;
+
+	{
+		std::lock_guard<std::mutex> lock(state->stateMutex);
+		state->transform.scale = scale;
+		state->transform.drawX = drawX;
+		state->transform.drawY = drawY;
+		state->transform.baseCX = baseCX;
+		state->transform.baseCY = baseCY;
+	}
+
+	gs_viewport_push();
+	gs_projection_push();
+
+	gs_ortho(0.0f, baseCX, 0.0f, baseCY, -100.0f, 100.0f);
+	gs_set_viewport(drawX, drawY, drawCX, drawCY);
+
+	if (targetCanvas) {
+		obs_canvas_render(targetCanvas);
+	} else {
+		obs_render_main_texture();
+	}
+
+	int64_t selectedId;
+	{
+		std::lock_guard<std::mutex> lock(state->stateMutex);
+		selectedId = state->selectedId;
+	}
+
+	if (selectedId >= 0) {
+		obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas);
+		if (sceneSource) {
+			obs_scene_t *scene = obs_scene_from_source(sceneSource);
+			obs_sceneitem_t *item = FindItemById(scene, selectedId);
+			if (item && SceneItemHasVideo(item) && !obs_sceneitem_locked(item)) {
+				EnsureBoxBuffer(state);
+				DrawSelection(state->boxBuffer, item, scale);
+			}
+			obs_source_release(sceneSource);
+		}
+	}
+
+	gs_projection_pop();
+	gs_viewport_pop();
+}
+
+} // namespace
+
+PreviewSurface::PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas)
+	: state_(new State()), host_(host), instance_(instance), targetCanvas_(targetCanvas)
+{
+	state_->targetCanvas = targetCanvas;
+}
+
+PreviewSurface::~PreviewSurface()
+{
+	Destroy();
+	delete state_;
+}
+
+// Client px (device) -> canvas coords using the last-rendered letterbox transform.
+// Returns false when the transform is not yet known (no frame drawn).
+namespace {
+bool ClientToCanvas(PreviewSurface::State *state, int mx, int my, vec2 &out)
+{
+	std::lock_guard<std::mutex> lock(state->stateMutex);
+	if (state->transform.scale <= 0.0f) {
+		return false;
+	}
+	out.x = (float(mx) - float(state->transform.drawX)) / state->transform.scale;
+	out.y = (float(my) - float(state->transform.drawY)) / state->transform.scale;
+	return true;
+}
+
+float CurrentScale(PreviewSurface::State *state)
+{
+	std::lock_guard<std::mutex> lock(state->stateMutex);
+	return state->transform.scale;
+}
+} // namespace
+
+void PreviewSurface::OnLeftDown(int mx, int my)
+{
+	if (hwnd_) {
+		SetCapture(hwnd_);
+	}
+
+	vec2 canvasPos;
+	if (!ClientToCanvas(state_, mx, my, canvasPos)) {
+		return;
+	}
+
+	obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas_);
+	if (!sceneSource) {
+		return;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	const float scale = CurrentScale(state_);
+
+	// If a handle of the currently-selected item is hit, begin a resize.
+	int64_t selectedId;
+	{
+		std::lock_guard<std::mutex> lock(state_->stateMutex);
+		selectedId = state_->selectedId;
+	}
+	if (selectedId >= 0 && scale > 0.0f) {
+		obs_sceneitem_t *sel = FindItemById(scene, selectedId);
+		if (sel && !obs_sceneitem_locked(sel)) {
+			const ItemHandle handle = FindHandleAtPos(sel, canvasPos, kHandleSelRadius / scale);
+			if (handle != ItemHandle::None) {
+				BeginResize(state_->drag, sel, handle, canvasPos);
+				HostLog("[preview] resize start id=" + std::to_string(selectedId) +
+					" handle=" + std::to_string(uint32_t(handle)));
+				obs_source_release(sceneSource);
+				return;
+			}
+		}
+	}
+
+	// Otherwise hit-test items and select/move (or deselect on empty).
+	const int64_t hitId = HitTestItemId(scene, canvasPos);
+	HostLog("[preview] click canvas=(" + std::to_string(int(canvasPos.x)) + "," + std::to_string(int(canvasPos.y)) +
+		") hit id=" + std::to_string(hitId));
+
+	if (hitId >= 0) {
+		SelectOnly(scene, hitId);
+
+		obs_sceneitem_t *item = FindItemById(scene, hitId);
+
+		{
+			std::lock_guard<std::mutex> lock(state_->stateMutex);
+			state_->selectedId = hitId;
+		}
+		state_->drag.mode = DragMode::Move;
+		state_->drag.id = hitId;
+		state_->drag.startCanvasPos = canvasPos;
+		if (item) {
+			obs_sceneitem_get_pos(item, &state_->drag.startItemPos);
+		}
+		EmitSelection(targetCanvas_, hitId);
+	} else {
+		SelectOnly(scene, -1);
+		{
+			std::lock_guard<std::mutex> lock(state_->stateMutex);
+			state_->selectedId = -1;
+		}
+		state_->drag.mode = DragMode::None;
+		EmitSelection(targetCanvas_, -1);
+	}
+
+	obs_source_release(sceneSource);
+}
+
+void PreviewSurface::OnMouseMove(int mx, int my)
+{
+	if (state_->drag.mode == DragMode::None) {
+		return;
+	}
+	vec2 canvasPos;
+	if (!ClientToCanvas(state_, mx, my, canvasPos)) {
+		return;
+	}
+
+	obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas_);
+	if (!sceneSource) {
+		return;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	obs_sceneitem_t *item = FindItemById(scene, state_->drag.id);
+	if (item && !obs_sceneitem_locked(item)) {
+		if (state_->drag.mode == DragMode::Move) {
+			vec2 newPos;
+			newPos.x = std::round(state_->drag.startItemPos.x +
+					      (canvasPos.x - state_->drag.startCanvasPos.x));
+			newPos.y = std::round(state_->drag.startItemPos.y +
+					      (canvasPos.y - state_->drag.startCanvasPos.y));
+			obs_sceneitem_set_pos(item, &newPos);
+		} else if (state_->drag.mode == DragMode::Resize) {
+			StretchItem(state_->drag, item, canvasPos);
+		}
+	}
+	obs_source_release(sceneSource);
+}
+
+void PreviewSurface::OnLeftUp()
+{
+	ReleaseCapture();
+	if (state_->drag.mode != DragMode::None) {
+		HostLog("[preview] drag end id=" + std::to_string(state_->drag.id));
+	}
+	state_->drag.mode = DragMode::None;
+	state_->drag.handle = ItemHandle::None;
+}
+
+void PreviewSurface::CancelDrag()
+{
+	state_->drag.mode = DragMode::None;
+	state_->drag.handle = ItemHandle::None;
+}
+
+void PreviewSurface::EnsureCreated()
 {
 	if (hwnd_) {
 		return;
@@ -836,13 +876,16 @@ void PreviewWindow::EnsureCreated()
 
 	// Borderless child sibling of the CEF browser HWND. WS_CLIPSIBLINGS keeps the
 	// browser from overdrawing into it (the browser HWND also sets it). Starts
-	// hidden; SetRect shows it after positioning so no frame flashes at 0,0.
+	// hidden; SetRect shows it after positioning so no frame flashes at 0,0. The
+	// State pointer is stashed in GWLP_USERDATA so the shared WndProc can map this
+	// HWND back to its surface state without a global table.
 	hwnd_ = CreateWindowExW(0, kPreviewClassName, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 16, 16, host_, nullptr,
 				instance_, nullptr);
 	if (!hwnd_) {
 		HostLog("[obs] preview overlay HWND create FAILED");
 		return;
 	}
+	SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 	HostLog("[obs] preview overlay HWND created");
 
 	gs_init_data init = {};
@@ -852,15 +895,16 @@ void PreviewWindow::EnsureCreated()
 	init.zsformat = GS_ZS_NONE;
 	init.window.hwnd = hwnd_; // child HWND passthrough (gs_window.hwnd is void*)
 
-	g_display = obs_display_create(&init, 0x000000);
-	HostLog(std::string("[obs] obs_display_create -> ") + (g_display ? "OK" : "NULL"));
-	if (g_display) {
-		obs_display_add_draw_callback(g_display, RenderPreview, nullptr);
+	obs_display_t *display = obs_display_create(&init, 0x000000);
+	display_ = display;
+	HostLog(std::string("[obs] obs_display_create -> ") + (display ? "OK" : "NULL"));
+	if (display) {
+		obs_display_add_draw_callback(display, RenderPreview, state_);
 		HostLog("[obs] preview draw callback registered");
 	}
 }
 
-void PreviewWindow::SetRect(int x, int y, int cx, int cy)
+void PreviewSurface::SetRect(int x, int y, int cx, int cy)
 {
 	if (cx <= 0 || cy <= 0) {
 		Hide();
@@ -877,36 +921,162 @@ void PreviewWindow::SetRect(int x, int y, int cx, int cy)
 	// the first sized call.
 	SetWindowPos(hwnd_, HWND_TOP, x, y, cx, cy, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-	if (g_display) {
-		obs_display_resize(g_display, uint32_t(cx), uint32_t(cy));
+	if (display_) {
+		obs_display_resize(static_cast<obs_display_t *>(display_), uint32_t(cx), uint32_t(cy));
 	}
 }
 
-void PreviewWindow::Hide()
+void PreviewSurface::Hide()
 {
 	if (hwnd_) {
 		ShowWindow(hwnd_, SW_HIDE);
 	}
 }
 
-void PreviewWindow::Destroy()
+void PreviewSurface::Destroy()
 {
-	if (g_display) {
-		obs_display_remove_draw_callback(g_display, RenderPreview, nullptr);
-		obs_display_destroy(g_display);
-		g_display = nullptr;
+	if (display_) {
+		obs_display_t *display = static_cast<obs_display_t *>(display_);
+		obs_display_remove_draw_callback(display, RenderPreview, state_);
+		obs_display_destroy(display);
+		display_ = nullptr;
 		HostLog("[obs] preview display destroyed");
 	}
-	if (g_boxBuffer) {
+	if (state_->boxBuffer) {
 		obs_enter_graphics();
-		gs_vertexbuffer_destroy(g_boxBuffer);
+		gs_vertexbuffer_destroy(state_->boxBuffer);
 		obs_leave_graphics();
-		g_boxBuffer = nullptr;
+		state_->boxBuffer = nullptr;
 	}
 	if (hwnd_) {
 		DestroyWindow(hwnd_);
 		hwnd_ = nullptr;
 	}
+}
+
+bool PreviewSurface::SelectFromBridge(const std::string &scene, int64_t id, bool hasId)
+{
+	obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas_);
+	if (!sceneSource) {
+		return false;
+	}
+	// Ignore a foreign scene name to keep "preview shows the surface's scene" intact.
+	if (!scene.empty()) {
+		const char *n = obs_source_get_name(sceneSource);
+		if (!n || scene != n) {
+			obs_source_release(sceneSource);
+			return false;
+		}
+	}
+	obs_scene_t *sc = obs_scene_from_source(sceneSource);
+
+	const int64_t newId = hasId ? id : int64_t(-1);
+	SelectOnly(sc, newId);
+	{
+		std::lock_guard<std::mutex> lock(state_->stateMutex);
+		state_->selectedId = newId;
+	}
+	obs_source_release(sceneSource);
+
+	EmitSelection(targetCanvas_, newId);
+	return true;
+}
+
+int64_t PreviewSurface::HitTestForTest(float canvasX, float canvasY)
+{
+	obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas_);
+	if (!sceneSource) {
+		return -1;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	vec2 pos;
+	vec2_set(&pos, canvasX, canvasY);
+	const int64_t id = HitTestItemId(scene, pos);
+	obs_source_release(sceneSource);
+	return id;
+}
+
+int64_t PreviewSurface::SelectedIdForTest()
+{
+	std::lock_guard<std::mutex> lock(state_->stateMutex);
+	return state_->selectedId;
+}
+
+bool PreviewSurface::OnVideoReset()
+{
+	if (!display_) {
+		// No display yet (UI never sized this surface). The next SetRect creates it
+		// fresh against the new base resolution; nothing to re-validate.
+		HostLog("[preview] OnVideoReset: no display yet (will create lazily)");
+		return false;
+	}
+
+	// The base resolution changed, so the cached letterbox transform is stale.
+	// Reset it; RenderPreview recomputes it from the surface's video info on the
+	// next frame. ClientToCanvas treats scale<=0 as "no frame yet" and ignores
+	// mouse input until that recompute lands, avoiding a one-frame mis-mapped drag.
+	{
+		std::lock_guard<std::mutex> lock(state_->stateMutex);
+		state_->transform = PreviewTransform{};
+	}
+
+	// Nudge a redraw at the current size so the new mix is presented promptly.
+	obs_display_update_color_space(static_cast<obs_display_t *>(display_));
+	HostLog("[preview] OnVideoReset: display alive, letterbox transform invalidated");
+	return true;
+}
+
+namespace {
+
+// Route a window message to the surface that owns the HWND (stashed in
+// GWLP_USERDATA at creation). null before the first SetRect / for a foreign HWND.
+PreviewSurface *SurfaceFromHwnd(HWND hwnd)
+{
+	return reinterpret_cast<PreviewSurface *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+}
+
+LRESULT CALLBACK PreviewWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+	PreviewSurface *surface = SurfaceFromHwnd(hwnd);
+	if (!surface) {
+		return DefWindowProcW(hwnd, msg, wparam, lparam);
+	}
+	switch (msg) {
+	case WM_LBUTTONDOWN:
+		surface->OnLeftDown(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+		return 0;
+	case WM_MOUSEMOVE:
+		surface->OnMouseMove(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+		return 0;
+	case WM_LBUTTONUP:
+		surface->OnLeftUp();
+		return 0;
+	case WM_CAPTURECHANGED:
+		surface->CancelDrag();
+		return 0;
+	default:
+		break;
+	}
+	return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+} // namespace
+
+PreviewWindow::PreviewWindow(HWND host, HINSTANCE instance) : default_(host, instance, nullptr) {}
+
+void PreviewWindow::SetRect(int x, int y, int cx, int cy)
+{
+	default_.SetRect(x, y, cx, cy);
+}
+
+void PreviewWindow::Hide()
+{
+	default_.Hide();
+}
+
+void PreviewWindow::Destroy()
+{
+	default_.Destroy();
 }
 
 namespace Preview {
@@ -923,68 +1093,26 @@ PreviewWindow *Instance()
 
 bool SelectFromBridge(const std::string &scene, int64_t id, bool hasId)
 {
-	obs_source_t *sceneSource = AcquireOutputSceneSource();
-	if (!sceneSource) {
+	if (!g_instance) {
 		return false;
 	}
-	// Ignore a foreign scene name to keep "preview shows output 0" intact.
-	if (!scene.empty()) {
-		const char *n = obs_source_get_name(sceneSource);
-		if (!n || scene != n) {
-			obs_source_release(sceneSource);
-			return false;
-		}
-	}
-	obs_scene_t *sc = obs_scene_from_source(sceneSource);
-
-	const int64_t newId = hasId ? id : int64_t(-1);
-	SelectOnly(sc, newId);
-	{
-		std::lock_guard<std::mutex> lock(g_stateMutex);
-		g_selectedId = newId;
-	}
-	obs_source_release(sceneSource);
-
-	EmitSelection(newId);
-	return true;
+	return g_instance->Default().SelectFromBridge(scene, id, hasId);
 }
 
 int64_t HitTestForTest(float canvasX, float canvasY)
 {
-	obs_source_t *sceneSource = AcquireOutputSceneSource();
-	if (!sceneSource) {
+	if (!g_instance) {
 		return -1;
 	}
-	obs_scene_t *scene = obs_scene_from_source(sceneSource);
-	vec2 pos;
-	vec2_set(&pos, canvasX, canvasY);
-	const int64_t id = HitTestItemId(scene, pos);
-	obs_source_release(sceneSource);
-	return id;
+	return g_instance->Default().HitTestForTest(canvasX, canvasY);
 }
 
 bool OnVideoReset()
 {
-	if (!g_display) {
-		// No display yet (UI never sized the preview). The next SetRect creates
-		// it fresh against the new base resolution; nothing to re-validate.
-		HostLog("[preview] OnVideoReset: no display yet (will create lazily)");
+	if (!g_instance) {
 		return false;
 	}
-
-	// The base resolution changed, so the cached letterbox transform is stale.
-	// Reset it; RenderPreview recomputes it from obs_get_video_info() on the next
-	// frame. ClientToCanvas treats scale<=0 as "no frame yet" and ignores mouse
-	// input until that recompute lands, avoiding a one-frame mis-mapped drag.
-	{
-		std::lock_guard<std::mutex> lock(g_stateMutex);
-		g_transform = PreviewTransform{};
-	}
-
-	// Nudge a redraw at the current size so the new mix is presented promptly.
-	obs_display_update_color_space(g_display);
-	HostLog("[preview] OnVideoReset: display alive, letterbox transform invalidated");
-	return true;
+	return g_instance->Default().OnVideoReset();
 }
 
 } // namespace Preview

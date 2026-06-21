@@ -6,21 +6,42 @@
 #include <cstdint>
 #include <string>
 
-// Owns the native preview: a borderless child HWND of the host (sibling above the
-// CEF browser HWND, z-ordered on top) plus an obs_display attached to it. The
+struct obs_canvas;
+typedef struct obs_canvas obs_canvas_t;
+
+// One native preview surface: a borderless child HWND of the host (sibling above
+// the CEF browser HWND, z-ordered on top) plus an obs_display attached to it. The
 // obs_display is its own D3D11 swapchain libobs steps independently of the CEF
-// browser's renderer, rendering the active program scene (output channel 0) with
-// aspect-correct letterboxing. Lives between ObsBootstrap::Start() and Stop().
+// browser's renderer, rendering one canvas's program scene with aspect-correct
+// letterboxing.
 //
-// The overlay HWND is created lazily on the first SetRect so the UI drives its
-// geometry. SetRect/Hide run on the host UI thread (the CEF message-router
-// callback thread is the same thread here).
-class PreviewWindow {
+// A surface is bound to a `targetCanvas` at construction. A null targetCanvas is
+// the Default surface: it renders the global mix (obs_get_video_info +
+// obs_render_main_texture) and edits output channel 0's scene, byte-identical to
+// the original single-preview path. A non-null targetCanvas renders that canvas's
+// mix (obs_canvas_get_video_info + obs_canvas_render) and edits the canvas's
+// current scene (CanvasRuntime::CurrentScene), so each additional canvas's panel
+// drags/selects/transforms within its own scene.
+//
+// Each surface owns its editing state (selection, drag, letterbox transform)
+// behind its own mutex, so an edit on one surface never bleeds into another. The
+// render callback runs on the libobs render thread; SetRect/Hide/Destroy + the
+// mouse WndProc run on the host UI thread. The mutex guards only state shared
+// across those two threads; it is never held across an obs_display/render call.
+//
+// The overlay HWND + display are created lazily on the first SetRect so the UI
+// drives the geometry. Lives between its owner's creation and Destroy().
+class PreviewSurface {
 public:
-	// host: the top-level host window the overlay is parented to. siblingAbove:
-	// the CEF browser HWND the overlay must stay z-ordered above (may be null at
-	// construction; the overlay is created above whatever is current at SetRect).
-	PreviewWindow(HWND host, HINSTANCE instance);
+	// host: the top-level host window the overlay is parented to. targetCanvas:
+	// the canvas mix this surface renders+edits, or null for the Default surface
+	// (global mix + output channel 0). The canvas pointer is borrowed (owned by
+	// CanvasRuntime); the surface's display must be destroyed before that mix.
+	PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas);
+	~PreviewSurface();
+
+	PreviewSurface(const PreviewSurface &) = delete;
+	PreviewSurface &operator=(const PreviewSurface &) = delete;
 
 	// Position/size the overlay (device pixels, host-client coords) and resize the
 	// obs_display. Creates the overlay HWND + display on first call. Zero/negative
@@ -30,15 +51,82 @@ public:
 	// Hide the overlay HWND (keeps it + the display alive for the next SetRect).
 	void Hide();
 
-	// Destroy the obs_display (must run while libobs is up) and the overlay HWND.
+	// Destroy the obs_display (must run while libobs is up, before this surface's
+	// canvas mix is freed) and the overlay HWND.
 	void Destroy();
+
+	// The overlay HWND, or null until the first SetRect. Used to map a window
+	// message back to its owning surface.
+	HWND Hwnd() const { return hwnd_; }
+
+	// Drive selection from JS without a mouse event (the SourcesPanel). `scene` is
+	// validated against the surface's current scene name (a mismatch is ignored);
+	// when `hasId` is false the selection is cleared. Emits sceneItem.selected.
+	bool SelectFromBridge(const std::string &scene, int64_t id, bool hasId);
+
+	// Hit-test at a canvas-space coordinate against this surface's scene; returns
+	// the topmost matching scene-item id, or -1. Used by the smoke self-test.
+	int64_t HitTestForTest(float canvasX, float canvasY);
+
+	// The currently-selected scene-item id on this surface (-1 when none). Used by
+	// the isolation self-test to prove an edit on one surface leaves another's
+	// selection untouched. Reads under the surface's own lock.
+	int64_t SelectedIdForTest();
+
+	// Re-validate the surface after a video reset of its mix: clear the cached
+	// letterbox transform so the next frame recomputes it against the new base
+	// resolution, and nudge a redraw. Returns false when no display exists yet.
+	bool OnVideoReset();
+
+	// Mouse editing entry points, invoked once a window message is mapped to this
+	// surface. All run on the UI thread.
+	void OnLeftDown(int mx, int my);
+	void OnMouseMove(int mx, int my);
+	void OnLeftUp();
+	void CancelDrag();
+
+	// Per-surface impl state (selection + letterbox transform shared with the
+	// render thread, drag state, box buffer). Defined in the .cpp so this header
+	// stays free of libobs + graphics types; declared here only so the .cpp's
+	// render/mouse helpers can name it. Incomplete outside that TU.
+	struct State;
 
 private:
 	void EnsureCreated();
 
+	State *state_;
+
 	HWND host_;
 	HINSTANCE instance_;
-	HWND hwnd_ = nullptr; // overlay child HWND; null until first SetRect
+	obs_canvas_t *targetCanvas_; // null = Default surface (global mix, output 0)
+	HWND hwnd_ = nullptr;        // overlay child HWND; null until first SetRect
+	void *display_ = nullptr;    // obs_display_t* (opaque here)
+};
+
+// Owns the native preview: currently a single Default surface (null targetCanvas)
+// rendering the global mix + editing output channel 0, byte-identical to the
+// original single-preview behavior. Sub-phase B2 promotes this to a manager of N
+// per-canvas surfaces. SetRect/Hide run on the host UI thread; the obs_display
+// lives between ObsBootstrap::Start() and Stop().
+class PreviewWindow {
+public:
+	PreviewWindow(HWND host, HINSTANCE instance);
+
+	// Position/size the overlay (device pixels, host-client coords). Creates the
+	// overlay HWND + display on first call. Zero/negative size hides instead.
+	void SetRect(int x, int y, int cx, int cy);
+
+	// Hide the overlay HWND (keeps it + the display alive for the next SetRect).
+	void Hide();
+
+	// Destroy the obs_display (must run while libobs is up) and the overlay HWND.
+	void Destroy();
+
+	// The Default surface, so the bridge select/hit-test/reset paths can reach it.
+	PreviewSurface &Default() { return default_; }
+
+private:
+	PreviewSurface default_;
 };
 
 // Process-wide accessor to the single live PreviewWindow so the bridge methods
