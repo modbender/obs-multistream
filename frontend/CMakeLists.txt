@@ -84,6 +84,8 @@ target_sources(
     src/multistream/OutputBindingStore.hpp
     src/multistream/MultistreamEngine.cpp
     src/multistream/MultistreamEngine.hpp
+    src/multistream/CanvasRuntime.cpp
+    src/multistream/CanvasRuntime.hpp
     src/multistream/StorePaths.hpp
 )
 
@@ -136,6 +138,7 @@ set_source_files_properties(
   src/multistream/StreamProfileStore.cpp
   src/multistream/OutputBindingStore.cpp
   src/multistream/MultistreamEngine.cpp
+  src/multistream/CanvasRuntime.cpp
   PROPERTIES COMPILE_OPTIONS "/wd4201"
 )
 
