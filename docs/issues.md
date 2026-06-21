@@ -278,3 +278,29 @@ own Per-Monitor-V2 DPI awareness, the preview renders correctly. Confirmed fix.
   itself; overriding it breaks the native preview.
 - No reason to pin Qt back to 6.8.x for this issue (6.8 reproduces it too).
   A Qt-version pin for upstream *parity* remains a separate, optional decision.
+
+---
+
+## Phase 4 (new frontend) — deferred tracking notes
+
+### 4.4.4 fan-out engine — errored output stays in the live set (deferred)
+
+`MultistreamEngine::OnOutputStop` sets a dropped/failed output's state to
+`Error` but leaves its `LiveOutput` in the `live` vector; only an explicit
+`StopOutput`/`StopAll` erases it. Consequence: after a stream errors out,
+`IsCanvasLive`/`AnyLive` still report true, so the canvas video/audio settings
+guard keeps refusing edits until the user manually stops that output. This is
+faithful to the legacy `MultistreamOutput` and arguably safe-by-default (the
+encoder is still bound to the canvas mix), but the guard intent ("refuse while
+streaming") and behavior ("refuse while a LiveOutput exists, including errored")
+diverge. Revisit when wiring the live status UX: either auto-reap errored
+outputs from `live` or surface a "clear" affordance. Low priority; not a
+correctness bug.
+
+### 4.4.4 `Statuses()` cross-thread store read — RESOLVED
+
+Fixed in `frontend: build multistream status off the UI thread`: the off-thread
+output signal handlers no longer build the status array inline (which read the
+UI-thread-mutated canvas/profile/binding stores); `EmitMultistreamChanged`
+defers to `TID_UI` so `Statuses()` always reads the stores on the thread that
+writes them.
