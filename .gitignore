@@ -57,3 +57,6 @@ build-aux/flatpak-github-action-modified-*
 
 # Visual brainstorming companion (local-only)
 .superpowers/
+
+# Throwaway CEF-host spike (local-only)
+spike/
