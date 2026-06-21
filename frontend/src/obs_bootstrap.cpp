@@ -1142,6 +1142,71 @@ void ObsBootstrap::RunMultistreamEngineSelfTest()
 		std::to_string(bindingsBefore) + ")");
 }
 
+void ObsBootstrap::RunCanvasRuntimeSelfTest()
+{
+	// Prove an ADDITIONAL canvas (not the Default) now encodes: bring up its live
+	// obs_canvas_t mix, confirm the uuid is preserved so the engine resolver can
+	// match it, then drive StartOutput end-to-end. Operate ONLY on the in-memory
+	// stores (never Save) so the user's files stay untouched and the model returns
+	// to baseline. The temp canvas leaves its encoder ids empty on purpose: the
+	// engine falls back to the Default canvas's encoders, which are already seeded.
+	CanvasDefinition def;
+	def.name = "selftest-runtime-canvas";
+	def.isDefault = false;
+	def.width = 1280;
+	def.height = 720;
+	def.fpsNum = 30;
+	def.fpsDen = 1;
+	const CanvasDefinition &added = g_canvases.Add(std::move(def));
+	const std::string canvasUuid = added.uuid;
+	g_canvasRuntime->EnsureCanvas(added);
+
+	obs_canvas_t *canvas = g_canvasRuntime->Find(canvasUuid);
+	video_t *video = g_canvasRuntime->VideoFor(canvasUuid);
+	const char *liveUuid = canvas ? obs_canvas_get_uuid(canvas) : nullptr;
+	const bool uuidMatches = liveUuid && canvasUuid == liveUuid;
+	HostLog(std::string("[selftest] canvas-runtime EnsureCanvas -> Find=") + (canvas ? "ok" : "null (BUG)") +
+		"; VideoFor=" + (video ? "ok" : "null (BUG)") + "; uuid " + (uuidMatches ? "preserved" : "MISMATCH (BUG)") +
+		" (" + canvasUuid + " vs " + (liveUuid ? liveUuid : "(null)") + ")");
+
+	StreamProfile prof;
+	prof.label = "selftest-runtime";
+	prof.serviceId = "rtmp_custom";
+	prof.settings = OBSDataAutoRelease(obs_data_create());
+	obs_data_set_string(prof.settings, "server", "rtmp://127.0.0.1:1/live");
+	obs_data_set_string(prof.settings, "key", "selftest");
+	const std::string profileUuid = g_streamProfiles.Add(std::move(prof)).uuid;
+
+	OutputBinding &binding = g_outputBindings.Bindings().Add(canvasUuid);
+	binding.profileUuid = profileUuid;
+	binding.enabled = true;
+	const std::string bindingUuid = binding.uuid;
+
+	// Start: this could only return true if the additional canvas has a real mix
+	// (the resolver returns it) so the engine could bind encoders to it. Before the
+	// runtime layer the resolver returned null here and StartOutput refused.
+	const bool started = g_multistream->StartOutput(bindingUuid);
+	const bool canvasLive = g_multistream->IsCanvasLive(canvasUuid);
+	HostLog(std::string("[selftest] canvas-runtime StartOutput -> ") + (started ? "true" : "false (BUG)") +
+		"; IsCanvasLive(additional)=" + (canvasLive ? "true" : "false (BUG)"));
+
+	g_multistream->StopOutput(bindingUuid);
+	const bool stillLive = g_multistream->IsCanvasLive(canvasUuid);
+	HostLog(std::string("[selftest] canvas-runtime StopOutput -> IsCanvasLive=") +
+		(stillLive ? "true (BUG)" : "false"));
+
+	// Restore the model to baseline (in-memory only; nothing was Saved). Drop the
+	// engine's cached encoders for the temp canvas before its mix goes away.
+	g_outputBindings.Bindings().Remove(bindingUuid);
+	g_streamProfiles.Remove(profileUuid);
+	g_multistream->InvalidateCanvasEncoders(canvasUuid);
+	g_canvasRuntime->RemoveCanvas(canvasUuid);
+	g_canvases.Remove(canvasUuid);
+	const bool gone = g_canvasRuntime->Find(canvasUuid) == nullptr && g_canvases.Find(canvasUuid) == nullptr;
+	HostLog(std::string("[selftest] canvas-runtime cleanup: temp canvas ") + (gone ? "removed" : "STILL PRESENT (BUG)") +
+		"; canvases now " + std::to_string(g_canvases.Definitions().size()));
+}
+
 void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.

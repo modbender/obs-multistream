@@ -100,6 +100,14 @@ void RunMultistreamModelSelfTest();
 // Saves, so the user's files are untouched. Gated by the caller to the smoke
 // path.
 void RunMultistreamEngineSelfTest();
+// Headless proof for 4.4.5a: bring up an additional canvas's live obs_canvas_t mix
+// via the runtime, assert the uuid is preserved and VideoFor returns the mix, then
+// drive StartOutput on a temp enabled binding pointed at it (which can only succeed
+// because the mix now exists) and confirm IsCanvasLive flips for that canvas.
+// Removes the temp canvas/profile/binding from the in-memory stores afterward;
+// never Saves, so the user's files are untouched. Gated by the caller to the smoke
+// path.
+void RunCanvasRuntimeSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 
