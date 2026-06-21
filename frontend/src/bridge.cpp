@@ -2245,6 +2245,15 @@ void EmitEvent(const std::string &name, const json &payload)
 
 void EmitMultistreamChanged()
 {
+	// BuildStatusArray -> Statuses() reads the canvas/profile/binding stores, which
+	// are mutated only on the UI thread. This is fired from the off-thread output
+	// start/stop signal handlers too, so defer the build to TID_UI; otherwise an
+	// output dropping mid-edit would race a concurrent Outputs-tab store mutation
+	// (vector reallocation under the read -> torn read / iterator invalidation).
+	if (!CefCurrentlyOn(TID_UI)) {
+		CefPostTask(TID_UI, base::BindOnce(&EmitMultistreamChanged));
+		return;
+	}
 	EmitEvent("multistream.changed", json{{"outputs", BuildStatusArray()}});
 }
 
