@@ -1,0 +1,36 @@
+#pragma once
+
+#include "StreamProfile.hpp"
+
+#include <string>
+#include <vector>
+
+// Owns the global list of stream profiles for the new (non-Qt) frontend,
+// persisted to the SAME standalone streams.json the legacy frontend uses
+// (<config>/obs-multistream/basic/streams.json). De-Qt'd port of the legacy
+// StreamProfileManager; FilePath() resolves the config dir via libobs
+// os_get_config_path instead of OBSApp.
+//
+// When any profiles exist, exactly one is isPrimary == true (re-pointed on Load
+// and on primary removal).
+class StreamProfileStore {
+public:
+	void Load(); // read streams.json (replaces contents; re-points primary if missing)
+	void Save() const;
+
+	const std::vector<StreamProfile> &Profiles() const { return profiles; }
+	bool Empty() const { return profiles.empty(); }
+	StreamProfile *Primary(); // the isPrimary profile, or nullptr if none yet
+	StreamProfile *Find(const std::string &uuid);
+	StreamProfile &Add(StreamProfile p);  // assigns uuid if empty; first add becomes primary
+	void Remove(const std::string &uuid); // re-points primary if the primary was removed
+
+	// Drop all profiles (releasing their obs_data) for teardown leak measurement.
+	void Clear() { profiles.clear(); }
+
+	// <config>/obs-multistream/basic/streams.json -- identical to the legacy path.
+	static std::string FilePath();
+
+private:
+	std::vector<StreamProfile> profiles;
+};

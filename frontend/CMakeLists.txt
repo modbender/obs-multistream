@@ -67,6 +67,22 @@ target_sources(
     src/log.hpp
     api-impl/frontend_callbacks.cpp
     api-impl/frontend_callbacks.hpp
+    # Phase 4.4.0 native-multistream data model. The five legacy model files are
+    # Qt-free (libobs obs_data_* + std only) and compiled here UNMODIFIED from
+    # their frontend_old/utility/ location; the *Store files de-Qt the two legacy
+    # managers (config dir via os_get_config_path instead of OBSApp).
+    "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasDefinition.cpp"
+    "${CMAKE_SOURCE_DIR}/frontend_old/utility/OBSCanvas.cpp"
+    "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasSceneLink.cpp"
+    "${CMAKE_SOURCE_DIR}/frontend_old/utility/OutputBinding.cpp"
+    "${CMAKE_SOURCE_DIR}/frontend_old/utility/StreamProfile.cpp"
+    src/multistream/CanvasStore.cpp
+    src/multistream/CanvasStore.hpp
+    src/multistream/StreamProfileStore.cpp
+    src/multistream/StreamProfileStore.hpp
+    src/multistream/OutputBindingStore.cpp
+    src/multistream/OutputBindingStore.hpp
+    src/multistream/StorePaths.hpp
 )
 
 # CEF's required compiler/linker flags, defines, and include paths.
@@ -75,6 +91,9 @@ set_executable_target_properties(${_target})
 target_include_directories(
   ${_target}
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/api-impl"
+          # The legacy model files (and the *Store ports that include their
+          # headers) resolve "CanvasDefinition.hpp" etc. from frontend_old/utility.
+          "${CMAKE_SOURCE_DIR}/frontend_old/utility"
 )
 
 # The bridge envelope uses nlohmann/json, a header-only lib shipped in the
@@ -106,6 +125,14 @@ set_source_files_properties(
   src/properties_serializer.cpp
   src/preview_window.cpp
   api-impl/frontend_callbacks.cpp
+  "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasDefinition.cpp"
+  "${CMAKE_SOURCE_DIR}/frontend_old/utility/OBSCanvas.cpp"
+  "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasSceneLink.cpp"
+  "${CMAKE_SOURCE_DIR}/frontend_old/utility/OutputBinding.cpp"
+  "${CMAKE_SOURCE_DIR}/frontend_old/utility/StreamProfile.cpp"
+  src/multistream/CanvasStore.cpp
+  src/multistream/StreamProfileStore.cpp
+  src/multistream/OutputBindingStore.cpp
   PROPERTIES COMPILE_OPTIONS "/wd4201"
 )
 

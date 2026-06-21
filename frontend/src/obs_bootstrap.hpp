@@ -33,6 +33,11 @@ void RunPreviewEditSelfTest();
 // caller to the smoke path; restores the original config so the run leaves no
 // change.
 void RunSettingsSelfTest();
+// Headless proof for 4.4.0: round-trip the multistream model stores. Add a
+// canvas + a stream profile, Save, reload into a fresh store, confirm each
+// persisted, then Remove + Save to restore the user's real files unchanged.
+// Gated by the caller to the smoke path.
+void RunMultistreamModelSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 

@@ -20,6 +20,9 @@
 #include "bridge.hpp"
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
+#include "multistream/CanvasStore.hpp"
+#include "multistream/OutputBindingStore.hpp"
+#include "multistream/StreamProfileStore.hpp"
 #include "paths.hpp"
 #include "preview_window.hpp"
 
@@ -213,6 +216,42 @@ void CreateDefaultScene()
 	HostLog("[obs] default scene bound to output channel 0");
 }
 
+// The native-multistream data model (Phase 4.4.0). Global so 4.4.1+ can expose it
+// to the bridge. Three layers: canvases (global canvases.json), stream profiles
+// (global streams.json), output bindings (profile x canvas; standalone
+// output_bindings.json for now -- see OutputBindingStore).
+CanvasStore g_canvases;
+StreamProfileStore g_streamProfiles;
+OutputBindingStore g_outputBindings;
+
+// Load (or seed) the model from the shared config dir and log its shape. Must run
+// after modules load so EnsureDefaultEncoders sees registered encoders.
+void LoadMultistreamModel()
+{
+	g_canvases.Load();
+	if (g_canvases.EnsureDefaultEncoders()) {
+		g_canvases.Save();
+	}
+	g_streamProfiles.Load();
+	g_outputBindings.Load();
+
+	const CanvasDefinition &def = g_canvases.Default();
+	HostLog("[obs] multistream: " + std::to_string(g_canvases.Definitions().size()) +
+		" canvas(es); default='" + def.name + "' uuid=" + def.uuid + " " + std::to_string(def.width) + "x" +
+		std::to_string(def.height) + "@" + std::to_string(def.fpsNum) + "/" + std::to_string(def.fpsDen) +
+		" venc=" + (def.video.id.empty() ? "(unset)" : def.video.id) +
+		" aenc=" + (def.audio.id.empty() ? "(unset)" : def.audio.id));
+
+	const StreamProfile *primary = g_streamProfiles.Primary();
+	HostLog("[obs] multistream: " + std::to_string(g_streamProfiles.Profiles().size()) +
+		" stream profile(s); primary=" + (primary ? primary->DisplayName() : "(none)"));
+
+	HostLog("[obs] multistream: " + std::to_string(g_outputBindings.Bindings().bindings.size()) +
+		" output binding(s); file=" + OutputBindingStore::FilePath());
+	HostLog("[obs] multistream: canvases.json=" + CanvasStore::FilePath());
+	HostLog("[obs] multistream: streams.json=" + StreamProfileStore::FilePath());
+}
+
 } // namespace
 
 bool ObsBootstrap::Start()
@@ -288,6 +327,8 @@ bool ObsBootstrap::Start()
 	RunProbes();
 
 	CreateDefaultScene();
+
+	LoadMultistreamModel();
 
 	return true;
 }
@@ -570,6 +611,79 @@ void ObsBootstrap::RunSettingsSelfTest()
 	HostLog("[selftest] audio restored to " + std::to_string(a0.value("sampleRate", 0u)) + "Hz");
 }
 
+void ObsBootstrap::RunMultistreamModelSelfTest()
+{
+	// Canvas round-trip: add a temporary canvas to the LIVE store, Save to the real
+	// canvases.json, reload into a FRESH store, confirm it persisted, then remove +
+	// Save so the user's file ends exactly as it began.
+	{
+		const size_t before = g_canvases.Definitions().size();
+		CanvasDefinition tmp;
+		tmp.name = "selftest-canvas";
+		tmp.width = 1280;
+		tmp.height = 720;
+		const std::string uuid = g_canvases.Add(std::move(tmp)).uuid;
+		g_canvases.Save();
+
+		CanvasStore reloaded;
+		reloaded.Load();
+		const CanvasDefinition *found = reloaded.Find(uuid);
+		HostLog(std::string("[selftest] canvas round-trip: reloaded ") +
+			std::to_string(reloaded.Definitions().size()) + " (was " + std::to_string(before) +
+			"+1); selftest-canvas " + (found ? "FOUND" : "MISSING") +
+			(found ? " (" + std::to_string(found->width) + "x" + std::to_string(found->height) + ")" : ""));
+
+		g_canvases.Remove(uuid);
+		g_canvases.Save();
+		HostLog("[selftest] canvas round-trip: removed temp canvas, store back to " +
+			std::to_string(g_canvases.Definitions().size()));
+	}
+
+	// Stream-profile round-trip: same pattern against streams.json.
+	{
+		const size_t before = g_streamProfiles.Profiles().size();
+		StreamProfile tmp;
+		tmp.label = "selftest-profile";
+		tmp.serviceId = "rtmp_custom";
+		const std::string uuid = g_streamProfiles.Add(std::move(tmp)).uuid;
+		g_streamProfiles.Save();
+
+		StreamProfileStore reloaded;
+		reloaded.Load();
+		const StreamProfile *found = reloaded.Find(uuid);
+		HostLog(std::string("[selftest] profile round-trip: reloaded ") +
+			std::to_string(reloaded.Profiles().size()) + " (was " + std::to_string(before) +
+			"+1); selftest-profile " + (found ? "FOUND" : "MISSING") +
+			(found ? " label='" + found->label + "'" : ""));
+
+		g_streamProfiles.Remove(uuid);
+		g_streamProfiles.Save();
+		HostLog("[selftest] profile round-trip: removed temp profile, store back to " +
+			std::to_string(g_streamProfiles.Profiles().size()));
+	}
+
+	// Output-binding round-trip: add a binding for the Default canvas, Save, reload,
+	// confirm, then clear + Save back to the original on-disk state.
+	{
+		const std::string canvasUuid = g_canvases.Default().uuid;
+		const size_t before = g_outputBindings.Bindings().bindings.size();
+		const std::string uuid = g_outputBindings.Bindings().Add(canvasUuid).uuid;
+		g_outputBindings.Save();
+
+		OutputBindingStore reloaded;
+		reloaded.Load();
+		const bool found = reloaded.Bindings().Find(uuid) != nullptr;
+		HostLog(std::string("[selftest] binding round-trip: reloaded ") +
+			std::to_string(reloaded.Bindings().bindings.size()) + " (was " + std::to_string(before) +
+			"+1); temp binding " + (found ? "FOUND" : "MISSING"));
+
+		g_outputBindings.Bindings().Remove(uuid);
+		g_outputBindings.Save();
+		HostLog("[selftest] binding round-trip: removed temp binding, store back to " +
+			std::to_string(g_outputBindings.Bindings().bindings.size()));
+	}
+}
+
 void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.
@@ -580,6 +694,14 @@ void ObsBootstrap::Stop()
 	// obs_shutdown, mirroring the Qt frontend's ClearSceneData.
 	while (obs_wait_for_destroy_queue()) {
 	}
+
+	// Release the multistream model's obs_data while libobs is still up, so the
+	// leak count below reflects libobs's true static residual rather than the
+	// loaded canvas/profile config (the store globals would otherwise live until
+	// process exit, past the measurement).
+	g_canvases.Clear();
+	g_streamProfiles.Clear();
+	g_outputBindings.Clear();
 
 	obs_shutdown();
 
