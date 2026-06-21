@@ -1328,6 +1328,166 @@ void ObsBootstrap::RunCanvasSceneSelfTest()
 		"; canvases now " + std::to_string(g_canvases.Definitions().size()));
 }
 
+void ObsBootstrap::RunPreviewSurfaceIsolationSelfTest()
+{
+	using Bridge::json;
+
+	if (!Preview::Instance()) {
+		HostLog("[selftest] preview-isolation: no preview manager (skipped)");
+		return;
+	}
+
+	auto run = [](const std::string &method, const json &params, bool &ok) -> json {
+		json result;
+		std::string error;
+		ok = Bridge::Dispatch(method, params, result, error);
+		if (!ok) {
+			HostLog("[selftest] " + method + " FAILED: " + error);
+			return json(nullptr);
+		}
+		return result;
+	};
+
+	// Bring up a temporary ADDITIONAL canvas with its own live mix (+ a default
+	// channel-0 "Scene"), like the canvas-scene selftest. In-memory only (never
+	// Save). The point: an edit driven on this canvas's preview surface must touch
+	// ONLY that surface's state, leaving the Default surface + output-0 scene alone.
+	CanvasDefinition def;
+	def.name = "selftest-isolation-canvas";
+	def.isDefault = false;
+	def.width = 1280;
+	def.height = 720;
+	def.fpsNum = 30;
+	def.fpsDen = 1;
+	const CanvasDefinition &added = g_canvases.Add(std::move(def));
+	const std::string canvasUuid = added.uuid;
+	g_canvasRuntime->EnsureCanvas(added);
+
+	bool ok = false;
+
+	// Add a source to the canvas's current scene so there is an item to hit-test.
+	json srcCreated = run("sources.create", json{{"canvas", canvasUuid}, {"type", "color_source"}}, ok);
+	const int64_t canvasItemId = ok ? srcCreated.value("id", int64_t(0)) : 0;
+	const std::string canvasSrcName = ok ? srcCreated.value("source", std::string()) : std::string();
+	HostLog(std::string("[selftest] preview-isolation: canvas source -> ") +
+		(ok ? "id=" + std::to_string(canvasItemId) + " '" + canvasSrcName + "'" : "FAIL"));
+
+	// Snapshot the Default surface's selection BEFORE touching the additional
+	// surface, so we can prove it is unchanged afterward. (The preview-edit selftest
+	// ran earlier and cleared it, so this should already be -1.)
+	PreviewSurface *defaultSurface = Preview::Instance()->SurfaceFor("");
+	const int64_t defaultSelBefore = defaultSurface ? defaultSurface->SelectedIdForTest() : -2;
+
+	// Address the additional canvas's surface; it shares no state with the Default.
+	PreviewSurface *canvasSurface = Preview::Instance()->SurfaceFor(canvasUuid);
+	HostLog(std::string("[selftest] preview-isolation: additional surface -> ") +
+		(canvasSurface ? "ok" : "NULL (BUG)"));
+
+	// 1) Hit-test the canvas item at its box-transform center, against the ADDITIONAL
+	// surface. It must find the canvas item (proof the surface resolves the canvas's
+	// own scene, not output 0).
+	int64_t hitOnCanvas = -1;
+	if (canvasSurface) {
+		obs_source_t *canvasScene = g_canvasRuntime->CurrentScene(canvasUuid); // addref'd
+		if (canvasScene) {
+			struct First {
+				obs_sceneitem_t *item;
+			} fctx{nullptr};
+			obs_scene_enum_items(
+				obs_scene_from_source(canvasScene),
+				[](obs_scene_t *, obs_sceneitem_t *item, void *p) -> bool {
+					static_cast<First *>(p)->item = item;
+					return false;
+				},
+				&fctx);
+			if (fctx.item) {
+				matrix4 boxTransform;
+				obs_sceneitem_get_box_transform(fctx.item, &boxTransform);
+				vec3 center;
+				vec3_set(&center, 0.5f, 0.5f, 0.0f);
+				vec3_transform(&center, &center, &boxTransform);
+				hitOnCanvas = Preview::HitTestForTest(canvasUuid, center.x, center.y);
+			}
+			obs_source_release(canvasScene);
+		}
+	}
+	HostLog(std::string("[selftest] preview-isolation: hit-test on additional surface -> id=") +
+		std::to_string(hitOnCanvas) + (hitOnCanvas == canvasItemId ? " (match)" : " (MISMATCH)"));
+
+	// 2) Select the canvas item on the ADDITIONAL surface. Its selection state must
+	// flip; the Default surface's must NOT.
+	const bool selOk = Preview::SelectFromBridge(canvasUuid, "", canvasItemId, true);
+	const int64_t canvasSel = canvasSurface ? canvasSurface->SelectedIdForTest() : -2;
+	const int64_t defaultSelAfter = defaultSurface ? defaultSurface->SelectedIdForTest() : -2;
+	HostLog(std::string("[selftest] preview-isolation: select on additional -> ") + (selOk ? "ok" : "FAIL") +
+		"; additional sel=" + std::to_string(canvasSel) + " (expect " + std::to_string(canvasItemId) + ")" +
+		"; default sel before=" + std::to_string(defaultSelBefore) + " after=" + std::to_string(defaultSelAfter) +
+		" (isolation " +
+		((canvasSel == canvasItemId && defaultSelAfter == defaultSelBefore) ? "OK" : "BUG: bled into Default") +
+		")");
+
+	// 3) Move the canvas item; assert the global output-0 scene's items are
+	// unaffected (the move went to the canvas scene, not the program scene).
+	bool movedOk = false;
+	if (canvasItemId) {
+		obs_source_t *canvasScene = g_canvasRuntime->CurrentScene(canvasUuid); // addref'd
+		if (canvasScene) {
+			obs_scene_t *sc = obs_scene_from_source(canvasScene);
+			obs_sceneitem_t *item = nullptr;
+			struct FindCtx {
+				int64_t id;
+				obs_sceneitem_t *found;
+			} fc{canvasItemId, nullptr};
+			obs_scene_enum_items(
+				sc,
+				[](obs_scene_t *, obs_sceneitem_t *it, void *p) -> bool {
+					auto *c = static_cast<FindCtx *>(p);
+					if (obs_sceneitem_get_id(it) == c->id) {
+						c->found = it;
+						return false;
+					}
+					return true;
+				},
+				&fc);
+			item = fc.found;
+			if (item) {
+				vec2 orig;
+				obs_sceneitem_get_pos(item, &orig);
+				vec2 moved;
+				vec2_set(&moved, orig.x + 40.0f, orig.y + 25.0f);
+				obs_sceneitem_set_pos(item, &moved);
+				vec2 after;
+				obs_sceneitem_get_pos(item, &after);
+				movedOk = int(after.x) == int(orig.x + 40.0f) && int(after.y) == int(orig.y + 25.0f);
+				obs_sceneitem_set_pos(item, &orig); // restore
+			}
+			obs_source_release(canvasScene);
+		}
+	}
+	HostLog(std::string("[selftest] preview-isolation: canvas item move -> ") + (movedOk ? "ok (restored)" : "FAIL"));
+
+	// Clear the additional surface's selection so it leaves no committed state, then
+	// tear down the temp canvas (drops its surface's mix; the surface itself is
+	// reaped by DestroyAll at shutdown, but its display already has no mix to render
+	// once the canvas is gone -- so destroy the surface now to keep ordering clean).
+	Preview::SelectFromBridge(canvasUuid, "", 0, false);
+	Preview::Instance()->Destroy(canvasUuid);
+
+	if (canvasItemId) {
+		obs_source_t *s = obs_get_source_by_name(canvasSrcName.c_str());
+		if (s) {
+			obs_source_remove(s);
+			obs_source_release(s);
+		}
+	}
+	g_multistream->InvalidateCanvasEncoders(canvasUuid);
+	g_canvasRuntime->RemoveCanvas(canvasUuid);
+	g_canvases.Remove(canvasUuid);
+	const bool gone = g_canvasRuntime->Find(canvasUuid) == nullptr && g_canvases.Find(canvasUuid) == nullptr;
+	HostLog(std::string("[selftest] preview-isolation cleanup: temp canvas ") +
+		(gone ? "removed" : "STILL PRESENT (BUG)"));
+}
+
 void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.

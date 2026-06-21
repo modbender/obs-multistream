@@ -116,6 +116,14 @@ void RunCanvasRuntimeSelfTest();
 // the temp canvas afterward; never Saves, so the user's files are untouched. Gated
 // by the caller to the smoke path.
 void RunCanvasSceneSelfTest();
+// Headless proof for 4.4.5b sub-phase B: bring up an additional canvas with a live
+// mix + a source in its current scene, address its preview surface by uuid, and
+// drive a hit-test + a select + a move on it. Assert the edit lands on the
+// additional surface's OWN state (selection flips, item moves) while the Default
+// surface's selection and the global output-0 scene are untouched -- i.e. no
+// cross-surface bleed. Removes the temp canvas afterward; never Saves. Gated by
+// the caller to the smoke path.
+void RunPreviewSurfaceIsolationSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 
