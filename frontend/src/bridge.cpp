@@ -1645,6 +1645,13 @@ bool MethodCanvasRemove(const json &params, json &result, std::string &error)
 		error = "the default canvas cannot be removed";
 		return false;
 	}
+	// Removing destroys the canvas mix; a live output's encoder is still bound to
+	// it, so refuse while live (mirrors the canvas.update guard) rather than free
+	// the mix under a running encoder.
+	if (CanvasIsLive(uuid)) {
+		error = "cannot remove a canvas while it is live";
+		return false;
+	}
 	// Drop the engine's cached encoder pair for the removed canvas (it is bound to
 	// a mix that goes away with the canvas), then destroy the live mix itself.
 	ObsBootstrap::Multistream().InvalidateCanvasEncoders(uuid);
