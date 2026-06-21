@@ -49,6 +49,11 @@ bool Dispatch(const std::string &method, const json &params, json &result, std::
 // there. payload is any JSON value (object/array/scalar/null).
 void EmitEvent(const std::string &name, const json &payload);
 
+// Push the current multistream output statuses as the "multistream.changed"
+// event. Wired as the engine's onStatusChanged; safe to call off the UI thread
+// (EmitEvent marshals to TID_UI).
+void EmitMultistreamChanged();
+
 } // namespace Bridge
 
 // Browser-side query handler for the window.cefQuery() bridge. Parses the

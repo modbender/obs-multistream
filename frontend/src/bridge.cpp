@@ -18,6 +18,7 @@
 #include "properties_serializer.hpp"
 
 #include "multistream/CanvasStore.hpp"
+#include "multistream/MultistreamEngine.hpp"
 #include "multistream/OutputBindingStore.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include <util/dstr.h>
@@ -74,6 +75,25 @@ void OnFrontendEvent(enum obs_frontend_event event, void * /*data*/)
 		return;
 	}
 	EmitEvent("obs.event", json{{"event", name}});
+}
+
+// Build the multistream status JSON array (one object per enabled binding) from
+// the engine's current Statuses(). The state enum is carried as its lowercase
+// name (StateName); the Svelte side maps it to a status-dot color.
+json BuildStatusArray()
+{
+	json arr = json::array();
+	for (const MultistreamEngine::OutputStatus &st : ObsBootstrap::Multistream().Statuses()) {
+		arr.push_back(json{
+			{"bindingUuid", st.bindingUuid},
+			{"canvasUuid", st.canvasUuid},
+			{"profileLabel", st.profileLabel},
+			{"canvasName", st.canvasName},
+			{"state", MultistreamEngine::StateName(st.state)},
+			{"lastError", st.lastError},
+		});
+	}
+	return arr;
 }
 
 // --- method bodies ----------------------------------------------------------
@@ -2185,6 +2205,11 @@ void EmitEvent(const std::string &name, const json &payload)
 		return;
 	}
 	CefPostTask(TID_UI, base::BindOnce(&DoEmit, name, payloadDump));
+}
+
+void EmitMultistreamChanged()
+{
+	EmitEvent("multistream.changed", json{{"outputs", BuildStatusArray()}});
 }
 
 } // namespace Bridge

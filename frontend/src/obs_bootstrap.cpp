@@ -21,6 +21,7 @@
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
 #include "multistream/CanvasStore.hpp"
+#include "multistream/MultistreamEngine.hpp"
 #include "multistream/OutputBindingStore.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include "paths.hpp"
@@ -224,6 +225,10 @@ CanvasStore g_canvases;
 StreamProfileStore g_streamProfiles;
 OutputBindingStore g_outputBindings;
 
+// The fan-out streaming engine, constructed after the stores load (it captures
+// them by reference) and reset in Stop before they clear.
+std::unique_ptr<MultistreamEngine> g_multistream;
+
 // Load (or seed) the model from the shared config dir and log its shape. Must run
 // after modules load so EnsureDefaultEncoders sees registered encoders.
 void LoadMultistreamModel()
@@ -267,6 +272,11 @@ StreamProfileStore &ObsBootstrap::StreamProfiles()
 OutputBindingStore &ObsBootstrap::OutputBindings()
 {
 	return g_outputBindings;
+}
+
+MultistreamEngine &ObsBootstrap::Multistream()
+{
+	return *g_multistream;
 }
 
 bool ObsBootstrap::Start()
@@ -344,6 +354,17 @@ bool ObsBootstrap::Start()
 	CreateDefaultScene();
 
 	LoadMultistreamModel();
+
+	// Build the fan-out engine over the now-loaded stores. The Default canvas
+	// encodes from the global mix; additional canvases get a real obs_canvas_t
+	// mix in 4.4.5, so the resolver returns null for them (start is refused +
+	// logged until then). State changes route to the bridge, which posts the
+	// multistream.changed push on its own (thread-safe) UI marshaling.
+	g_multistream = std::make_unique<MultistreamEngine>(
+		g_canvases, g_streamProfiles, g_outputBindings, [](const std::string &uuid) -> video_t * {
+			return uuid == g_canvases.Default().uuid ? obs_get_video() : nullptr;
+		});
+	g_multistream->onStatusChanged = [] { Bridge::EmitMultistreamChanged(); };
 
 	return true;
 }
@@ -1056,6 +1077,15 @@ void ObsBootstrap::Stop()
 	// thread; drain in a loop until no more work is spawned before
 	// obs_shutdown, mirroring the Qt frontend's ClearSceneData.
 	while (obs_wait_for_destroy_queue()) {
+	}
+
+	// Tear the engine down before the stores it references clear and before
+	// obs_shutdown: StopAll releases its services/outputs/encoders while libobs
+	// is still up. The dtor also calls StopAll (defensive), but reset here so the
+	// order against Clear() is explicit.
+	if (g_multistream) {
+		g_multistream->StopAll();
+		g_multistream.reset();
 	}
 
 	// Release the multistream model's obs_data while libobs is still up, so the
