@@ -283,6 +283,96 @@ main program canvas in several places.
 
 ---
 
+## Phase 4 — Frontend rewrite: CEF-hosted Svelte UI 💭 IN DESIGN
+
+Replace the Qt Widgets desktop frontend with a web UI (**Svelte**) hosted in
+**CEF as the whole application shell**. libobs and the fork's native-multistream
+engine (`CanvasManager` / `MultistreamOutput` / `OutputBinding`) stay; only the
+UI layer changes.
+
+**Why:** Qt Widgets' layout model is the flexibility ceiling — e.g. the preview
+is the `QMainWindow` central widget and can't be hidden/reflowed (no
+`display:none` equivalent; see 3c). A web UI removes that whole class of
+constraint (CSS layout; freely hide/move/overlap panels), and on the chosen
+criteria — lightweight, future-proof, scalable, reliable, flexible — beats the
+alternatives.
+
+**Stack decided (after a research pass; full rationale → forthcoming spec):**
+
+- **Shell: CEF as the whole UI** — not Electron, Tauri, or QML. Reuses the
+  `libcef` + obs-browser CEF integration already shipped for browser sources →
+  one Chromium runtime for UI *and* sources; no second runtime, no Node, no
+  native addon. Lowest incremental footprint; in-process C++↔libobs.
+- **UI framework: Svelte** — compiled, no vDOM runtime; fits the real-time
+  control-surface nature; Svelte 5 + Vercel backing = future-proof.
+- **Preview: native-window (HWND/NSView) passthrough** — libobs renders its GPU
+  surface into a host-owned window handle (the Streamlabs-proven mechanism;
+  macOS via IOSurface).
+- Rejected: Tauri (mandatory CEF cancels its lightness), Electron (two
+  Chromiums), QML (single-vendor, smaller ecosystem), Sciter/Ultralight (second
+  runtime), Flutter (Windows GPU embed broken / desktop archived), Slint (GPLv3
+  + immature for desktop chrome).
+
+**Make-or-break first step — de-risking spike (gate before committing): ✅ DONE
+2026-06-21 — verdict GO.** A throwaway standalone CEF-host exe (`spike/cef-host/`,
+gitignored) proved all four gate items: libobs boots and runs at a steady 60 fps
+under the CEF message loop with **no Qt**; `obs_display` renders `monitor_capture`
+into a child HWND alongside the embedded browser; a `CefMessageRouter` JS↔C++
+round-trip returns the libobs version; clean warning-free teardown (a deferred-
+destroy cascade race was fixed via single-ownership + a `while(obs_wait_for_
+destroy_queue())` drain, mirroring `OBSBasic::ClearSceneData`), leak count a
+constant static 3. Independently reproduced 4/4. Spec/plan/RESULTS:
+`docs/superpowers/{specs,plans}/2026-06-20-cef-host-spike*` + `spike/cef-host/
+RESULTS.md` (all gitignored — read directly). The mechanism is proven; do not
+re-spike it.
+
+**⚠ Biggest 4.1 risk the spike re-scoped (NOT the mechanism):** the spike loaded
+only a 2-module allowlist (`image-source`, `win-capture`) because
+`obs_load_all_modules()` **aborts headless** — many plugins (encoders, services,
+outputs, frontend-tools, *-output-ui) call into `obs-frontend-api` callbacks that
+**only the Qt frontend currently installs**. Replacing Qt therefore requires a
+**headless-safe `obs-frontend-api` shim** (or curated+patched module loading) to
+run the full plugin set. This is unscoped, non-trivial, and plausibly the single
+largest chunk of 4.1 — validate it with a cheap throwaway test BEFORE sinking 4.1
+effort. Also: the full-app teardown must replicate `ClearSceneData`'s
+enum-remove-all-then-drain, not the spike's single-scene minimal version.
+
+**Scope note:** large multi-sub-project effort (the Qt frontend is ~85K LOC of
+UI + app logic), decomposed into its own spec/plan cycles. Remaining Phase 3
+items — **3b** (per-canvas Studio Mode) and **3e** (Stats dock) — and any further
+canvas-editing parity are **deferred and rebuilt in the new frontend** rather
+than written in throwaway Qt. 3a/3d (already shipped in Qt) inform the new
+design but their widgets are superseded.
+
+**Migration decided (Approach A — parallel big-bang):** move the current Qt
+frontend to `frontend_old/` (kept for reference/parity-checking, not the active
+build), build the new Svelte/CEF frontend fresh in `frontend/`, flip the default
+at cutover (4.6). A CMake flag (e.g. `USE_LEGACY_FRONTEND`, default ON until the
+new frontend reaches MVP) keeps `frontend_old` buildable through the transition
+so a working app is always available; only one frontend ever builds at a time.
+
+**Deferred within Phase 4 (required later — roadmap as found):**
+
+- 🔭 **Cross-platform preview** — the spike and initial build are **Windows-only**
+  (HWND + D3D11 passthrough). macOS (NSView + IOSurface) and Linux (X11/GL)
+  preview embedding come later as their own efforts.
+- 🔭 **Headless `obs-frontend-api` shim** (surfaced by the 4.0 spike) — needed to
+  load the full plugin set without a Qt frontend; likely the biggest 4.1
+  workstream. Spike a viability test with all modules before committing to 4.1.
+- ✅ **Visual confirmation of the spike (2026-06-21, windows-mcp)** — the bridge
+  result (`32.1.0-…`) renders in the browser pane, and a temporary green
+  `color_source` rendered on screen in the preview pane, proving the `obs_display`
+  → child-HWND present path visually. (`monitor_capture` showed black only because
+  the captured monitor was playing hardware-overlay/DRM video — a source artifact,
+  not a display-path bug.) All four spike gates now confirmed.
+- 🔭 **4.1 integration deltas** — obs-browser's bundled CEF fork (vs the standalone
+  Spotify CEF used in the spike): sandbox/bootstrap mode, `/MD` vs its flags,
+  message-router surface; and a custom `app://` scheme to serve the Svelte bundle
+  (replacing the spike's `file://` harness).
+- 🔭 Further deferred items discovered during Phase 4 get appended here.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
