@@ -1,11 +1,18 @@
 <script lang="ts">
   import { obs, type SceneItem, type ReorderDirection } from "./bridge";
   import { sceneState } from "./scenes.svelte";
+  import PropertyForm from "./properties/PropertyForm.svelte";
 
   let items = $state<SceneItem[]>([]);
   let loaded = $state(false);
   let error = $state<string | null>(null);
   let selectedItemId = $state<number | null>(null);
+  // The source whose properties dialog is open (its source name), or null.
+  let propsForSource = $state<string | null>(null);
+
+  function openProperties(item: SceneItem) {
+    if (item.source) propsForSource = item.source;
+  }
 
   async function load() {
     if (!sceneState.current) {
@@ -114,10 +121,15 @@
             title={item.locked ? "Unlock" : "Lock"}
             onclick={() => void toggleLocked(item)}>{item.locked ? "🔒" : "🔓"}</button
           >
-          <button class="name" onclick={() => (selectedItemId = item.id)}>
+          <button
+            class="name"
+            onclick={() => (selectedItemId = item.id)}
+            ondblclick={() => openProperties(item)}
+          >
             {item.source ?? "(unnamed)"}
           </button>
           <span class="row-actions">
+            <button class="icon" title="Properties" onclick={() => openProperties(item)}>⚙</button>
             <button
               class="icon"
               title="Move up"
@@ -137,6 +149,26 @@
     </ul>
   {/if}
 </section>
+
+{#if propsForSource}
+  <div
+    class="modal-backdrop"
+    role="presentation"
+    onclick={(e) => {
+      if (e.target === e.currentTarget) propsForSource = null;
+    }}
+  >
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Source properties">
+      <header class="modal-head">
+        <h3>Properties — {propsForSource}</h3>
+        <button class="icon close" title="Close" onclick={() => (propsForSource = null)}>✕</button>
+      </header>
+      <div class="modal-body">
+        <PropertyForm kind="source" ref={propsForSource} />
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .panel {
@@ -227,5 +259,47 @@
     color: var(--off);
     margin: 0;
     font-size: 12px;
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 24px;
+  }
+  .modal {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: min(560px, 100%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-head h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .modal-body {
+    padding: 18px;
+    overflow: auto;
+  }
+  .close {
+    font-size: 14px;
   }
 </style>

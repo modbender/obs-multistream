@@ -312,6 +312,73 @@ void ObsBootstrap::FireSceneChanged()
 	}
 }
 
+void ObsBootstrap::RunPropertiesSelfTest()
+{
+	using Bridge::json;
+
+	auto run = [](const std::string &method, const json &params) -> json {
+		json result;
+		std::string error;
+		if (!Bridge::Dispatch(method, params, result, error)) {
+			HostLog("[selftest] " + method + " FAILED: " + error);
+			return json(nullptr);
+		}
+		return result;
+	};
+
+	// 1) properties.get on the default color source: expect color + width/height.
+	json got = run("properties.get", json{{"kind", "source"}, {"ref", "Placeholder Background"}});
+	if (!got.is_object()) {
+		return;
+	}
+	const json &props = got["props"];
+	std::string names;
+	for (const auto &p : props) {
+		names += " " + p.value("name", std::string("?")) + "(" + p.value("type", std::string("?")) + ")";
+	}
+	HostLog("[selftest] properties.get color_source -> " + std::to_string(props.size()) +
+		" props:" + names);
+	const int64_t before = got["values"].value("color", int64_t(0));
+	HostLog("[selftest] color before = " + std::to_string(before));
+
+	// 2) properties.set a new color, prove the value round-trips on re-fetch.
+	const int64_t newColor = 0xff00ff00; // opaque green (ABGR)
+	json set = run("properties.set", json{{"kind", "source"},
+					      {"ref", "Placeholder Background"},
+					      {"settings", json{{"color", newColor}}}});
+	if (set.is_object()) {
+		const int64_t after = set["values"].value("color", int64_t(0));
+		HostLog("[selftest] color after set = " + std::to_string(after) +
+			(after == newColor ? " (round-trip OK)" : " (MISMATCH)"));
+		HostLog("[selftest] re-fetched props count = " + std::to_string(set["props"].size()));
+	}
+
+	// 3) Restore the original color so the smoke run leaves no visible change.
+	run("properties.set",
+	    json{{"kind", "source"}, {"ref", "Placeholder Background"}, {"settings", json{{"color", before}}}});
+	HostLog("[selftest] color restored to " + std::to_string(before));
+
+	// 4) Richer-type coverage: a transient browser_source (url/fps/css/list/bool/
+	// path) exercises text/int/list/group descriptors. Not added to any scene; we
+	// query its properties then remove + release it (no committed scene change).
+	obs_source_t *web = obs_source_create("browser_source", "selftest-web", nullptr, nullptr);
+	if (web) {
+		json bs = run("properties.get", json{{"kind", "source"}, {"ref", "selftest-web"}});
+		if (bs.is_object()) {
+			std::string types;
+			for (const auto &p : bs["props"]) {
+				types += " " + p.value("name", std::string("?")) + "(" +
+					 p.value("type", std::string("?")) + ")";
+			}
+			HostLog("[selftest] browser_source props (" + std::to_string(bs["props"].size()) +
+				"):" + types);
+		}
+		obs_source_remove(web);
+		obs_source_release(web);
+		HostLog("[selftest] transient browser_source released");
+	}
+}
+
 void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.

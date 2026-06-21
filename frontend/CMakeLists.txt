@@ -58,6 +58,8 @@ target_sources(
     src/scheme.hpp
     src/bridge.cpp
     src/bridge.hpp
+    src/properties_serializer.cpp
+    src/properties_serializer.hpp
     src/obs_bootstrap.cpp
     src/obs_bootstrap.hpp
     src/preview_window.cpp
@@ -101,6 +103,7 @@ set_source_files_properties(
   src/main.cpp
   src/obs_bootstrap.cpp
   src/bridge.cpp
+  src/properties_serializer.cpp
   src/preview_window.cpp
   api-impl/frontend_callbacks.cpp
   PROPERTIES COMPILE_OPTIONS "/wd4201"

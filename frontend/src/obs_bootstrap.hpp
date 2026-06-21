@@ -18,6 +18,10 @@ bool Start();
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).
 void FireSceneChanged();
 void TeardownScene();
+// Headless proof for 4.3.2: drive properties.get/properties.set on the default
+// color source through the bridge and log the round-trip. Gated by the caller to
+// the smoke path; no-op effect on normal runs (it only reads/restores).
+void RunPropertiesSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 

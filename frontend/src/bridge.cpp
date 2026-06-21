@@ -13,6 +13,7 @@
 
 #include "log.hpp"
 #include "preview_window.hpp"
+#include "properties_serializer.hpp"
 
 namespace Bridge {
 
@@ -626,6 +627,172 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 	return true;
 }
 
+// --- properties (generic obs_properties renderer) ---------------------------
+
+// One editable-object kind: how to resolve a `ref` to an obs object, fetch its
+// properties + settings, and apply an update. Adding "encoder"/"service"/
+// "output" later is one row here, not a new method. The resolver returns an
+// addref'd handle (caller releases via `release`); `get_props`/`get_settings`/
+// `update` operate on the void* handle.
+struct PropertyKind {
+	const char *name;
+	void *(*resolve)(const std::string &ref);                   // addref'd; null if not found
+	obs_properties_t *(*get_props)(void *obj);                  // caller frees with obs_properties_destroy
+	obs_data_t *(*get_settings)(void *obj);                     // addref'd; caller releases
+	void (*update)(void *obj, obs_data_t *settings);            // apply settings
+	void (*release)(void *obj);                                 // drop the resolve ref
+};
+
+const PropertyKind kPropertyKinds[] = {
+	{
+		"source",
+		[](const std::string &ref) -> void * { return obs_get_source_by_name(ref.c_str()); },
+		[](void *obj) -> obs_properties_t * { return obs_source_properties(static_cast<obs_source_t *>(obj)); },
+		[](void *obj) -> obs_data_t * { return obs_source_get_settings(static_cast<obs_source_t *>(obj)); },
+		[](void *obj, obs_data_t *settings) { obs_source_update(static_cast<obs_source_t *>(obj), settings); },
+		[](void *obj) { obs_source_release(static_cast<obs_source_t *>(obj)); },
+	},
+};
+
+const PropertyKind *FindPropertyKind(const std::string &kind)
+{
+	for (const auto &k : kPropertyKinds) {
+		if (kind == k.name) {
+			return &k;
+		}
+	}
+	return nullptr;
+}
+
+// Build {props, values} for an already-resolved object. `props` is the
+// serialized descriptor array; `values` is the object's current settings as a
+// JSON object (so the form binds the same data the object reads). Frees the
+// fetched properties; does NOT release `obj`.
+bool BuildPropertiesResult(const PropertyKind *kind, void *obj, json &result, std::string &error)
+{
+	obs_properties_t *props = kind->get_props(obj);
+	obs_data_t *settings = kind->get_settings(obj); // addref'd
+
+	json descriptors = PropertiesSerializer::SerializeProperties(props, settings);
+
+	json values = json::object();
+	if (settings) {
+		const char *raw = obs_data_get_json(settings);
+		if (raw) {
+			values = json::parse(raw, nullptr, false);
+			if (values.is_discarded()) {
+				values = json::object();
+			}
+		}
+	}
+
+	if (props) {
+		obs_properties_destroy(props);
+	}
+	if (settings) {
+		obs_data_release(settings);
+	}
+
+	(void)error;
+	result = json{{"props", std::move(descriptors)}, {"values", std::move(values)}};
+	return true;
+}
+
+// Read+validate {kind, ref} -> resolved object + its kind. Caller releases the
+// object via kind->release on success.
+bool ResolvePropertyTarget(const json &params, const PropertyKind *&kind, void *&obj, std::string &error)
+{
+	const std::string kindName = OptString(params, "kind");
+	const std::string ref = OptString(params, "ref");
+	if (kindName.empty() || ref.empty()) {
+		error = "properties requires non-empty 'kind' and 'ref'";
+		return false;
+	}
+	kind = FindPropertyKind(kindName);
+	if (!kind) {
+		error = "unsupported properties kind: " + kindName;
+		return false;
+	}
+	obj = kind->resolve(ref);
+	if (!obj) {
+		error = "no " + kindName + " named '" + ref + "'";
+		return false;
+	}
+	return true;
+}
+
+bool MethodPropertiesGet(const json &params, json &result, std::string &error)
+{
+	const PropertyKind *kind = nullptr;
+	void *obj = nullptr;
+	if (!ResolvePropertyTarget(params, kind, obj, error)) {
+		return false;
+	}
+	const bool ok = BuildPropertiesResult(kind, obj, result, error);
+	kind->release(obj);
+	return ok;
+}
+
+bool MethodPropertiesSet(const json &params, json &result, std::string &error)
+{
+	const PropertyKind *kind = nullptr;
+	void *obj = nullptr;
+	if (!ResolvePropertyTarget(params, kind, obj, error)) {
+		return false;
+	}
+
+	// Apply the supplied settings (partial: obs_*_update merges over existing).
+	if (params.is_object() && params.contains("settings") && params["settings"].is_object()) {
+		const std::string dump = params["settings"].dump();
+		obs_data_t *settings = obs_data_create_from_json(dump.c_str());
+		if (settings) {
+			kind->update(obj, settings);
+			obs_data_release(settings);
+		}
+	}
+
+	// Re-fetch so modified-callbacks' visibility/enabled/option changes reflect
+	// in the returned schema + values. obs re-runs them during update + get.
+	const bool ok = BuildPropertiesResult(kind, obj, result, error);
+	kind->release(obj);
+	return ok;
+}
+
+bool MethodPropertiesButton(const json &params, json &result, std::string &error)
+{
+	const PropertyKind *kind = nullptr;
+	void *obj = nullptr;
+	if (!ResolvePropertyTarget(params, kind, obj, error)) {
+		return false;
+	}
+	const std::string propName = OptString(params, "prop");
+	if (propName.empty()) {
+		kind->release(obj);
+		error = "properties.button requires a 'prop' name";
+		return false;
+	}
+
+	obs_properties_t *props = kind->get_props(obj);
+	obs_property_t *prop = props ? obs_properties_get(props, propName.c_str()) : nullptr;
+	if (!prop) {
+		if (props) {
+			obs_properties_destroy(props);
+		}
+		kind->release(obj);
+		error = "no property named '" + propName + "'";
+		return false;
+	}
+
+	// Invoke the button's click callback. It may mutate the property layout; we
+	// re-fetch fresh props+values afterward regardless.
+	obs_property_button_clicked(prop, obj);
+	obs_properties_destroy(props);
+
+	const bool ok = BuildPropertiesResult(kind, obj, result, error);
+	kind->release(obj);
+	return ok;
+}
+
 // Post the actual ExecuteJavaScript on TID_UI. Built from JSON dumps so the name
 // and payload are correctly quoted/escaped.
 void DoEmit(const std::string &name, const std::string &payloadDump)
@@ -675,6 +842,9 @@ void Init()
 		{"sceneItems.setLocked", MethodSceneItemsSetLocked},
 		{"sceneItems.remove", MethodSceneItemsRemove},
 		{"sceneItems.reorder", MethodSceneItemsReorder},
+		{"properties.get", MethodPropertiesGet},
+		{"properties.set", MethodPropertiesSet},
+		{"properties.button", MethodPropertiesButton},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);

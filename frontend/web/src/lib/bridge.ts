@@ -44,6 +44,111 @@ export interface SceneItem {
 
 export type ReorderDirection = "up" | "down" | "top" | "bottom";
 
+// --- generic obs_properties descriptors (4.3.2) -----------------------------
+
+/** Editable-object kind a property set belongs to. "source" is wired now. */
+export type PropertyKind = "source" | "encoder" | "service" | "output";
+
+/** One item in a list (combo/radio) property. */
+export interface PropertyListItem {
+  name: string | null;
+  value: string | number | boolean;
+  disabled: boolean;
+}
+
+/** Fields shared by every property descriptor. */
+interface PropertyBase {
+  name: string;
+  label: string | null;
+  enabled: boolean;
+  visible: boolean;
+  long_description?: string;
+  /** Live value from the object's settings (type-specific). */
+  value?: unknown;
+}
+
+export interface BoolProperty extends PropertyBase {
+  type: "bool";
+  value: boolean;
+}
+export interface IntProperty extends PropertyBase {
+  type: "int";
+  min: number;
+  max: number;
+  step: number;
+  int_type: "scroller" | "slider";
+  suffix: string | null;
+  value: number;
+}
+export interface FloatProperty extends PropertyBase {
+  type: "float";
+  min: number;
+  max: number;
+  step: number;
+  float_type: "scroller" | "slider";
+  suffix: string | null;
+  value: number;
+}
+export interface TextProperty extends PropertyBase {
+  type: "text";
+  text_type: "default" | "password" | "multiline" | "info";
+  monospace: boolean;
+  info_type?: "normal" | "warning" | "error";
+  info_word_wrap?: boolean;
+  value: string | null;
+}
+export interface PathProperty extends PropertyBase {
+  type: "path";
+  path_type: "file" | "file_save" | "directory";
+  filter: string | null;
+  default_path: string | null;
+  value: string | null;
+}
+export interface ListProperty extends PropertyBase {
+  type: "list";
+  combo_format: "int" | "float" | "string" | "bool" | "invalid";
+  combo_type: "editable" | "list" | "radio";
+  items: PropertyListItem[];
+  value: string | number | boolean | null;
+}
+export interface ColorProperty extends PropertyBase {
+  type: "color" | "color_alpha";
+  value: number;
+}
+export interface ButtonProperty extends PropertyBase {
+  type: "button";
+  button_type: "default" | "url";
+  url?: string;
+}
+export interface GroupProperty extends PropertyBase {
+  type: "group";
+  group_type: "normal" | "checkable";
+  props: PropertyDescriptor[];
+  value?: boolean;
+}
+/** Composite types serialized best-effort; rendered as "unsupported (TODO)". */
+export interface UnsupportedProperty extends PropertyBase {
+  type: "font" | "editable_list" | "frame_rate" | "invalid";
+}
+
+export type PropertyDescriptor =
+  | BoolProperty
+  | IntProperty
+  | FloatProperty
+  | TextProperty
+  | PathProperty
+  | ListProperty
+  | ColorProperty
+  | ButtonProperty
+  | GroupProperty
+  | UnsupportedProperty;
+
+/** Result of properties.get / properties.set / properties.button. */
+export interface PropertiesResult {
+  props: PropertyDescriptor[];
+  values: Record<string, unknown>;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -66,6 +171,10 @@ export interface ObsMethods {
   "sceneItems.setLocked": { id: number; locked: boolean };
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
+  // Generic obs_properties renderer (4.3.2).
+  "properties.get": PropertiesResult;
+  "properties.set": PropertiesResult;
+  "properties.button": PropertiesResult;
 }
 
 /** Known server->client push events and their payload shapes. */
