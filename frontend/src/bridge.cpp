@@ -475,6 +475,42 @@ obs_source_t *ResolveSceneSource(const std::string &name)
 	return source;
 }
 
+// A canvas-scoped scene request: the resolved canvas uuid (empty for the global
+// channel-0 path) plus whether the request addresses an additional canvas. The
+// `canvas` param is purely additive -- absent, empty, or equal to the Default
+// canvas uuid all resolve exactly as before (global output-0), keeping the
+// Default/absent path byte-identical.
+struct CanvasTarget {
+	std::string uuid;     // the additional canvas's uuid; empty => global path
+	bool isAdditional;    // true only when uuid names a non-Default canvas
+};
+
+CanvasTarget ResolveCanvasTarget(const json &params)
+{
+	CanvasTarget t;
+	const std::string canvas = OptString(params, "canvas");
+	if (canvas.empty() || canvas == ObsBootstrap::Canvases().Default().uuid) {
+		return t; // global channel-0 path
+	}
+	t.uuid = canvas;
+	t.isAdditional = true;
+	return t;
+}
+
+// Resolve the scene a scene/source operation should act on, addref'd (caller
+// releases), honoring an optional `canvas` param. For an additional canvas the
+// scene is that canvas's current channel-0 scene; otherwise the existing global
+// resolution (named `scene`, or output 0) applies unchanged. null when nothing
+// resolves.
+obs_source_t *ResolveTargetScene(const json &params)
+{
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		return ObsBootstrap::CanvasRuntime().CurrentScene(target.uuid); // addref'd
+	}
+	return ResolveSceneSource(OptString(params, "scene")); // addref'd
+}
+
 // Locate a scene item by id within a scene. Returns the item WITHOUT an added
 // ref (it is owned by the scene); valid only while the scene is held. null when
 // no item matches.
@@ -555,8 +591,27 @@ bool MethodPreviewSelect(const json &params, json &result, std::string &error)
 
 // --- scenes -----------------------------------------------------------------
 
-bool MethodScenesList(const json & /*params*/, json &result, std::string & /*error*/)
+// Emit scenes.changed, tagged with the addressed canvas uuid (empty/null for the
+// global path) so a per-canvas panel filters to its own canvas's scene list.
+void EmitScenesChanged(const std::string &canvasUuid)
 {
+	EmitEvent("scenes.changed", json{{"canvas", canvasUuid.empty() ? json(nullptr) : json(canvasUuid)}});
+}
+
+bool MethodScenesList(const json &params, json &result, std::string &error)
+{
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		// List the additional canvas's own scenes (isolated from the global
+		// registry), flagging the one bound to its channel 0 as current.
+		json scenes = json::array();
+		for (const CanvasRuntime::SceneInfo &s : ObsBootstrap::CanvasRuntime().Scenes(target.uuid)) {
+			scenes.push_back(json{{"name", s.name}, {"current", s.current}});
+		}
+		result = std::move(scenes);
+		return true;
+	}
+	(void)error;
 	// Enumerate scene sources in creation order. `current` flags the scene bound
 	// to output channel 0.
 	obs_source_t *current = obs_get_output_source(0); // addref'd; may be null
@@ -595,6 +650,22 @@ bool MethodScenesCreate(const json &params, json &result, std::string &error)
 		error = "scenes.create requires a non-empty 'name'";
 		return false;
 	}
+
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		// Create the scene inside the additional canvas's own source namespace; the
+		// runtime rejects a name already taken within that canvas.
+		obs_source_t *created = ObsBootstrap::CanvasRuntime().CreateScene(target.uuid, name); // addref'd
+		if (!created) {
+			error = "could not create scene '" + name + "' in that canvas";
+			return false;
+		}
+		obs_source_release(created); // the canvas owns the scene; drop our ref
+		EmitScenesChanged(target.uuid);
+		result = json{{"name", name}};
+		return true;
+	}
+
 	// Reject duplicates (a source of any kind with that name collides).
 	obs_source_t *existing = obs_get_source_by_name(name.c_str());
 	if (existing) {
@@ -610,7 +681,7 @@ bool MethodScenesCreate(const json &params, json &result, std::string &error)
 	}
 	obs_scene_release(scene); // creation ref; the scene source persists in the registry
 
-	EmitEvent("scenes.changed", json::object());
+	EmitScenesChanged(std::string());
 	result = json{{"name", name}};
 	return true;
 }
@@ -621,6 +692,19 @@ bool MethodScenesRemove(const json &params, json &result, std::string &error)
 	if (name.empty()) {
 		error = "scenes.remove requires a non-empty 'name'";
 		return false;
+	}
+
+	const CanvasTarget canvasTarget = ResolveCanvasTarget(params);
+	if (canvasTarget.isAdditional) {
+		// Remove from the additional canvas's own scenes; the runtime refuses the
+		// last scene and switches channel 0 off the target first.
+		if (!ObsBootstrap::CanvasRuntime().RemoveScene(canvasTarget.uuid, name)) {
+			error = "could not remove scene '" + name + "' from that canvas";
+			return false;
+		}
+		EmitScenesChanged(canvasTarget.uuid);
+		result = json{{"removed", name}};
+		return true;
 	}
 
 	// Count scenes and find a fallback (any scene other than the target) so we
@@ -682,7 +766,7 @@ bool MethodScenesRemove(const json &params, json &result, std::string &error)
 		obs_source_release(ctx.fallback);
 	}
 
-	EmitEvent("scenes.changed", json::object());
+	EmitScenesChanged(std::string());
 	result = json{{"removed", name}};
 	return true;
 }
@@ -694,6 +778,19 @@ bool MethodScenesSetCurrent(const json &params, json &result, std::string &error
 		error = "scenes.setCurrent requires a non-empty 'name'";
 		return false;
 	}
+
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		// Set the additional canvas's current scene (its channel 0), not output 0.
+		if (!ObsBootstrap::CanvasRuntime().SetCurrentScene(target.uuid, name)) {
+			error = "no scene named '" + name + "' in that canvas";
+			return false;
+		}
+		EmitScenesChanged(target.uuid);
+		result = json{{"name", name}};
+		return true;
+	}
+
 	obs_source_t *source = obs_get_source_by_name(name.c_str()); // addref'd
 	if (!source || !obs_scene_from_source(source)) {
 		if (source) {
@@ -705,7 +802,7 @@ bool MethodScenesSetCurrent(const json &params, json &result, std::string &error
 	obs_set_output_source(0, source);
 	obs_source_release(source);
 
-	EmitEvent("scenes.changed", json::object());
+	EmitScenesChanged(std::string());
 	result = json{{"name", name}};
 	return true;
 }
@@ -722,6 +819,20 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 		result = json{{"name", to}};
 		return true;
 	}
+
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		// Rename within the additional canvas's own source namespace; the runtime
+		// rejects a clash with another scene in that canvas.
+		if (!ObsBootstrap::CanvasRuntime().RenameScene(target.uuid, from, to)) {
+			error = "could not rename '" + from + "' to '" + to + "' in that canvas";
+			return false;
+		}
+		EmitScenesChanged(target.uuid);
+		result = json{{"name", to}};
+		return true;
+	}
+
 	obs_source_t *clash = obs_get_source_by_name(to.c_str());
 	if (clash) {
 		obs_source_release(clash);
@@ -739,7 +850,7 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 	obs_source_set_name(source, to.c_str());
 	obs_source_release(source);
 
-	EmitEvent("scenes.changed", json::object());
+	EmitScenesChanged(std::string());
 	result = json{{"name", to}};
 	return true;
 }
@@ -747,16 +858,19 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 // --- scene items ------------------------------------------------------------
 
 // Emit sceneItems.changed for the resolved scene. Passes the scene's actual name
-// so the UI can decide whether the change applies to what it is showing.
-void EmitSceneItemsChanged(obs_source_t *sceneSource)
+// plus the addressed canvas uuid (empty for the global path) so a per-canvas panel
+// filters the event to its own canvas before deciding whether the change applies.
+void EmitSceneItemsChanged(obs_source_t *sceneSource, const std::string &canvasUuid)
 {
 	const char *name = sceneSource ? obs_source_get_name(sceneSource) : nullptr;
-	EmitEvent("sceneItems.changed", json{{"scene", name ? json(name) : json(nullptr)}});
+	EmitEvent("sceneItems.changed",
+		  json{{"scene", name ? json(name) : json(nullptr)},
+		       {"canvas", canvasUuid.empty() ? json(nullptr) : json(canvasUuid)}});
 }
 
 bool MethodSceneItemsList(const json &params, json &result, std::string &error)
 {
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
 	if (!sceneSource) {
 		error = "no scene to list";
 		return false;
@@ -795,7 +909,7 @@ bool MethodSceneItemsSetVisible(const json &params, json &result, std::string &e
 		return false;
 	}
 	const bool visible = params.is_object() && params.value("visible", false);
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene"));
+	obs_source_t *sceneSource = ResolveTargetScene(params);
 	if (!sceneSource) {
 		error = "no scene";
 		return false;
@@ -808,7 +922,7 @@ bool MethodSceneItemsSetVisible(const json &params, json &result, std::string &e
 		return false;
 	}
 	obs_sceneitem_set_visible(item, visible);
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	result = json{{"id", id}, {"visible", visible}};
 	return true;
@@ -821,7 +935,7 @@ bool MethodSceneItemsSetLocked(const json &params, json &result, std::string &er
 		return false;
 	}
 	const bool locked = params.is_object() && params.value("locked", false);
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene"));
+	obs_source_t *sceneSource = ResolveTargetScene(params);
 	if (!sceneSource) {
 		error = "no scene";
 		return false;
@@ -834,7 +948,7 @@ bool MethodSceneItemsSetLocked(const json &params, json &result, std::string &er
 		return false;
 	}
 	obs_sceneitem_set_locked(item, locked);
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	result = json{{"id", id}, {"locked", locked}};
 	return true;
@@ -846,7 +960,7 @@ bool MethodSceneItemsRemove(const json &params, json &result, std::string &error
 	if (!ItemIdFromParams(params, id, error)) {
 		return false;
 	}
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene"));
+	obs_source_t *sceneSource = ResolveTargetScene(params);
 	if (!sceneSource) {
 		error = "no scene";
 		return false;
@@ -859,7 +973,7 @@ bool MethodSceneItemsRemove(const json &params, json &result, std::string &error
 		return false;
 	}
 	obs_sceneitem_remove(item);
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	result = json{{"removed", id}};
 	return true;
@@ -895,7 +1009,7 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 		return false;
 	}
 
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene"));
+	obs_source_t *sceneSource = ResolveTargetScene(params);
 	if (!sceneSource) {
 		error = "no scene";
 		return false;
@@ -908,7 +1022,7 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 		return false;
 	}
 	obs_sceneitem_set_order(item, *movement);
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	result = json{{"id", id}, {"direction", direction}};
 	return true;
@@ -976,7 +1090,7 @@ bool MethodSourcesCreate(const json &params, json &result, std::string &error)
 		return false;
 	}
 
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
 	if (!sceneSource) {
 		error = "no scene to add the source to";
 		return false;
@@ -994,7 +1108,7 @@ bool MethodSourcesCreate(const json &params, json &result, std::string &error)
 	const int64_t itemId = item ? obs_sceneitem_get_id(item) : 0;
 	obs_source_release(source); // drop the create-ref; scene holds the source
 
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 
 	if (!item) {
@@ -1009,7 +1123,7 @@ bool MethodSourcesCreate(const json &params, json &result, std::string &error)
 // UI can offer "Add existing". params: {scene?}.
 bool MethodSourcesListExisting(const json &params, json &result, std::string &error)
 {
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
 	if (!sceneSource) {
 		error = "no scene";
 		return false;
@@ -1064,7 +1178,7 @@ bool MethodSourcesAddExisting(const json &params, json &result, std::string &err
 		error = "no source named '" + name + "'";
 		return false;
 	}
-	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
 	if (!sceneSource) {
 		obs_source_release(source);
 		error = "no scene to add the source to";
@@ -1076,7 +1190,7 @@ bool MethodSourcesAddExisting(const json &params, json &result, std::string &err
 	const int64_t itemId = item ? obs_sceneitem_get_id(item) : 0;
 	obs_source_release(source); // drop our lookup ref
 
-	EmitSceneItemsChanged(sceneSource);
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 
 	if (!item) {

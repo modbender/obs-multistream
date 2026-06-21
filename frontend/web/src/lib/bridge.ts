@@ -319,19 +319,23 @@ export interface ObsMethods {
   "preview.setRect": null;
   "preview.hide": null;
   "preview.select": { selected: number | null };
-  // Scenes (current = the scene bound to output channel 0).
+  // Scenes. `current` = the scene bound to channel 0 of the addressed canvas. Pass
+  // an optional `canvas` uuid to operate on an additional canvas's own scenes;
+  // omit it (or pass the Default canvas uuid) for the global channel-0 path (4.4.5b).
   "scenes.list": SceneInfo[];
   "scenes.create": { name: string };
   "scenes.remove": { removed: string };
   "scenes.setCurrent": { name: string };
   "scenes.rename": { name: string };
   // Scene items (top-first draw order; omit `scene` to target the current scene).
+  // Pass an optional `canvas` uuid to target an additional canvas's current scene.
   "sceneItems.list": SceneItem[];
   "sceneItems.setVisible": { id: number; visible: boolean };
   "sceneItems.setLocked": { id: number; locked: boolean };
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
-  // Source types + creation (4.3.3). Omit `scene` to target the current scene.
+  // Source types + creation (4.3.3). Omit `scene` to target the current scene; pass
+  // an optional `canvas` uuid to add into an additional canvas's current scene.
   "sourceTypes.list": SourceType[];
   "sources.create": { id: number; source: string };
   "sources.listExisting": string[];
@@ -374,8 +378,10 @@ export interface ObsMethods {
 export interface ObsEvents {
   "streaming.changed": { active: boolean };
   "obs.event": { event: string };
-  "scenes.changed": Record<string, never>;
-  "sceneItems.changed": { scene: string | null };
+  // `canvas` is the addressed canvas uuid, or null for the global channel-0 path;
+  // a per-canvas panel filters to its own canvas before reacting (4.4.5b).
+  "scenes.changed": { canvas: string | null };
+  "sceneItems.changed": { scene: string | null; canvas: string | null };
   "sceneItem.selected": { scene: string | null; id: number | null };
   "settings.videoChanged": VideoSettings;
   "settings.audioChanged": AudioSettings;
