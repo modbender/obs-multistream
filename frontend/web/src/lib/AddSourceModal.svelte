@@ -1,6 +1,7 @@
 <script lang="ts">
   import { obs, type SourceType } from "./bridge";
   import { sceneState } from "./scenes.svelte";
+  import { suspendPreview } from "./previewGate.svelte";
 
   interface Props {
     /** Called after a successful create with the new sceneitem id + source name. */
@@ -9,6 +10,9 @@
     onClose: () => void;
   }
   let { onCreated, onClose }: Props = $props();
+
+  // Hide the native preview overlay while this modal is open.
+  $effect(() => suspendPreview());
 
   let types = $state<SourceType[]>([]);
   let loaded = $state(false);

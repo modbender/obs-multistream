@@ -3,6 +3,7 @@
   import { sceneState } from "./scenes.svelte";
   import PropertyForm from "./properties/PropertyForm.svelte";
   import AddSourceModal from "./AddSourceModal.svelte";
+  import { suspendPreview } from "./previewGate.svelte";
 
   let items = $state<SceneItem[]>([]);
   let loaded = $state(false);
@@ -22,6 +23,11 @@
     selectedItemId = item.id;
     void obs.call("preview.select", { scene: sceneState.current, id: item.id });
   }
+
+  // The inline properties modal overlaps the preview; suspend the overlay while open.
+  $effect(() => {
+    if (propsForSource) return suspendPreview();
+  });
 
   // Reflect preview-driven selection (click in the overlay) back into the list.
   $effect(() => {

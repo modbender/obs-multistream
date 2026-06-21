@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { obs } from "./bridge";
+  import { previewSuspended } from "./previewGate.svelte";
 
   // The native obs preview overlay (a sibling HWND above the CEF browser) is
   // positioned to cover exactly this element. We measure our client rect in CSS
@@ -43,6 +44,16 @@
       window.removeEventListener("scroll", reportRect, true);
       obs.call("preview.hide").catch(() => {});
     };
+  });
+
+  // While any modal/overlay is open it would be occluded by the native preview
+  // HWND, so hide the overlay; re-assert our rect when the last one closes.
+  $effect(() => {
+    if (previewSuspended()) {
+      obs.call("preview.hide").catch(() => {});
+    } else {
+      reportRect();
+    }
   });
 </script>
 
