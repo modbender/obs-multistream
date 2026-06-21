@@ -22,6 +22,11 @@ void TeardownScene();
 // color source through the bridge and log the round-trip. Gated by the caller to
 // the smoke path; no-op effect on normal runs (it only reads/restores).
 void RunPropertiesSelfTest();
+// Headless proof for 4.3.4: select the first scene-item via the same entry point
+// the bridge uses, prove hit-testing returns its id at its center, then exercise
+// the move math (offset pos, then restore). Gated by the caller to the smoke
+// path; leaves no visible change.
+void RunPreviewEditSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 

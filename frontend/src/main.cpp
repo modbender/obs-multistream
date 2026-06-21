@@ -86,6 +86,7 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			// round-trips before self-quit.
 			if (getenv("FE_SMOKE_QUIT_SECONDS")) {
 				ObsBootstrap::RunPropertiesSelfTest();
+				ObsBootstrap::RunPreviewEditSelfTest();
 			}
 		} else if (wparam == kSmokeQuitTimerId) {
 			KillTimer(hwnd, kSmokeQuitTimerId);

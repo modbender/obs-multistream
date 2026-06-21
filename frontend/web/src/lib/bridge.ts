@@ -166,6 +166,7 @@ export interface ObsMethods {
   "streaming.stop": { active: boolean };
   "preview.setRect": null;
   "preview.hide": null;
+  "preview.select": { selected: number | null };
   // Scenes (current = the scene bound to output channel 0).
   "scenes.list": SceneInfo[];
   "scenes.create": { name: string };
@@ -195,6 +196,7 @@ export interface ObsEvents {
   "obs.event": { event: string };
   "scenes.changed": Record<string, never>;
   "sceneItems.changed": { scene: string | null };
+  "sceneItem.selected": { scene: string | null; id: number | null };
 }
 
 export interface BridgeError extends Error {

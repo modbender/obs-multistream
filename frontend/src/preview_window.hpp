@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <string>
 
 // Owns the native preview: a borderless child HWND of the host (sibling above the
 // CEF browser HWND, z-ordered on top) plus an obs_display attached to it. The
@@ -47,6 +48,18 @@ private:
 namespace Preview {
 void SetInstance(PreviewWindow *pw);
 PreviewWindow *Instance();
+
+// Drive selection from JS (the SourcesPanel) without a mouse event. The editor's
+// authoritative scene is always output channel 0; `scene` is only used to verify
+// it matches output 0's name (else the call is ignored, keeping "preview shows
+// the current scene" intact). When `hasId` is false the selection is cleared.
+// Emits sceneItem.selected like a mouse-driven change. Runs on the UI thread.
+bool SelectFromBridge(const std::string &scene, int64_t id, bool hasId);
+
+// Hit-test at a canvas-space coordinate against output 0's scene; returns the
+// topmost matching scene-item id, or -1 when nothing is hit. Used by the smoke
+// self-test to prove hit-testing without a real cursor.
+int64_t HitTestForTest(float canvasX, float canvasY);
 } // namespace Preview
 
 #endif // OBS_MULTISTREAM_FRONTEND_PREVIEW_WINDOW_HPP_

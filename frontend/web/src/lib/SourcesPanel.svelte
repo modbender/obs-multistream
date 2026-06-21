@@ -17,6 +17,22 @@
     if (item.source) propsForSource = item.source;
   }
 
+  // Select a row and drive the preview selection (overlay handles/outline).
+  function selectItem(item: SceneItem) {
+    selectedItemId = item.id;
+    void obs.call("preview.select", { scene: sceneState.current, id: item.id });
+  }
+
+  // Reflect preview-driven selection (click in the overlay) back into the list.
+  $effect(() => {
+    const off = obs.on("sceneItem.selected", (p) => {
+      if (!p.scene || p.scene === sceneState.current) {
+        selectedItemId = p.id;
+      }
+    });
+    return off;
+  });
+
   // Create flow: select the fresh item, then open its properties (mirrors OBS).
   function onSourceCreated(created: { id: number; source: string }) {
     adding = false;
@@ -143,7 +159,7 @@
           >
           <button
             class="name"
-            onclick={() => (selectedItemId = item.id)}
+            onclick={() => selectItem(item)}
             ondblclick={() => openProperties(item)}
           >
             {item.source ?? "(unnamed)"}

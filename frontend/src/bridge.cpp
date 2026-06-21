@@ -267,6 +267,35 @@ bool ItemIdFromParams(const json &params, int64_t &id, std::string &error)
 	return false;
 }
 
+// Drive preview selection from the UI (SourcesPanel). params: {scene?, id?}. A
+// null/absent id deselects. The editor's authoritative scene is always output 0;
+// `scene` is only validated against it. Returns {selected: id|null}.
+bool MethodPreviewSelect(const json &params, json &result, std::string &error)
+{
+	const std::string scene = OptString(params, "scene");
+
+	int64_t id = 0;
+	bool hasId = false;
+	if (params.is_object()) {
+		auto it = params.find("id");
+		if (it != params.end() && !it->is_null()) {
+			std::string idErr;
+			if (!ItemIdFromParams(params, id, idErr)) {
+				error = idErr;
+				return false;
+			}
+			hasId = true;
+		}
+	}
+
+	if (!Preview::SelectFromBridge(scene, id, hasId)) {
+		error = "preview selection failed (no scene or scene mismatch)";
+		return false;
+	}
+	result = json{{"selected", hasId ? json(id) : json(nullptr)}};
+	return true;
+}
+
 // --- scenes -----------------------------------------------------------------
 
 bool MethodScenesList(const json & /*params*/, json &result, std::string & /*error*/)
@@ -1006,6 +1035,7 @@ void Init()
 		{"streaming.stop", MethodStreamingStop},
 		{"preview.setRect", MethodPreviewSetRect},
 		{"preview.hide", MethodPreviewHide},
+		{"preview.select", MethodPreviewSelect},
 		{"scenes.list", MethodScenesList},
 		{"scenes.create", MethodScenesCreate},
 		{"scenes.remove", MethodScenesRemove},

@@ -4,6 +4,10 @@
 #include <obs-frontend-internal.hpp>
 #include <util/base.h>
 
+#include <graphics/matrix4.h>
+#include <graphics/vec2.h>
+#include <graphics/vec3.h>
+
 #include <windows.h>
 
 #include <algorithm>
@@ -17,6 +21,7 @@
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
 #include "paths.hpp"
+#include "preview_window.hpp"
 
 namespace {
 
@@ -412,6 +417,76 @@ void ObsBootstrap::RunPropertiesSelfTest()
 		}
 	}
 	HostLog("[selftest] sources.create round-trip done (transient items removed)");
+}
+
+void ObsBootstrap::RunPreviewEditSelfTest()
+{
+	obs_source_t *sceneSource = obs_get_output_source(0); // addref'd
+	if (!sceneSource) {
+		HostLog("[selftest] preview-edit: no scene bound to output 0");
+		return;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	struct First {
+		obs_sceneitem_t *item;
+	} ctx{nullptr};
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *p) -> bool {
+			static_cast<First *>(p)->item = item;
+			return false; // first (bottom-most) is enough
+		},
+		&ctx);
+	if (!ctx.item) {
+		HostLog("[selftest] preview-edit: scene has no items");
+		obs_source_release(sceneSource);
+		return;
+	}
+
+	const int64_t id = obs_sceneitem_get_id(ctx.item);
+	obs_source_t *itemSrc = obs_sceneitem_get_source(ctx.item);
+	const char *srcName = itemSrc ? obs_source_get_name(itemSrc) : nullptr;
+	HostLog("[selftest] preview-edit: first item '" + std::string(srcName ? srcName : "?") +
+		"' id=" + std::to_string(id));
+
+	// Item center in canvas coords via its box transform (unit 0.5,0.5 -> center).
+	matrix4 boxTransform;
+	obs_sceneitem_get_box_transform(ctx.item, &boxTransform);
+	vec3 center;
+	vec3_set(&center, 0.5f, 0.5f, 0.0f);
+	vec3_transform(&center, &center, &boxTransform);
+
+	// 1) Select via the same entry point the bridge uses.
+	const bool selOk = Preview::SelectFromBridge("", id, true);
+	HostLog("[selftest] preview-edit: SelectFromBridge -> " + std::string(selOk ? "OK" : "FAIL"));
+
+	// 2) Hit-test at the item center: expect to get the same id back.
+	const int64_t hit = Preview::HitTestForTest(center.x, center.y);
+	HostLog("[selftest] preview-edit: hit-test at center (" + std::to_string(int(center.x)) + "," +
+		std::to_string(int(center.y)) + ") -> id=" + std::to_string(hit) +
+		(hit == id ? " (match)" : " (MISMATCH)"));
+
+	// 3) Exercise the move math directly, then restore the original position.
+	vec2 origPos;
+	obs_sceneitem_get_pos(ctx.item, &origPos);
+	vec2 movedPos;
+	vec2_set(&movedPos, origPos.x + 50.0f, origPos.y + 30.0f);
+	obs_sceneitem_set_pos(ctx.item, &movedPos);
+	vec2 afterPos;
+	obs_sceneitem_get_pos(ctx.item, &afterPos);
+	HostLog("[selftest] preview-edit: move pos before=(" + std::to_string(int(origPos.x)) + "," +
+		std::to_string(int(origPos.y)) + ") after=(" + std::to_string(int(afterPos.x)) + "," +
+		std::to_string(int(afterPos.y)) + ")");
+	obs_sceneitem_set_pos(ctx.item, &origPos);
+	vec2 restoredPos;
+	obs_sceneitem_get_pos(ctx.item, &restoredPos);
+	HostLog("[selftest] preview-edit: pos restored to (" + std::to_string(int(restoredPos.x)) + "," +
+		std::to_string(int(restoredPos.y)) + ")");
+
+	// Clear the selection so the smoke run leaves no committed selection state.
+	Preview::SelectFromBridge("", 0, false);
+	obs_source_release(sceneSource);
 }
 
 void ObsBootstrap::Stop()
