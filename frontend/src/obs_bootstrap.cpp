@@ -259,6 +259,11 @@ CanvasStore &ObsBootstrap::Canvases()
 	return g_canvases;
 }
 
+StreamProfileStore &ObsBootstrap::StreamProfiles()
+{
+	return g_streamProfiles;
+}
+
 bool ObsBootstrap::Start()
 {
 	// obs-browser checks this in its guarded path to skip CefInitialize (the
@@ -722,6 +727,123 @@ void ObsBootstrap::RunCanvasBridgeSelfTest()
 		const bool gone = reloaded.Find(uuid) == nullptr;
 		HostLog(std::string("[selftest] canvas.remove restored file: ") + (gone ? "OK (temp gone)" : "STILL PRESENT") +
 			"; store now " + std::to_string(reloaded.Definitions().size()));
+	}
+}
+
+void ObsBootstrap::RunStreamProfileBridgeSelfTest()
+{
+	using Bridge::json;
+
+	auto run = [](const std::string &method, const json &params, bool &ok) -> json {
+		json result;
+		std::string error;
+		ok = Bridge::Dispatch(method, params, result, error);
+		if (!ok) {
+			HostLog("[selftest] " + method + " FAILED: " + error);
+			return json(nullptr);
+		}
+		return result;
+	};
+
+	bool ok = false;
+
+	// 1) streamProfile.list: report the user's real profiles + which is primary.
+	json list = run("streamProfile.list", json(nullptr), ok);
+	if (ok && list.is_array()) {
+		std::string names;
+		for (const auto &p : list) {
+			names += " '" + p.value("label", std::string("?")) + "'(" + p.value("platform", std::string("?")) +
+				 "/" + p.value("service", std::string("?")) + (p.value("isPrimary", false) ? ",primary" : "") +
+				 ")";
+		}
+		HostLog("[selftest] streamProfile.list -> " + std::to_string(list.size()) + " profile(s):" + names);
+	}
+
+	// 2) serviceTypes.list: prove a sane set (rtmp_common/rtmp_custom/whip_custom).
+	json svcTypes = run("serviceTypes.list", json(nullptr), ok);
+	if (ok && svcTypes.is_array()) {
+		std::string sample;
+		for (const auto &t : svcTypes) {
+			sample += " " + t.value("id", std::string("?"));
+		}
+		HostLog("[selftest] serviceTypes.list -> " + std::to_string(svcTypes.size()) + ":" + sample);
+	}
+
+	// 3) create -> update -> setPrimary -> (service properties.get) -> remove
+	// round-trip, proving each persists to streams.json and the file ends as it
+	// began.
+	json created = run("streamProfile.create",
+			   json{{"label", "selftest-bridge-profile"},
+				{"service", "rtmp_custom"},
+				{"settings", json{{"server", "rtmp://selftest.example/app"}, {"key", "selftest-key-1"}}}},
+			   ok);
+	if (!ok || !created.is_object()) {
+		return;
+	}
+	const std::string uuid = created.value("uuid", std::string());
+	HostLog("[selftest] streamProfile.create -> uuid=" + uuid);
+
+	// Confirm it persisted to disk by reloading a fresh store.
+	{
+		StreamProfileStore reloaded;
+		reloaded.Load();
+		const StreamProfile *found = reloaded.Find(uuid);
+		HostLog(std::string("[selftest] streamProfile.create persisted: ") +
+			(found ? "FOUND label='" + found->label + "' key='" + found->Key() + "'" : "MISSING"));
+	}
+
+	// 3b) Duplicate guard: a second create with the SAME stream key must be rejected.
+	{
+		json dupResult;
+		std::string dupError;
+		const bool dupOk =
+			Bridge::Dispatch("streamProfile.create",
+					 json{{"label", "selftest-dup"},
+					      {"service", "rtmp_custom"},
+					      {"settings", json{{"server", "rtmp://other.example/app"},
+								{"key", "selftest-key-1"}}}},
+					 dupResult, dupError);
+		HostLog(std::string("[selftest] duplicate-key create -> ") +
+			(dupOk ? "ACCEPTED (BUG: should reject)" : "REJECTED (\"" + dupError + "\")"));
+	}
+
+	json updated = run("streamProfile.update",
+			   json{{"uuid", uuid}, {"label", "selftest-renamed"}, {"settings", json{{"key", "selftest-key-2"}}}},
+			   ok);
+	if (ok && updated.is_object()) {
+		HostLog("[selftest] streamProfile.update -> label='" + updated.value("label", std::string("?")) +
+			"' (round-trip " +
+			(updated.value("label", std::string()) == "selftest-renamed" ? "OK" : "MISMATCH") + ")");
+	}
+
+	json primary = run("streamProfile.setPrimary", json{{"uuid", uuid}}, ok);
+	if (ok) {
+		HostLog("[selftest] streamProfile.setPrimary -> isPrimary=" +
+			std::string(primary.value("isPrimary", false) ? "true" : "false"));
+	}
+
+	// Service properties.get through the generic serializer (kind:"service").
+	json svcProps = run("properties.get", json{{"kind", "service"}, {"ref", uuid}}, ok);
+	if (ok && svcProps.is_object() && svcProps.contains("props")) {
+		HostLog("[selftest] properties.get service -> " + std::to_string(svcProps["props"].size()) +
+			" descriptors");
+	}
+
+	json removed = run("streamProfile.remove", json{{"uuid", uuid}}, ok);
+	if (ok) {
+		HostLog("[selftest] streamProfile.remove -> removed=" + removed.value("removed", std::string("?")));
+	}
+
+	// Confirm the file is back to its original shape (temp profile gone).
+	{
+		StreamProfileStore reloaded;
+		reloaded.Load();
+		const bool gone = reloaded.Find(uuid) == nullptr;
+		const StreamProfile *primaryProfile = reloaded.Primary();
+		HostLog(std::string("[selftest] streamProfile.remove restored file: ") +
+			(gone ? "OK (temp gone)" : "STILL PRESENT") + "; store now " +
+			std::to_string(reloaded.Profiles().size()) +
+			", primary=" + (primaryProfile ? primaryProfile->DisplayName() : "(none)"));
 	}
 }
 

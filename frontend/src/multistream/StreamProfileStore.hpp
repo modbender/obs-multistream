@@ -24,6 +24,7 @@ public:
 	StreamProfile *Find(const std::string &uuid);
 	StreamProfile &Add(StreamProfile p);  // assigns uuid if empty; first add becomes primary
 	void Remove(const std::string &uuid); // re-points primary if the primary was removed
+	bool SetPrimary(const std::string &uuid); // marks uuid primary, clears the rest; false if not found
 
 	// Drop all profiles (releasing their obs_data) for teardown leak measurement.
 	void Clear() { profiles.clear(); }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { obs, type VideoSettings, type AudioSettings, type SpeakerLayout } from "./bridge";
   import CanvasesTab from "./CanvasesTab.svelte";
+  import StreamsTab from "./StreamsTab.svelte";
 
   interface Props {
     onClose: () => void;
@@ -8,11 +9,12 @@
   let { onClose }: Props = $props();
 
   // Data-driven tab list: add a tab by appending one row (and its render branch
-  // below). Streams/Outputs arrive in 4.4.2/4.4.3.
+  // below). Outputs arrives in 4.4.3.
   const tabs = [
     { id: "video", label: "Video" },
     { id: "audio", label: "Audio" },
     { id: "canvases", label: "Canvases" },
+    { id: "streams", label: "Streams" },
   ] as const;
   type TabId = (typeof tabs)[number]["id"];
   let activeTab = $state<TabId>("video");
@@ -174,6 +176,8 @@
     <div class="modal-body">
       {#if activeTab === "canvases"}
         <CanvasesTab />
+      {:else if activeTab === "streams"}
+        <StreamsTab />
       {:else if !loaded}
         <p class="dim">Loading settings…</p>
       {:else if activeTab === "video"}

@@ -227,6 +227,40 @@ export interface EncoderType {
   name: string;
 }
 
+// --- stream profiles (reusable destination credentials, 4.4.2) --------------
+
+/** A stream profile as reported by streamProfile.list / returned by update. */
+export interface StreamProfileInfo {
+  uuid: string;
+  label: string;
+  isPrimary: boolean;
+  /** Raw service id, e.g. "rtmp_common" | "rtmp_custom" | "whip_custom". */
+  service: string;
+  /** Display prefix derived from the service (e.g. "YouTube", "Custom", "WHIP"). */
+  platform: string;
+}
+
+/** Fields accepted by streamProfile.create. */
+export interface StreamProfileCreateParams {
+  label: string;
+  service: string;
+  settings?: Record<string, unknown>;
+}
+
+/** Fields accepted by streamProfile.update (all but uuid optional). */
+export interface StreamProfileUpdateParams {
+  uuid: string;
+  label?: string;
+  service?: string;
+  settings?: Record<string, unknown>;
+}
+
+/** A registered service type as reported by serviceTypes.list. */
+export interface ServiceType {
+  id: string;
+  name: string;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -270,6 +304,13 @@ export interface ObsMethods {
   "canvas.update": CanvasInfo;
   "canvas.remove": { removed: string };
   "encoderTypes.list": EncoderType[];
+  // Stream profiles (reusable destination credentials, 4.4.2).
+  "streamProfile.list": StreamProfileInfo[];
+  "streamProfile.create": { uuid: string };
+  "streamProfile.update": StreamProfileInfo;
+  "streamProfile.remove": { removed: string };
+  "streamProfile.setPrimary": { uuid: string; isPrimary: boolean };
+  "serviceTypes.list": ServiceType[];
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -282,6 +323,7 @@ export interface ObsEvents {
   "settings.videoChanged": VideoSettings;
   "settings.audioChanged": AudioSettings;
   "canvas.changed": Record<string, never>;
+  "streamProfile.changed": Record<string, never>;
 }
 
 export interface BridgeError extends Error {

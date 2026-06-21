@@ -18,6 +18,8 @@
 #include "properties_serializer.hpp"
 
 #include "multistream/CanvasStore.hpp"
+#include "multistream/StreamProfileStore.hpp"
+#include <util/dstr.h>
 #include <util/platform.h>
 
 namespace Bridge {
@@ -1155,6 +1157,55 @@ void *ResolveEncoderRef(const std::string &ref)
 	return ctx;
 }
 
+// A stream-profile service is a *stored* service id + obs_data settings living in
+// a StreamProfile, not a live obs object. The "service" PropertyKind resolves a
+// ref of the form "<profileUuid>" to this context: a transient obs_service is
+// created (bound to the profile's stored settings) so obs_service_properties and
+// its modified-callbacks work; properties come from that instance, settings are
+// the profile's own obs_data, and updates apply back into it + Save + emit
+// streamProfile.changed. Heap-allocated by resolve, freed by release.
+struct ServiceRefCtx {
+	std::string profileUuid;
+	OBSServiceAutoRelease service;  // transient instance bound to the stored settings
+	OBSDataAutoRelease settings;    // the StreamProfile's settings (same obs_data instance)
+};
+
+void *ResolveServiceRef(const std::string &ref)
+{
+	StreamProfile *p = ObsBootstrap::StreamProfiles().Find(ref);
+	if (!p) {
+		return nullptr;
+	}
+	// Ensure the settings obs_data exists so props bind + updates persist; seed
+	// from the service type's defaults the first time.
+	if (!p->settings) {
+		p->settings = obs_service_defaults(p->serviceId.c_str());
+		if (!p->settings) {
+			p->settings = obs_data_create();
+		}
+	}
+
+	// A live obs_service is required for obs_service_properties (and so its
+	// modified-callbacks see the stored values). Create one private instance bound
+	// to a COPY of the settings -- the service may mutate its own copy, but we apply
+	// edits back into the profile's obs_data explicitly on update.
+	OBSDataAutoRelease seed = obs_data_create();
+	obs_data_apply(seed, p->settings);
+	OBSServiceAutoRelease svc = obs_service_create_private(p->serviceId.c_str(), "bridge-service-props", seed);
+	if (!svc) {
+		return nullptr;
+	}
+
+	auto *ctx = new ServiceRefCtx();
+	ctx->profileUuid = ref;
+	ctx->service = std::move(svc);
+	// Share the SAME obs_data instance the profile holds so applied settings land
+	// in the model. operator=(T) takes ownership without addref, so addref first.
+	obs_data_addref(p->settings.Get());
+	ctx->settings = p->settings.Get();
+	return ctx;
+}
+
 const PropertyKind kPropertyKinds[] = {
 	{
 		"source",
@@ -1186,6 +1237,31 @@ const PropertyKind kPropertyKinds[] = {
 			EmitEvent("canvas.changed", json::object());
 		},
 		[](void *obj) { delete static_cast<EncoderRefCtx *>(obj); },
+	},
+	{
+		"service",
+		ResolveServiceRef,
+		[](void *obj) -> obs_properties_t * {
+			return obs_service_properties(static_cast<ServiceRefCtx *>(obj)->service.Get());
+		},
+		[](void *obj) -> obs_data_t * {
+			obs_data_t *s = static_cast<ServiceRefCtx *>(obj)->settings.Get();
+			if (s) {
+				obs_data_addref(s);
+			}
+			return s;
+		},
+		[](void *obj, obs_data_t *settings) {
+			auto *ctx = static_cast<ServiceRefCtx *>(obj);
+			// Merge incoming settings into the profile's stored obs_data (same
+			// instance the profile holds) AND into the transient service so its
+			// modified-callbacks re-evaluate on the next get. Then persist + announce.
+			obs_data_apply(ctx->settings, settings);
+			obs_service_update(ctx->service.Get(), settings);
+			ObsBootstrap::StreamProfiles().Save();
+			EmitEvent("streamProfile.changed", json::object());
+		},
+		[](void *obj) { delete static_cast<ServiceRefCtx *>(obj); },
 	},
 };
 
@@ -1576,6 +1652,222 @@ bool MethodEncoderTypesList(const json &params, json &result, std::string &error
 	return true;
 }
 
+// --- stream profiles (reusable destination credentials, 4.4.2) --------------
+
+// Map one StreamProfile to the bridge's profile shape. `platform` is the display
+// prefix (e.g. "YouTube"); `service` is the raw service id (rtmp_common etc.).
+json StreamProfileToJson(const StreamProfile &p)
+{
+	return json{
+		{"uuid", p.uuid},
+		{"label", p.label},
+		{"isPrimary", p.isPrimary},
+		{"service", p.serviceId},
+		{"platform", p.PlatformName()},
+	};
+}
+
+// Ported duplicate guard (legacy OBSBasicSettings::CheckStreamProfileConflicts):
+// reject when another profile (not `selfUuid`) shares this one's non-empty stream
+// key, OR a case-insensitive identical "Platform - Name" display label. `candidate`
+// is the prospective post-edit profile. Fills `error` and returns true on conflict.
+bool StreamProfileConflicts(const StreamProfile &candidate, const std::string &selfUuid, std::string &error)
+{
+	const std::string candKey = candidate.Key();
+	const std::string candName = candidate.DisplayName();
+
+	for (const StreamProfile &other : ObsBootstrap::StreamProfiles().Profiles()) {
+		if (other.uuid == selfUuid) {
+			continue;
+		}
+		// Only non-empty keys collide; two unset credentials aren't a clash.
+		if (!candKey.empty() && candKey == other.Key()) {
+			error = "stream key already in use by '" + other.DisplayName() + "'";
+			return true;
+		}
+		if (astrcmpi(candName.c_str(), other.DisplayName().c_str()) == 0) {
+			error = "a profile named '" + other.DisplayName() + "' already exists";
+			return true;
+		}
+	}
+	return false;
+}
+
+// Build an OBSDataAutoRelease from a JSON `settings` sub-object, or null when
+// absent/not an object.
+OBSDataAutoRelease SettingsFromParams(const json &params)
+{
+	if (params.is_object() && params.contains("settings") && params["settings"].is_object()) {
+		const std::string dump = params["settings"].dump();
+		return OBSDataAutoRelease(obs_data_create_from_json(dump.c_str()));
+	}
+	return OBSDataAutoRelease(nullptr);
+}
+
+bool MethodStreamProfileList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (const StreamProfile &p : ObsBootstrap::StreamProfiles().Profiles()) {
+		arr.push_back(StreamProfileToJson(p));
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodStreamProfileCreate(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "streamProfile.create expects an object";
+		return false;
+	}
+	const std::string label = OptString(params, "label");
+	if (label.empty()) {
+		error = "streamProfile.create requires a non-empty 'label'";
+		return false;
+	}
+
+	StreamProfile p;
+	p.label = label;
+	const std::string service = OptString(params, "service");
+	if (!service.empty()) {
+		p.serviceId = service;
+	}
+	p.settings = SettingsFromParams(params);
+
+	// Validate against every existing profile before committing.
+	if (StreamProfileConflicts(p, std::string(), error)) {
+		return false;
+	}
+
+	StreamProfileStore &store = ObsBootstrap::StreamProfiles();
+	const std::string uuid = store.Add(std::move(p)).uuid;
+	store.Save();
+
+	EmitEvent("streamProfile.changed", json::object());
+	result = json{{"uuid", uuid}};
+	return true;
+}
+
+bool MethodStreamProfileUpdate(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "streamProfile.update expects an object";
+		return false;
+	}
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "streamProfile.update requires a non-empty 'uuid'";
+		return false;
+	}
+	StreamProfileStore &store = ObsBootstrap::StreamProfiles();
+	StreamProfile *p = store.Find(uuid);
+	if (!p) {
+		error = "no stream profile with uuid '" + uuid + "'";
+		return false;
+	}
+
+	// Build the prospective post-edit profile (StreamProfile is move-only, so
+	// assemble its fields rather than copying), validate, then commit on success.
+	StreamProfile candidate;
+	candidate.uuid = uuid;
+	candidate.isPrimary = p->isPrimary;
+
+	const std::string label = OptString(params, "label");
+	candidate.label = label.empty() ? p->label : label;
+
+	const std::string service = OptString(params, "service");
+	const bool serviceChanged = !service.empty() && service != p->serviceId;
+	candidate.serviceId = serviceChanged ? service : p->serviceId;
+
+	OBSDataAutoRelease newSettings = SettingsFromParams(params);
+	if (newSettings) {
+		candidate.settings = std::move(newSettings);
+	} else if (serviceChanged) {
+		// Switching service id without supplying settings: reset to that service's
+		// defaults (the prior blob belongs to a different schema).
+		candidate.settings = obs_service_defaults(candidate.serviceId.c_str());
+	} else if (p->settings) {
+		// Reuse the existing settings: deep-copy so the candidate (and the
+		// duplicate-guard Key()/DisplayName()) read the same values without
+		// aliasing the live profile's obs_data.
+		candidate.settings = obs_data_create();
+		obs_data_apply(candidate.settings, p->settings);
+	}
+
+	if (StreamProfileConflicts(candidate, uuid, error)) {
+		return false;
+	}
+
+	p->label = candidate.label;
+	p->serviceId = candidate.serviceId;
+	p->settings = std::move(candidate.settings);
+	store.Save();
+
+	EmitEvent("streamProfile.changed", json::object());
+	result = StreamProfileToJson(*p);
+	return true;
+}
+
+bool MethodStreamProfileRemove(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "streamProfile.remove requires a non-empty 'uuid'";
+		return false;
+	}
+	StreamProfileStore &store = ObsBootstrap::StreamProfiles();
+	if (!store.Find(uuid)) {
+		error = "no stream profile with uuid '" + uuid + "'";
+		return false;
+	}
+	// Remove re-points the primary internally when the primary was removed.
+	store.Remove(uuid);
+	store.Save();
+
+	EmitEvent("streamProfile.changed", json::object());
+	result = json{{"removed", uuid}};
+	return true;
+}
+
+bool MethodStreamProfileSetPrimary(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "streamProfile.setPrimary requires a non-empty 'uuid'";
+		return false;
+	}
+	StreamProfileStore &store = ObsBootstrap::StreamProfiles();
+	if (!store.SetPrimary(uuid)) {
+		error = "no stream profile with uuid '" + uuid + "'";
+		return false;
+	}
+	store.Save();
+
+	EmitEvent("streamProfile.changed", json::object());
+	result = json{{"uuid", uuid}, {"isPrimary", true}};
+	return true;
+}
+
+// List registered service types as {id, name} (e.g. rtmp_common, rtmp_custom,
+// whip_custom). Sorted by display name.
+bool MethodServiceTypesList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	const char *id = nullptr;
+	for (size_t i = 0; obs_enum_service_types(i, &id); ++i) {
+		if (!id) {
+			continue;
+		}
+		const char *display = obs_service_get_display_name(id);
+		arr.push_back(json{{"id", id}, {"name", display ? json(display) : json(id)}});
+	}
+	std::sort(arr.begin(), arr.end(), [](const json &a, const json &b) {
+		return a.value("name", std::string()) < b.value("name", std::string());
+	});
+	result = std::move(arr);
+	return true;
+}
+
 // Post the actual ExecuteJavaScript on TID_UI. Built from JSON dumps so the name
 // and payload are correctly quoted/escaped.
 void DoEmit(const std::string &name, const std::string &payloadDump)
@@ -1642,6 +1934,12 @@ void Init()
 		{"canvas.update", MethodCanvasUpdate},
 		{"canvas.remove", MethodCanvasRemove},
 		{"encoderTypes.list", MethodEncoderTypesList},
+		{"streamProfile.list", MethodStreamProfileList},
+		{"streamProfile.create", MethodStreamProfileCreate},
+		{"streamProfile.update", MethodStreamProfileUpdate},
+		{"streamProfile.remove", MethodStreamProfileRemove},
+		{"streamProfile.setPrimary", MethodStreamProfileSetPrimary},
+		{"serviceTypes.list", MethodServiceTypesList},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);

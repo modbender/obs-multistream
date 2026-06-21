@@ -90,6 +90,23 @@ StreamProfile &StreamProfileStore::Add(StreamProfile p)
 	return profiles.back();
 }
 
+bool StreamProfileStore::SetPrimary(const std::string &uuid)
+{
+	bool found = false;
+	for (StreamProfile &p : profiles) {
+		if (p.uuid == uuid) {
+			found = true;
+		}
+	}
+	if (!found) {
+		return false;
+	}
+	for (StreamProfile &p : profiles) {
+		p.isPrimary = (p.uuid == uuid);
+	}
+	return true;
+}
+
 void StreamProfileStore::Remove(const std::string &uuid)
 {
 	for (auto it = profiles.begin(); it != profiles.end(); ++it) {

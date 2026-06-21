@@ -13,6 +13,7 @@
 // drain only via the CEF message loop. The caller (main.cpp) runs this and then
 // pumps CefDoMessageLoopWork() before Stop()/CefShutdown().
 class CanvasStore;
+class StreamProfileStore;
 
 namespace ObsBootstrap {
 bool Start();
@@ -21,6 +22,11 @@ bool Start();
 // Start, cleared in Stop). Exposed so the bridge can serve canvas CRUD over it.
 // Valid between Start() and Stop().
 CanvasStore &Canvases();
+
+// The global stream-profile registry (reusable destination credentials, persisted
+// to streams.json). Owned by the bootstrap; exposed so the bridge can serve
+// stream-profile CRUD over it. Valid between Start() and Stop().
+StreamProfileStore &StreamProfiles();
 
 // Re-fire OBS_FRONTEND_EVENT_SCENE_CHANGED through the shim so the loaded UI page
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).
@@ -47,6 +53,13 @@ void RunSettingsSelfTest();
 // properties.get when wired. Gated by the caller to the smoke path; restores the
 // user's file unchanged.
 void RunCanvasBridgeSelfTest();
+// Headless proof for 4.4.2: drive streamProfile.list / serviceTypes.list and a
+// streamProfile.create+update+setPrimary+remove round-trip through the bridge,
+// confirm each persists to streams.json and restores, that the duplicate guard
+// rejects a clashing create, and that properties.get(kind:"service") returns
+// descriptors. Gated by the caller to the smoke path; restores the user's file
+// unchanged.
+void RunStreamProfileBridgeSelfTest();
 // Headless proof for 4.4.0: round-trip the multistream model stores. Add a
 // canvas + a stream profile, Save, reload into a fresh store, confirm each
 // persisted, then Remove + Save to restore the user's real files unchanged.
