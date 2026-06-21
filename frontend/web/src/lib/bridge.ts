@@ -261,6 +261,35 @@ export interface ServiceType {
   name: string;
 }
 
+// --- output bindings (profile x canvas routing edges, 4.4.3) -----------------
+
+/**
+ * An output binding as reported by outputBinding.list / returned by update.
+ * `profileLabel` / `canvasName` are the joined display strings: "(unset)" for an
+ * empty reference, "(deleted)" for a uuid whose profile/canvas no longer exists.
+ */
+export interface OutputBindingInfo {
+  uuid: string;
+  profileUuid: string;
+  profileLabel: string;
+  canvasUuid: string;
+  canvasName: string;
+  enabled: boolean;
+}
+
+/** Fields accepted by outputBinding.create (profileUuid optional = unset). */
+export interface OutputBindingCreateParams {
+  profileUuid?: string;
+  canvasUuid: string;
+}
+
+/** Fields accepted by outputBinding.update (all but uuid optional). */
+export interface OutputBindingUpdateParams {
+  uuid: string;
+  profileUuid?: string;
+  canvasUuid?: string;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -311,6 +340,12 @@ export interface ObsMethods {
   "streamProfile.remove": { removed: string };
   "streamProfile.setPrimary": { uuid: string; isPrimary: boolean };
   "serviceTypes.list": ServiceType[];
+  // Output bindings (profile x canvas routing edges, 4.4.3).
+  "outputBinding.list": OutputBindingInfo[];
+  "outputBinding.create": { uuid: string };
+  "outputBinding.update": OutputBindingInfo;
+  "outputBinding.setEnabled": { uuid: string; enabled: boolean };
+  "outputBinding.remove": { removed: string };
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -324,6 +359,7 @@ export interface ObsEvents {
   "settings.audioChanged": AudioSettings;
   "canvas.changed": Record<string, never>;
   "streamProfile.changed": Record<string, never>;
+  "outputBinding.changed": Record<string, never>;
 }
 
 export interface BridgeError extends Error {

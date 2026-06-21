@@ -14,6 +14,7 @@
 // pumps CefDoMessageLoopWork() before Stop()/CefShutdown().
 class CanvasStore;
 class StreamProfileStore;
+class OutputBindingStore;
 
 namespace ObsBootstrap {
 bool Start();
@@ -27,6 +28,11 @@ CanvasStore &Canvases();
 // to streams.json). Owned by the bootstrap; exposed so the bridge can serve
 // stream-profile CRUD over it. Valid between Start() and Stop().
 StreamProfileStore &StreamProfiles();
+
+// The global output-binding registry (profile x canvas routing edges, persisted
+// to output_bindings.json). Owned by the bootstrap; exposed so the bridge can
+// serve output-binding CRUD over it. Valid between Start() and Stop().
+OutputBindingStore &OutputBindings();
 
 // Re-fire OBS_FRONTEND_EVENT_SCENE_CHANGED through the shim so the loaded UI page
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).
@@ -60,6 +66,13 @@ void RunCanvasBridgeSelfTest();
 // descriptors. Gated by the caller to the smoke path; restores the user's file
 // unchanged.
 void RunStreamProfileBridgeSelfTest();
+// Headless proof for 4.4.3: drive outputBinding.list and an
+// outputBinding.create+setEnabled+update+remove round-trip through the bridge,
+// confirming each persists to output_bindings.json and restores, that the
+// list joins profile/canvas uuids to display names, that the duplicate guard
+// rejects a clashing create, and that AnyEnabledForCanvas reflects the toggle.
+// Gated by the caller to the smoke path; restores the user's file unchanged.
+void RunOutputBindingBridgeSelfTest();
 // Headless proof for 4.4.0: round-trip the multistream model stores. Add a
 // canvas + a stream profile, Save, reload into a fresh store, confirm each
 // persisted, then Remove + Save to restore the user's real files unchanged.

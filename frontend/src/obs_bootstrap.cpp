@@ -264,6 +264,11 @@ StreamProfileStore &ObsBootstrap::StreamProfiles()
 	return g_streamProfiles;
 }
 
+OutputBindingStore &ObsBootstrap::OutputBindings()
+{
+	return g_outputBindings;
+}
+
 bool ObsBootstrap::Start()
 {
 	// obs-browser checks this in its guarded path to skip CefInitialize (the
@@ -844,6 +849,128 @@ void ObsBootstrap::RunStreamProfileBridgeSelfTest()
 			(gone ? "OK (temp gone)" : "STILL PRESENT") + "; store now " +
 			std::to_string(reloaded.Profiles().size()) +
 			", primary=" + (primaryProfile ? primaryProfile->DisplayName() : "(none)"));
+	}
+}
+
+void ObsBootstrap::RunOutputBindingBridgeSelfTest()
+{
+	using Bridge::json;
+
+	auto run = [](const std::string &method, const json &params, bool &ok) -> json {
+		json result;
+		std::string error;
+		ok = Bridge::Dispatch(method, params, result, error);
+		if (!ok) {
+			HostLog("[selftest] " + method + " FAILED: " + error);
+			return json(nullptr);
+		}
+		return result;
+	};
+
+	bool ok = false;
+
+	// 1) outputBinding.list: report the user's real bindings, joined to names.
+	json list = run("outputBinding.list", json(nullptr), ok);
+	if (ok && list.is_array()) {
+		std::string rows;
+		for (const auto &b : list) {
+			rows += " [" + b.value("profileLabel", std::string("?")) + " -> " +
+				b.value("canvasName", std::string("?")) +
+				(b.value("enabled", false) ? ",on" : ",off") + "]";
+		}
+		HostLog("[selftest] outputBinding.list -> " + std::to_string(list.size()) + " binding(s):" + rows);
+	}
+
+	// A binding needs a real canvas (the Default always exists). A profile is
+	// optional, but bind a real one if the user has any so the join is exercised.
+	const std::string canvasUuid = g_canvases.Default().uuid;
+	std::string profileUuid;
+	if (!g_streamProfiles.Profiles().empty()) {
+		profileUuid = g_streamProfiles.Profiles().front().uuid;
+	}
+
+	// 2) create -> setEnabled -> update -> remove round-trip, proving each persists
+	// to output_bindings.json and the file ends as it began.
+	json createParams = json{{"canvasUuid", canvasUuid}};
+	if (!profileUuid.empty()) {
+		createParams["profileUuid"] = profileUuid;
+	}
+	json created = run("outputBinding.create", createParams, ok);
+	if (!ok || !created.is_object()) {
+		return;
+	}
+	const std::string uuid = created.value("uuid", std::string());
+	HostLog("[selftest] outputBinding.create -> uuid=" + uuid + " (canvas=" + canvasUuid +
+		", profile=" + (profileUuid.empty() ? "(unset)" : profileUuid) + ")");
+
+	// Confirm it persisted to disk by reloading a fresh store + that the live list
+	// joins it to the right names.
+	{
+		OutputBindingStore reloaded;
+		reloaded.Load();
+		const bool found = reloaded.Bindings().Find(uuid) != nullptr;
+		HostLog(std::string("[selftest] outputBinding.create persisted: ") + (found ? "FOUND" : "MISSING"));
+	}
+	{
+		json relist = run("outputBinding.list", json(nullptr), ok);
+		if (ok && relist.is_array()) {
+			for (const auto &b : relist) {
+				if (b.value("uuid", std::string()) == uuid) {
+					HostLog("[selftest] outputBinding.list join -> profileLabel='" +
+						b.value("profileLabel", std::string("?")) + "' canvasName='" +
+						b.value("canvasName", std::string("?")) + "'");
+				}
+			}
+		}
+	}
+
+	// 2b) Duplicate guard: a second create with the SAME (profile x canvas) pair
+	// must be rejected.
+	{
+		json dupResult;
+		std::string dupError;
+		const bool dupOk = Bridge::Dispatch("outputBinding.create", createParams, dupResult, dupError);
+		HostLog(std::string("[selftest] duplicate-pair create -> ") +
+			(dupOk ? "ACCEPTED (BUG: should reject)" : "REJECTED (\"" + dupError + "\")"));
+	}
+
+	// setEnabled(true) -> AnyEnabledForCanvas must flip on for this canvas.
+	json enabled = run("outputBinding.setEnabled", json{{"uuid", uuid}, {"enabled", true}}, ok);
+	if (ok) {
+		const bool any = g_outputBindings.Bindings().AnyEnabledForCanvas(canvasUuid);
+		HostLog("[selftest] outputBinding.setEnabled(true) -> enabled=" +
+			std::string(enabled.value("enabled", false) ? "true" : "false") +
+			"; AnyEnabledForCanvas=" + (any ? "true" : "false"));
+	}
+
+	// update: re-point to "(unset)" profile, confirming the join reflects the change.
+	json updated = run("outputBinding.update", json{{"uuid", uuid}, {"profileUuid", std::string()}}, ok);
+	if (ok && updated.is_object()) {
+		HostLog("[selftest] outputBinding.update -> profileLabel='" +
+			updated.value("profileLabel", std::string("?")) + "' (expect '(unset)')");
+	}
+
+	// setEnabled(false) -> AnyEnabledForCanvas flips back off (no other binding).
+	run("outputBinding.setEnabled", json{{"uuid", uuid}, {"enabled", false}}, ok);
+	if (ok) {
+		const bool any = g_outputBindings.Bindings().AnyEnabledForCanvas(canvasUuid);
+		HostLog(std::string("[selftest] outputBinding.setEnabled(false) -> AnyEnabledForCanvas=") +
+			(any ? "true" : "false"));
+	}
+
+	json removed = run("outputBinding.remove", json{{"uuid", uuid}}, ok);
+	if (ok) {
+		HostLog("[selftest] outputBinding.remove -> removed=" + removed.value("removed", std::string("?")));
+	}
+
+	// Confirm the file is back to its original shape (temp binding gone).
+	{
+		OutputBindingStore reloaded;
+		reloaded.Load();
+		const bool gone = reloaded.Bindings().Find(uuid) == nullptr;
+		HostLog(std::string("[selftest] outputBinding.remove restored file: ") +
+			(gone ? "OK (temp gone)" : "STILL PRESENT") + "; store now " +
+			std::to_string(reloaded.Bindings().bindings.size()));
 	}
 }
 

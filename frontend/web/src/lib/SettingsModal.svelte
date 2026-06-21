@@ -2,19 +2,26 @@
   import { obs, type VideoSettings, type AudioSettings, type SpeakerLayout } from "./bridge";
   import CanvasesTab from "./CanvasesTab.svelte";
   import StreamsTab from "./StreamsTab.svelte";
+  import OutputsTab from "./OutputsTab.svelte";
+  import { suspendPreview } from "./previewGate.svelte";
 
   interface Props {
     onClose: () => void;
   }
   let { onClose }: Props = $props();
 
+  // Hide the native preview overlay while this modal is open (it would otherwise
+  // paint over the modal's center).
+  $effect(() => suspendPreview());
+
   // Data-driven tab list: add a tab by appending one row (and its render branch
-  // below). Outputs arrives in 4.4.3.
+  // below).
   const tabs = [
     { id: "video", label: "Video" },
     { id: "audio", label: "Audio" },
     { id: "canvases", label: "Canvases" },
     { id: "streams", label: "Streams" },
+    { id: "outputs", label: "Outputs" },
   ] as const;
   type TabId = (typeof tabs)[number]["id"];
   let activeTab = $state<TabId>("video");
@@ -178,6 +185,8 @@
         <CanvasesTab />
       {:else if activeTab === "streams"}
         <StreamsTab />
+      {:else if activeTab === "outputs"}
+        <OutputsTab />
       {:else if !loaded}
         <p class="dim">Loading settings…</p>
       {:else if activeTab === "video"}

@@ -18,6 +18,7 @@
 #include "properties_serializer.hpp"
 
 #include "multistream/CanvasStore.hpp"
+#include "multistream/OutputBindingStore.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include <util/dstr.h>
 #include <util/platform.h>
@@ -1868,6 +1869,203 @@ bool MethodServiceTypesList(const json & /*params*/, json &result, std::string &
 	return true;
 }
 
+// --- output bindings (profile x canvas routing edges, 4.4.3) ----------------
+
+// Resolve a profile uuid to a display label for the join in outputBinding.list.
+// Empty uuid -> "(unset)"; a uuid with no live profile -> "(deleted)"; otherwise
+// the profile's DisplayName(). This mirrors the legacy "deleted vs unset"
+// distinction so a dangling reference reads differently from an empty slot.
+std::string ProfileLabelFor(const std::string &profileUuid)
+{
+	if (profileUuid.empty()) {
+		return "(unset)";
+	}
+	StreamProfile *p = ObsBootstrap::StreamProfiles().Find(profileUuid);
+	return p ? p->DisplayName() : "(deleted)";
+}
+
+// Resolve a canvas uuid to a display name. Empty uuid -> "(unset)"; a uuid with
+// no live canvas -> "(deleted)"; otherwise the canvas name.
+std::string CanvasNameFor(const std::string &canvasUuid)
+{
+	if (canvasUuid.empty()) {
+		return "(unset)";
+	}
+	CanvasDefinition *def = ObsBootstrap::Canvases().Find(canvasUuid);
+	return def ? def->name : "(deleted)";
+}
+
+// Map one OutputBinding to the bridge's shape, joining its profile/canvas uuids
+// to display names through the live stores.
+json OutputBindingToJson(const OutputBinding &b)
+{
+	return json{
+		{"uuid", b.uuid},
+		{"profileUuid", b.profileUuid},
+		{"profileLabel", ProfileLabelFor(b.profileUuid)},
+		{"canvasUuid", b.canvasUuid},
+		{"canvasName", CanvasNameFor(b.canvasUuid)},
+		{"enabled", b.enabled},
+	};
+}
+
+bool MethodOutputBindingList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (const OutputBinding &b : ObsBootstrap::OutputBindings().Bindings().bindings) {
+		arr.push_back(OutputBindingToJson(b));
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodOutputBindingCreate(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "outputBinding.create expects an object";
+		return false;
+	}
+	const std::string canvasUuid = OptString(params, "canvasUuid");
+	if (canvasUuid.empty()) {
+		error = "outputBinding.create requires a non-empty 'canvasUuid'";
+		return false;
+	}
+	if (!ObsBootstrap::Canvases().Find(canvasUuid)) {
+		error = "no canvas with uuid '" + canvasUuid + "'";
+		return false;
+	}
+	const std::string profileUuid = OptString(params, "profileUuid");
+	if (!profileUuid.empty() && !ObsBootstrap::StreamProfiles().Find(profileUuid)) {
+		error = "no stream profile with uuid '" + profileUuid + "'";
+		return false;
+	}
+
+	OutputBindings &bindings = ObsBootstrap::OutputBindings().Bindings();
+
+	// Reject an exact duplicate: the same (profile x canvas) pair already bound.
+	for (const OutputBinding &b : bindings.bindings) {
+		if (b.profileUuid == profileUuid && b.canvasUuid == canvasUuid) {
+			error = "that profile is already bound to this canvas";
+			return false;
+		}
+	}
+
+	OutputBinding &created = bindings.Add(canvasUuid);
+	created.profileUuid = profileUuid;
+	const std::string uuid = created.uuid;
+	ObsBootstrap::OutputBindings().Save();
+
+	EmitEvent("outputBinding.changed", json::object());
+	result = json{{"uuid", uuid}};
+	return true;
+}
+
+bool MethodOutputBindingUpdate(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "outputBinding.update expects an object";
+		return false;
+	}
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "outputBinding.update requires a non-empty 'uuid'";
+		return false;
+	}
+	OutputBindings &bindings = ObsBootstrap::OutputBindings().Bindings();
+	OutputBinding *b = bindings.Find(uuid);
+	if (!b) {
+		error = "no output binding with uuid '" + uuid + "'";
+		return false;
+	}
+
+	// Resolve the prospective post-edit pair (absent fields keep current values),
+	// validate refs + the duplicate guard, then commit.
+	std::string newProfile = b->profileUuid;
+	std::string newCanvas = b->canvasUuid;
+	if (params.contains("profileUuid")) {
+		newProfile = OptString(params, "profileUuid");
+		if (!newProfile.empty() && !ObsBootstrap::StreamProfiles().Find(newProfile)) {
+			error = "no stream profile with uuid '" + newProfile + "'";
+			return false;
+		}
+	}
+	if (params.contains("canvasUuid")) {
+		newCanvas = OptString(params, "canvasUuid");
+		if (newCanvas.empty()) {
+			error = "'canvasUuid' must be non-empty";
+			return false;
+		}
+		if (!ObsBootstrap::Canvases().Find(newCanvas)) {
+			error = "no canvas with uuid '" + newCanvas + "'";
+			return false;
+		}
+	}
+
+	for (const OutputBinding &other : bindings.bindings) {
+		if (other.uuid != uuid && other.profileUuid == newProfile && other.canvasUuid == newCanvas) {
+			error = "that profile is already bound to this canvas";
+			return false;
+		}
+	}
+
+	b->profileUuid = newProfile;
+	b->canvasUuid = newCanvas;
+	ObsBootstrap::OutputBindings().Save();
+
+	EmitEvent("outputBinding.changed", json::object());
+	result = OutputBindingToJson(*b);
+	return true;
+}
+
+bool MethodOutputBindingSetEnabled(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "outputBinding.setEnabled requires a non-empty 'uuid'";
+		return false;
+	}
+	if (!params.is_object() || !params.contains("enabled") || !params["enabled"].is_boolean()) {
+		error = "outputBinding.setEnabled requires a boolean 'enabled'";
+		return false;
+	}
+	OutputBindings &bindings = ObsBootstrap::OutputBindings().Bindings();
+	OutputBinding *b = bindings.Find(uuid);
+	if (!b) {
+		error = "no output binding with uuid '" + uuid + "'";
+		return false;
+	}
+
+	const bool enabled = params["enabled"].get<bool>();
+	b->enabled = enabled;
+	ObsBootstrap::OutputBindings().Save();
+
+	// outputBinding.changed is also the hook 4.4.4/4.4.5 use to re-decide whether a
+	// canvas renders (AnyEnabledForCanvas may have flipped on this toggle).
+	EmitEvent("outputBinding.changed", json::object());
+	result = json{{"uuid", uuid}, {"enabled", enabled}};
+	return true;
+}
+
+bool MethodOutputBindingRemove(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "outputBinding.remove requires a non-empty 'uuid'";
+		return false;
+	}
+	OutputBindings &bindings = ObsBootstrap::OutputBindings().Bindings();
+	if (!bindings.Find(uuid)) {
+		error = "no output binding with uuid '" + uuid + "'";
+		return false;
+	}
+	bindings.Remove(uuid);
+	ObsBootstrap::OutputBindings().Save();
+
+	EmitEvent("outputBinding.changed", json::object());
+	result = json{{"removed", uuid}};
+	return true;
+}
+
 // Post the actual ExecuteJavaScript on TID_UI. Built from JSON dumps so the name
 // and payload are correctly quoted/escaped.
 void DoEmit(const std::string &name, const std::string &payloadDump)
@@ -1940,6 +2138,11 @@ void Init()
 		{"streamProfile.remove", MethodStreamProfileRemove},
 		{"streamProfile.setPrimary", MethodStreamProfileSetPrimary},
 		{"serviceTypes.list", MethodServiceTypesList},
+		{"outputBinding.list", MethodOutputBindingList},
+		{"outputBinding.create", MethodOutputBindingCreate},
+		{"outputBinding.update", MethodOutputBindingUpdate},
+		{"outputBinding.setEnabled", MethodOutputBindingSetEnabled},
+		{"outputBinding.remove", MethodOutputBindingRemove},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);
