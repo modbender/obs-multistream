@@ -119,14 +119,37 @@ set(_cef_rundir "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_EXECUTABLE_DESTINATION}")
 copy_files(${_target} "${CEF_BINARY_FILES}" "${CEF_ROOT}/Release" "${_cef_rundir}")
 copy_files(${_target} "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${_cef_rundir}")
 
-# Install the offline web bundle into the shared config-named data dir.
+# Build the offline Svelte UI bundle with bun, then install it into the shared
+# config-named data dir. bun is required (no npm/pnpm/yarn fallback) so the build
+# matches the committed bun.lock.
+find_program(BUN_EXECUTABLE bun REQUIRED)
+
+set(_web_dir "${CMAKE_CURRENT_SOURCE_DIR}/web")
+set(_web_dist "${_web_dir}/dist")
+set(_web_install "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_DATA_DESTINATION}/obs-multistream/web")
+
+# Always-run target: bun install (idempotent) then vite build. bun/vite are fast
+# and incremental, so an unconditional rebuild is cheap and avoids stale bundles
+# when web sources change without a tracked dependency graph here.
+add_custom_target(
+  frontend-web
+  COMMAND "${BUN_EXECUTABLE}" install
+  COMMAND "${BUN_EXECUTABLE}" run build
+  WORKING_DIRECTORY "${_web_dir}"
+  BYPRODUCTS "${_web_dist}/index.html"
+  COMMENT "Build offline Svelte UI bundle (bun + vite)"
+  VERBATIM
+)
+
+add_dependencies(${_target} frontend-web)
+
+# Copy the freshly built bundle (web/dist) into the rundir data dir.
 add_custom_command(
   TARGET ${_target}
   POST_BUILD
-  COMMAND
-    "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/web"
-    "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_DATA_DESTINATION}/obs-multistream/web"
-  COMMENT "Copy frontend web bundle to rundir"
+  COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_web_install}"
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_web_dist}" "${_web_install}"
+  COMMENT "Copy Svelte UI bundle to rundir"
   VERBATIM
 )
 
