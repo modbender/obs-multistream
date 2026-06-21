@@ -377,6 +377,41 @@ void ObsBootstrap::RunPropertiesSelfTest()
 		obs_source_release(web);
 		HostLog("[selftest] transient browser_source released");
 	}
+
+	// 5) sourceTypes.list: prove a sensible creatable set is returned.
+	json typesList = run("sourceTypes.list", json(nullptr));
+	if (typesList.is_array()) {
+		std::string sample;
+		int shown = 0;
+		for (const auto &t : typesList) {
+			if (shown++ < 10) {
+				sample += " " + t.value("id", std::string("?"));
+			}
+		}
+		HostLog("[selftest] sourceTypes.list -> " + std::to_string(typesList.size()) +
+			" types, e.g.:" + sample);
+	}
+
+	// 6) sources.create two distinct types into the current scene, proving each
+	// adds a sceneitem (and emits sceneItems.changed). Then remove them so the
+	// smoke run leaves the scene as it found it.
+	const char *kCreateTypes[] = {"color_source", "image_source"};
+	for (const char *type : kCreateTypes) {
+		json created = run("sources.create", json{{"type", type}});
+		if (created.is_object()) {
+			const int64_t id = created.value("id", int64_t(0));
+			const std::string src = created.value("source", std::string("?"));
+			HostLog("[selftest] sources.create " + std::string(type) + " -> id=" +
+				std::to_string(id) + " source='" + src + "'");
+			run("sceneItems.remove", json{{"id", id}});
+			obs_source_t *s = obs_get_source_by_name(src.c_str());
+			if (s) {
+				obs_source_remove(s);
+				obs_source_release(s);
+			}
+		}
+	}
+	HostLog("[selftest] sources.create round-trip done (transient items removed)");
 }
 
 void ObsBootstrap::Stop()

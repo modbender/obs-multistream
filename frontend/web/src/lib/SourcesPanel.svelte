@@ -2,6 +2,7 @@
   import { obs, type SceneItem, type ReorderDirection } from "./bridge";
   import { sceneState } from "./scenes.svelte";
   import PropertyForm from "./properties/PropertyForm.svelte";
+  import AddSourceModal from "./AddSourceModal.svelte";
 
   let items = $state<SceneItem[]>([]);
   let loaded = $state(false);
@@ -9,9 +10,20 @@
   let selectedItemId = $state<number | null>(null);
   // The source whose properties dialog is open (its source name), or null.
   let propsForSource = $state<string | null>(null);
+  // Whether the Add-Source picker is open.
+  let adding = $state(false);
 
   function openProperties(item: SceneItem) {
     if (item.source) propsForSource = item.source;
+  }
+
+  // Create flow: select the fresh item, then open its properties (mirrors OBS).
+  function onSourceCreated(created: { id: number; source: string }) {
+    adding = false;
+    selectedItemId = created.id;
+    propsForSource = created.source;
+    // The sceneItems.changed event refreshes the list; load() also runs below.
+    void load();
   }
 
   async function load() {
@@ -97,7 +109,15 @@
 </script>
 
 <section class="panel">
-  <header><h2>Sources</h2></header>
+  <header>
+    <h2>Sources</h2>
+    <button
+      class="icon add"
+      title="Add source"
+      disabled={!sceneState.current}
+      onclick={() => (adding = true)}>＋</button
+    >
+  </header>
 
   {#if error}
     <p class="error">{error}</p>
@@ -150,6 +170,10 @@
   {/if}
 </section>
 
+{#if adding}
+  <AddSourceModal onCreated={onSourceCreated} onClose={() => (adding = false)} />
+{/if}
+
 {#if propsForSource}
   <div
     class="modal-backdrop"
@@ -180,6 +204,11 @@
     flex-direction: column;
     gap: 10px;
   }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
   h2 {
     margin: 0;
     font-size: 13px;
@@ -187,6 +216,10 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-dim);
+  }
+  .add {
+    font-size: 16px;
+    line-height: 1;
   }
   ul {
     list-style: none;

@@ -44,6 +44,13 @@ export interface SceneItem {
 
 export type ReorderDirection = "up" | "down" | "top" | "bottom";
 
+/** A creatable input source type as reported by sourceTypes.list. */
+export interface SourceType {
+  id: string;
+  name: string;
+  caps: { video: boolean; audio: boolean };
+}
+
 // --- generic obs_properties descriptors (4.3.2) -----------------------------
 
 /** Editable-object kind a property set belongs to. "source" is wired now. */
@@ -171,6 +178,11 @@ export interface ObsMethods {
   "sceneItems.setLocked": { id: number; locked: boolean };
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
+  // Source types + creation (4.3.3). Omit `scene` to target the current scene.
+  "sourceTypes.list": SourceType[];
+  "sources.create": { id: number; source: string };
+  "sources.listExisting": string[];
+  "sources.addExisting": { id: number; source: string };
   // Generic obs_properties renderer (4.3.2).
   "properties.get": PropertiesResult;
   "properties.set": PropertiesResult;

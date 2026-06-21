@@ -1,5 +1,6 @@
 #include "bridge.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <mutex>
 #include <unordered_map>
@@ -627,6 +628,179 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 	return true;
 }
 
+// --- source types / source creation -----------------------------------------
+
+// List CREATABLE input source types: id, display name, and coarse capability
+// flags. Skips deprecated/disabled types so filters/transitions and obsolete
+// inputs are never offered as scene sources. Sorted by display name.
+bool MethodSourceTypesList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json types = json::array();
+	const char *id = nullptr;
+	for (size_t idx = 0; obs_enum_input_types(idx, &id); ++idx) {
+		if (!id) {
+			continue;
+		}
+		const uint32_t flags = obs_get_source_output_flags(id);
+		// Skip types OBS itself hides from the Add-Source menu.
+		if (flags & (OBS_SOURCE_DEPRECATED | OBS_SOURCE_CAP_DISABLED)) {
+			continue;
+		}
+		const char *display = obs_source_get_display_name(id);
+		types.push_back(json{
+			{"id", id},
+			{"name", display ? json(display) : json(id)},
+			{"caps", json{
+					{"video", (flags & OBS_SOURCE_VIDEO) != 0},
+					{"audio", (flags & OBS_SOURCE_AUDIO) != 0},
+				}},
+		});
+	}
+
+	std::sort(types.begin(), types.end(), [](const json &a, const json &b) {
+		return a.value("name", std::string()) < b.value("name", std::string());
+	});
+
+	result = std::move(types);
+	return true;
+}
+
+// Create a new input source with default settings and add it to a scene
+// (current scene when `scene` is omitted). params: {type, name?, scene?}.
+// Returns {id, source} (the new sceneitem id + final source name). Rejects a
+// name that collides with an existing source.
+bool MethodSourcesCreate(const json &params, json &result, std::string &error)
+{
+	const std::string type = OptString(params, "type");
+	if (type.empty()) {
+		error = "sources.create requires a non-empty 'type'";
+		return false;
+	}
+	std::string name = OptString(params, "name");
+	if (name.empty()) {
+		const char *display = obs_source_get_display_name(type.c_str());
+		name = display ? std::string(display) : type;
+	}
+
+	// Reject a duplicate name (a source of any kind collides).
+	obs_source_t *clash = obs_get_source_by_name(name.c_str());
+	if (clash) {
+		obs_source_release(clash);
+		error = "a source named '" + name + "' already exists";
+		return false;
+	}
+
+	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	if (!sceneSource) {
+		error = "no scene to add the source to";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	obs_source_t *source = obs_source_create(type.c_str(), name.c_str(), nullptr, nullptr); // create-ref
+	if (!source) {
+		obs_source_release(sceneSource);
+		error = "obs_source_create failed for type '" + type + "'";
+		return false;
+	}
+
+	obs_sceneitem_t *item = obs_scene_add(scene, source); // scene takes its own ref
+	const int64_t itemId = item ? obs_sceneitem_get_id(item) : 0;
+	obs_source_release(source); // drop the create-ref; scene holds the source
+
+	EmitSceneItemsChanged(sceneSource);
+	obs_source_release(sceneSource);
+
+	if (!item) {
+		error = "obs_scene_add failed";
+		return false;
+	}
+	result = json{{"id", itemId}, {"source", name}};
+	return true;
+}
+
+// List existing input sources NOT already present in the target scene, so the
+// UI can offer "Add existing". params: {scene?}.
+bool MethodSourcesListExisting(const json &params, json &result, std::string &error)
+{
+	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	// Collect names already in the scene so we can exclude them.
+	std::unordered_map<std::string, bool> inScene;
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+			obs_source_t *src = obs_sceneitem_get_source(item);
+			const char *n = src ? obs_source_get_name(src) : nullptr;
+			if (n) {
+				(*static_cast<std::unordered_map<std::string, bool> *>(param))[n] = true;
+			}
+			return true;
+		},
+		&inScene);
+
+	json names = json::array();
+	struct Ctx {
+		json *arr;
+		std::unordered_map<std::string, bool> *inScene;
+	} ctx{&names, &inScene};
+	obs_enum_sources(
+		[](void *param, obs_source_t *source) -> bool {
+			auto *c = static_cast<Ctx *>(param);
+			const char *n = obs_source_get_name(source);
+			if (n && c->inScene->find(n) == c->inScene->end()) {
+				c->arr->push_back(n);
+			}
+			return true;
+		},
+		&ctx);
+
+	obs_source_release(sceneSource);
+	result = std::move(names);
+	return true;
+}
+
+// Add an already-existing source to a scene. params: {name, scene?}.
+bool MethodSourcesAddExisting(const json &params, json &result, std::string &error)
+{
+	const std::string name = OptString(params, "name");
+	if (name.empty()) {
+		error = "sources.addExisting requires a non-empty 'name'";
+		return false;
+	}
+	obs_source_t *source = obs_get_source_by_name(name.c_str()); // addref'd
+	if (!source) {
+		error = "no source named '" + name + "'";
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveSceneSource(OptString(params, "scene")); // addref'd
+	if (!sceneSource) {
+		obs_source_release(source);
+		error = "no scene to add the source to";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	obs_sceneitem_t *item = obs_scene_add(scene, source); // scene takes its own ref
+	const int64_t itemId = item ? obs_sceneitem_get_id(item) : 0;
+	obs_source_release(source); // drop our lookup ref
+
+	EmitSceneItemsChanged(sceneSource);
+	obs_source_release(sceneSource);
+
+	if (!item) {
+		error = "obs_scene_add failed";
+		return false;
+	}
+	result = json{{"id", itemId}, {"source", name}};
+	return true;
+}
+
 // --- properties (generic obs_properties renderer) ---------------------------
 
 // One editable-object kind: how to resolve a `ref` to an obs object, fetch its
@@ -842,6 +1016,10 @@ void Init()
 		{"sceneItems.setLocked", MethodSceneItemsSetLocked},
 		{"sceneItems.remove", MethodSceneItemsRemove},
 		{"sceneItems.reorder", MethodSceneItemsReorder},
+		{"sourceTypes.list", MethodSourceTypesList},
+		{"sources.create", MethodSourcesCreate},
+		{"sources.listExisting", MethodSourcesListExisting},
+		{"sources.addExisting", MethodSourcesAddExisting},
 		{"properties.get", MethodPropertiesGet},
 		{"properties.set", MethodPropertiesSet},
 		{"properties.button", MethodPropertiesButton},
