@@ -60,13 +60,20 @@ target_sources(
     src/bridge.hpp
     src/obs_bootstrap.cpp
     src/obs_bootstrap.hpp
+    src/preview_window.cpp
+    src/preview_window.hpp
     src/log.hpp
+    api-impl/frontend_callbacks.cpp
+    api-impl/frontend_callbacks.hpp
 )
 
 # CEF's required compiler/linker flags, defines, and include paths.
 set_executable_target_properties(${_target})
 
-target_include_directories(${_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(
+  ${_target}
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/api-impl"
+)
 
 add_dependencies(${_target} libcef_dll_wrapper)
 target_link_libraries(
@@ -82,7 +89,11 @@ target_link_options(${_target} PRIVATE "/IGNORE:4199")
 # obs.h uses nameless struct/union (C4201), fatal under CEF's /W4 /WX. Suppress
 # only on the TUs that include obs.h.
 set_source_files_properties(
-  src/obs_bootstrap.cpp src/bridge.cpp
+  src/main.cpp
+  src/obs_bootstrap.cpp
+  src/bridge.cpp
+  src/preview_window.cpp
+  api-impl/frontend_callbacks.cpp
   PROPERTIES COMPILE_OPTIONS "/wd4201"
 )
 
