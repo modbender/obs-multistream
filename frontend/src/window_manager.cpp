@@ -122,17 +122,34 @@ int WindowManager::Detach(const std::string &dockId)
 
 bool WindowManager::Redock(int windowId)
 {
-	for (Window &w : windows_) {
-		if (w.windowId == windowId) {
-			HostLog("[window] redock id=" + std::to_string(windowId));
-			// Tear surfaces down FIRST (while libobs is up, before the browser dies),
-			// then close the browser; OnBeforeClose unregisters it from the emit set.
-			if (PreviewManager *pm = Preview::Instance()) {
-				pm->DestroyWindow(windowId);
-			}
-			PostMessageW(w.hwnd, WM_CLOSE, 0, 0);
-			return true;
+	for (auto it = windows_.begin(); it != windows_.end(); ++it) {
+		if (it->windowId != windowId) {
+			continue;
 		}
+		HostLog("[window] redock id=" + std::to_string(windowId));
+		// Synchronous teardown in the same order as the WM_CLOSE path (surfaces ->
+		// browser -> window), so window.list reflects the removal the instant Redock
+		// returns rather than after a posted WM_CLOSE drains. Tear surfaces down
+		// FIRST (while libobs is up, before the browser dies) so the obs_display
+		// is gone before its canvas mix could be freed; drop the host-HWND
+		// registration once the surfaces are gone.
+		if (PreviewManager *pm = Preview::Instance()) {
+			pm->DestroyWindow(windowId);
+			pm->UnregisterWindow(windowId);
+		}
+		if (it->browser) {
+			it->browser->GetHost()->CloseBrowser(true);
+		}
+		const HWND hwnd = it->hwnd;
+		HostLog("[window] closing id=" + std::to_string(windowId));
+		// Erase the tracking entry before destroying the HWND: the WM_CLOSE that
+		// ::DestroyWindow triggers then finds no entry (FindByHwnd -> null) and
+		// no-ops, so the teardown above is not repeated.
+		windows_.erase(it);
+		if (hwnd) {
+			::DestroyWindow(hwnd);
+		}
+		return true;
 	}
 	return false;
 }

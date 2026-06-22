@@ -9,6 +9,9 @@
 
   let host: HTMLDivElement;
   let api: DockviewApi | undefined;
+  // The most recent detach this (main) window initiated, so the Redock button knows
+  // which detached window to fold back in. {id, dock} or null when nothing is out.
+  let lastDetached = $state<{ id: number; dock: string } | null>(null);
 
   // Dockview hands us a DOM element per panel; we mount a Svelte component into it
   // and unmount on dispose. The panel's `params` carry the dock id + windowId.
@@ -60,7 +63,20 @@
       console.log("OBSSPIKE: scenes.changed observed in window=" + windowId);
     });
     const offOpened = obs.on("window.opened", (p) => console.log("OBSSPIKE: window.opened " + JSON.stringify(p)));
-    const offClosed = obs.on("window.closed", (p) => console.log("OBSSPIKE: window.closed " + JSON.stringify(p)));
+    // On redock, the host has already torn the detached window + its surface down;
+    // fold the panel back into THIS (main) window so the dock returns. Detached
+    // windows ignore it -- they are closing.
+    const offClosed = obs.on("window.closed", (p) => {
+      console.log("OBSSPIKE: window.closed " + JSON.stringify(p));
+      if (dockId !== null || !api) return;
+      const closedId = (p as { windowId?: number } | null)?.windowId;
+      const dock = lastDetached && lastDetached.id === closedId ? lastDetached.dock : null;
+      if (!dock || api.getPanel(dock)) return;
+      const comp = dock.startsWith("preview") ? "preview" : "scenes";
+      api.addPanel({ id: dock, component: comp, title: dock === "preview" ? "Preview · Default" : dock });
+      console.log("OBSSPIKE: redocked panel " + dock + " into main window");
+      lastDetached = null;
+    });
 
     return () => {
       off();
@@ -71,10 +87,20 @@
   });
 
   async function detach(dock: string) {
-    const r = await obs.call("window.detach", { dock });
+    const r = (await obs.call("window.detach", { dock })) as { windowId?: number } | null;
     console.log("OBSSPIKE: detach -> " + JSON.stringify(r));
     // Remove the panel from this (main) window once the host window owns it.
     api?.getPanel(dock)?.api.close();
+    if (r && typeof r.windowId === "number") {
+      lastDetached = { id: r.windowId, dock };
+    }
+  }
+
+  async function redock() {
+    if (!lastDetached) return;
+    const r = await obs.call("window.redock", { windowId: lastDetached.id });
+    console.log("OBSSPIKE: redock -> " + JSON.stringify(r));
+    // The window.closed broadcast folds the panel back in; nothing else to do here.
   }
 </script>
 
@@ -83,6 +109,7 @@
     <div class="toolbar">
       <button onclick={() => detach("preview")}>⧉ Detach Preview</button>
       <button onclick={() => detach("scenes")}>⧉ Detach Scenes</button>
+      <button onclick={redock} disabled={!lastDetached}>⧈ Redock</button>
     </div>
   {/if}
   <div class="dock-host" bind:this={host}></div>

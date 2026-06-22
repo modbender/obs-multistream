@@ -25,9 +25,14 @@ constexpr int kHostHeight = 720;
 constexpr wchar_t kHostClassName[] = L"ObsMultiStreamShell";
 constexpr UINT_PTR kSizeProbeTimerId = 1;
 constexpr UINT_PTR kSmokeQuitTimerId = 2;
+constexpr UINT_PTR kSmokeRedockTimerId = 3;
 
 // Host-window-owned handles. Single-threaded (browser process UI thread).
 CefRefPtr<CefBrowser> g_browser;
+
+// THROWAWAY (P0 spike). The windowId the smoke path detached, so the later redock
+// timer can drive window.redock against it. 0 => nothing detached.
+int g_smokeDetachedWindowId = 0;
 
 // Owns the per-canvas preview surfaces (each an obs_display on its own child
 // HWND). Created after ObsBootstrap::Start() succeeds; all surfaces destroyed
@@ -122,6 +127,18 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				std::string err;
 				if (Bridge::Dispatch("window.detach", Bridge::json{{"dock", "preview"}}, result, err)) {
 					HostLog("[host] smoke window.detach result=" + result.dump());
+					// Capture the detached id and arm the redock timer so the full
+					// detach->surface-created->redock->surface-destroyed->window.closed
+					// round-trip is exercised headlessly (Task 8). Delayed long enough
+					// for the detached browser to load + report its preview rect (which
+					// lazily creates the surface) before we tear it back down.
+					if (result.is_object() && result.contains("windowId") &&
+					    result["windowId"].is_number_integer()) {
+						g_smokeDetachedWindowId = result["windowId"].get<int>();
+						SetTimer(hwnd, kSmokeRedockTimerId, 4000, nullptr);
+						HostLog("[host] smoke redock armed for id=" +
+							std::to_string(g_smokeDetachedWindowId) + " in 4s");
+					}
 				} else {
 					HostLog("[host] smoke window.detach FAILED: " + err);
 				}
@@ -129,6 +146,28 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				std::string listErr;
 				if (Bridge::Dispatch("window.list", Bridge::json(nullptr), listResult, listErr)) {
 					HostLog("[host] smoke window.list result=" + listResult.dump());
+				}
+			}
+		} else if (wparam == kSmokeRedockTimerId) {
+			KillTimer(hwnd, kSmokeRedockTimerId);
+			// THROWAWAY (P0 spike). Drive the REAL window.redock bridge method (Task 6)
+			// for the smoke-detached window so the round-trip -- Redock -> surface
+			// teardown (preview display destroyed BEFORE the browser closes) ->
+			// window.closed broadcast -- is proven without a click. Then re-list to
+			// prove window.list no longer reports it (the entry was erased).
+			if (g_windows && g_smokeDetachedWindowId > 0) {
+				Bridge::json result;
+				std::string err;
+				if (Bridge::Dispatch("window.redock", Bridge::json{{"windowId", g_smokeDetachedWindowId}},
+						     result, err)) {
+					HostLog("[host] smoke window.redock result=" + result.dump());
+				} else {
+					HostLog("[host] smoke window.redock FAILED: " + err);
+				}
+				Bridge::json listResult;
+				std::string listErr;
+				if (Bridge::Dispatch("window.list", Bridge::json(nullptr), listResult, listErr)) {
+					HostLog("[host] smoke window.list (post-redock) result=" + listResult.dump());
 				}
 			}
 		} else if (wparam == kSmokeQuitTimerId) {
