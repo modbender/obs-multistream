@@ -304,3 +304,18 @@ output signal handlers no longer build the status array inline (which read the
 UI-thread-mutated canvas/profile/binding stores); `EmitMultistreamChanged`
 defers to `TID_UI` so `Statuses()` always reads the stores on the thread that
 writes them.
+
+### 4.4.5b multi-canvas panels — all-outputs-disabled first-run empty state (revisit before cutover)
+
+The new uniform canvas panels are output-gated: a panel shows only when
+`AnyEnabledForCanvas(uuid)` (the Default canvas included -- this is the deliberate
+"hide the Default panel when disabled" capability the Qt central widget could
+never do). Consequence: a fresh scene collection with zero output bindings shows
+NO canvas panels at all -- the entire center editing area collapses to the empty
+state ("No active canvases - enable an output in Settings -> Outputs"), and the
+shared Sources panel shows "No canvas focused". A brand-new user must discover
+Settings -> Outputs before anything is editable. This is the literal approved
+behavior, not a bug; flagging as a pre-cutover UX decision: keep as-is, OR keep
+the Default panel visible when NOTHING is enabled (gate only additional canvases
+on first run), OR add an "enable default output" CTA in the empty state. Design
+call -- not changed unilaterally.
