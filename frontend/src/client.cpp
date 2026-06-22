@@ -8,6 +8,18 @@
 
 Client::Client() = default;
 
+bool Client::OnBeforePopup(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> /*frame*/,
+			   const CefString &target_url, const CefString & /*target_frame_name*/,
+			   CefLifeSpanHandler::WindowOpenDisposition /*target_disposition*/, bool /*user_gesture*/,
+			   const CefPopupFeatures & /*popupFeatures*/, CefWindowInfo & /*windowInfo*/,
+			   CefRefPtr<CefClient> & /*client*/, CefBrowserSettings & /*settings*/,
+			   CefRefPtr<CefDictionaryValue> & /*extra_info*/, bool * /*no_javascript_access*/)
+{
+	CEF_REQUIRE_UI_THREAD();
+	HostLog("[cef] OnBeforePopup canceled (host-driven detach): " + target_url.ToString());
+	return true; // cancel: detach is host-driven via window.detach
+}
+
 void Client::OnAfterCreated(CefRefPtr<CefBrowser> browser)
 {
 	CEF_REQUIRE_UI_THREAD();
