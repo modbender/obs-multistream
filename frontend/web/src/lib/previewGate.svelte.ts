@@ -6,16 +6,23 @@
 // the preview suspend it while open; PreviewArea hides the overlay whenever the
 // count is non-zero and re-asserts its rect when it returns to zero.
 
+import { untrack } from "svelte";
+
 let count = $state(0);
 
 /** Suspend the preview while a modal/overlay is open. Returns a release fn. */
 export function suspendPreview(): () => void {
-	count++;
+	// Mutate inside untrack: callers invoke this from an $effect, and a plain
+	// `count++` both reads and writes `count`, which would subscribe the calling
+	// effect to its own write -> effect_update_depth_exceeded. Untracking the
+	// read keeps the gate one-directional: writers bump the count without
+	// subscribing; only previewSuspended() readers below take the dependency.
+	untrack(() => count++);
 	let released = false;
 	return () => {
 		if (!released) {
 			released = true;
-			count = Math.max(0, count - 1);
+			untrack(() => (count = Math.max(0, count - 1)));
 		}
 	};
 }
