@@ -12,6 +12,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include "audio/AudioMonitor.hpp"
 #include "log.hpp"
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
@@ -884,6 +885,38 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 	EmitScenesChanged(std::string());
 	result = json{{"name", to}};
 	return true;
+}
+
+// scenes.reorder {name, direction:"up"|"down", canvas?}: reorder a scene within
+// the (canvas or global) scene list.
+//
+// HONEST LIMITATION: libobs has no scene-ordering primitive. Unlike scene ITEMS
+// (obs_sceneitem_set_order), global scenes are plain sources enumerated by
+// obs_enum_scenes in CREATION order, and an additional canvas's scenes are
+// enumerated by obs_canvas_enum_scenes -- neither exposes a settable order. The
+// legacy Qt frontend's scene order is a UI-only concept: it persists a
+// "scene_order" array inside each scene-collection JSON (SaveSceneListOrder reads
+// the QListWidget row order). The new CEF frontend has NO scene-collection
+// save/load layer yet (OutputBindingStore notes this), so there is nowhere to
+// persist a user-defined order. Implementing a session-only order that
+// scenes.list does not consult would be a no-op disguised as success. Per the
+// plan ("do NOT fake it"), this returns a clear error until scene-collection
+// persistence exists to back a real order.
+bool MethodScenesReorder(const json &params, json & /*result*/, std::string &error)
+{
+	const std::string name = OptString(params, "name");
+	const std::string direction = OptString(params, "direction");
+	if (name.empty()) {
+		error = "scenes.reorder requires a non-empty 'name'";
+		return false;
+	}
+	if (direction != "up" && direction != "down") {
+		error = "scenes.reorder 'direction' must be 'up' or 'down'";
+		return false;
+	}
+	error = "scene reordering is not supported: libobs enumerates scenes in creation order and "
+		"the new frontend has no scene-collection persistence to store a custom order";
+	return false;
 }
 
 // --- scene items ------------------------------------------------------------
@@ -2298,6 +2331,69 @@ bool MethodMultistreamStopOutput(const json &params, json &result, std::string &
 	return true;
 }
 
+// --- audio mixer (per-source faders + volmeters, levels) --------------------
+
+bool MethodAudioList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (const AudioMonitor::SourceInfo &s : ObsBootstrap::AudioMonitor().List()) {
+		arr.push_back(json{
+			{"uuid", s.uuid},
+			{"name", s.name},
+			{"deflection", s.deflection},
+			{"volumeDb", s.volumeDb},
+			{"muted", s.muted},
+		});
+	}
+	result = json{{"sources", std::move(arr)}};
+	return true;
+}
+
+bool MethodAudioSetDeflection(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "audio.setDeflection requires a non-empty 'uuid'";
+		return false;
+	}
+	if (!params.is_object() || !params.contains("deflection") || !params["deflection"].is_number()) {
+		error = "audio.setDeflection requires a number 'deflection'";
+		return false;
+	}
+	const float deflection = params["deflection"].get<float>();
+	float appliedDef = 0.0f;
+	float appliedDb = 0.0f;
+	if (!ObsBootstrap::AudioMonitor().SetDeflection(uuid, deflection, appliedDef, appliedDb)) {
+		error = "no active audio source with uuid '" + uuid + "'";
+		return false;
+	}
+	result = json{{"uuid", uuid}, {"deflection", appliedDef}, {"volumeDb", appliedDb}};
+	return true;
+}
+
+bool MethodAudioSetMuted(const json &params, json &result, std::string &error)
+{
+	const std::string uuid = OptString(params, "uuid");
+	if (uuid.empty()) {
+		error = "audio.setMuted requires a non-empty 'uuid'";
+		return false;
+	}
+	if (!params.is_object() || !params.contains("muted") || !params["muted"].is_boolean()) {
+		error = "audio.setMuted requires a boolean 'muted'";
+		return false;
+	}
+	obs_source_t *source = obs_get_source_by_uuid(uuid.c_str()); // addref'd
+	if (!source) {
+		error = "no source with uuid '" + uuid + "'";
+		return false;
+	}
+	const bool muted = params["muted"].get<bool>();
+	obs_source_set_muted(source, muted);
+	obs_source_release(source);
+	result = json{{"uuid", uuid}, {"muted", muted}};
+	return true;
+}
+
 // Post the actual ExecuteJavaScript on TID_UI. Built from JSON dumps so the name
 // and payload are correctly quoted/escaped.
 void DoEmit(const std::string &name, const std::string &payloadDump)
@@ -2344,6 +2440,7 @@ void Init()
 		{"scenes.remove", MethodScenesRemove},
 		{"scenes.setCurrent", MethodScenesSetCurrent},
 		{"scenes.rename", MethodScenesRename},
+		{"scenes.reorder", MethodScenesReorder},
 		{"sceneItems.list", MethodSceneItemsList},
 		{"sceneItems.setVisible", MethodSceneItemsSetVisible},
 		{"sceneItems.setLocked", MethodSceneItemsSetLocked},
@@ -2379,6 +2476,9 @@ void Init()
 		{"multistream.status", MethodMultistreamStatus},
 		{"multistream.startOutput", MethodMultistreamStartOutput},
 		{"multistream.stopOutput", MethodMultistreamStopOutput},
+		{"audio.list", MethodAudioList},
+		{"audio.setDeflection", MethodAudioSetDeflection},
+		{"audio.setMuted", MethodAudioSetMuted},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);
@@ -2435,6 +2535,46 @@ void EmitMultistreamChanged()
 		return;
 	}
 	EmitEvent("multistream.changed", json{{"outputs", BuildStatusArray()}});
+}
+
+void EmitAudioLevels()
+{
+	// Coalesce the audio-thread fires into a single ~30 Hz emit. The throttle +
+	// the snapshot/build both run on TID_UI: building the payload off-thread would
+	// race a concurrent UI-thread store/monitor mutation (the 4.4.4 discipline).
+	constexpr uint64_t kMinIntervalNs = 33'000'000; // ~30 Hz
+	static uint64_t lastEmitNs = 0;
+
+	if (!CefCurrentlyOn(TID_UI)) {
+		CefPostTask(TID_UI, base::BindOnce(&EmitAudioLevels));
+		return;
+	}
+
+	const uint64_t now = os_gettime_ns();
+	const uint64_t elapsed = now - lastEmitNs;
+	if (lastEmitNs != 0 && elapsed < kMinIntervalNs) {
+		// Too soon: re-post for the remaining interval rather than emit now. The
+		// monitor's emitPending stays armed (we do NOT snapshot here), so this is
+		// still a single in-flight task -- it just defers the drain.
+		const int64_t delayMs = int64_t((kMinIntervalNs - elapsed) / 1'000'000) + 1;
+		CefPostDelayedTask(TID_UI, base::BindOnce(&EmitAudioLevels), delayMs);
+		return;
+	}
+
+	// Drain the coalesced levels (clears emitPending so the next callback re-arms)
+	// and build the dB payload here on the UI thread.
+	std::map<std::string, AudioMonitor::Levels> snapshot = ObsBootstrap::AudioMonitor().SnapshotLevels();
+	json arr = json::array();
+	for (const auto &[uuid, level] : snapshot) {
+		arr.push_back(json{{"uuid", uuid}, {"magnitude", level.magnitude}, {"peak", level.peak}});
+	}
+	lastEmitNs = now;
+	EmitEvent("audio.levels", json{{"levels", std::move(arr)}});
+}
+
+void EmitAudioChanged()
+{
+	EmitEvent("audio.changed", json::object());
 }
 
 } // namespace Bridge

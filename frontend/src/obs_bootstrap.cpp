@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "audio/AudioMonitor.hpp"
 #include "bridge.hpp"
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
@@ -236,6 +237,55 @@ std::unique_ptr<MultistreamEngine> g_multistream;
 // engine is gone but while libobs is still up.
 std::unique_ptr<CanvasRuntime> g_canvasRuntime;
 
+// The audio mixer's per-source fader/volmeter manager. Built in Start after the
+// default scene + modules, torn down in Stop BEFORE obs_shutdown (its volmeter
+// callbacks are removed first by ClearAll). The global source activate/deactivate
+// signals below rebuild its set + push audio.changed so the UI re-lists.
+std::unique_ptr<AudioMonitor> g_audioMonitor;
+
+// Rebuild the audio monitor's active-source set and notify the UI. Wired to the
+// global source activate/deactivate signals; runs on the signal's thread (the
+// source pipeline thread), but AudioMonitor::Rebuild is self-synchronized and
+// Bridge::EmitAudioChanged marshals to TID_UI, so this is safe off the UI thread.
+void OnAudioSourceSetChanged(void * /*data*/, calldata_t * /*params*/)
+{
+	if (g_audioMonitor) {
+		g_audioMonitor->Rebuild();
+		Bridge::EmitAudioChanged();
+	}
+}
+
+// The global signals that change which sources have active audio. Connected after
+// modules load (so the global signal handler exists) and disconnected in Stop.
+const char *const kAudioSourceSignals[] = {
+	"source_activate",
+	"source_deactivate",
+	"source_audio_activate",
+	"source_audio_deactivate",
+};
+
+void ConnectAudioSourceSignals()
+{
+	signal_handler_t *handler = obs_get_signal_handler();
+	if (!handler) {
+		return;
+	}
+	for (const char *signal : kAudioSourceSignals) {
+		signal_handler_connect(handler, signal, OnAudioSourceSetChanged, nullptr);
+	}
+}
+
+void DisconnectAudioSourceSignals()
+{
+	signal_handler_t *handler = obs_get_signal_handler();
+	if (!handler) {
+		return;
+	}
+	for (const char *signal : kAudioSourceSignals) {
+		signal_handler_disconnect(handler, signal, OnAudioSourceSetChanged, nullptr);
+	}
+}
+
 // Load (or seed) the model from the shared config dir and log its shape. Must run
 // after modules load so EnsureDefaultEncoders sees registered encoders.
 void LoadMultistreamModel()
@@ -296,6 +346,15 @@ MultistreamEngine &ObsBootstrap::Multistream()
 	// can only run once the CEF page has loaded -- well after construction -- so
 	// the pointer is non-null on every reachable path.
 	return *g_multistream;
+}
+
+::AudioMonitor &ObsBootstrap::AudioMonitor()
+{
+	// Valid between Start() (constructs g_audioMonitor after the default scene +
+	// modules) and Stop() (resets it). Callers are bridge methods + the throttled
+	// audio.levels emit, all reachable only after the CEF page loads, so the
+	// pointer is non-null on every reachable path.
+	return *g_audioMonitor;
 }
 
 bool ObsBootstrap::Start()
@@ -388,6 +447,15 @@ bool ObsBootstrap::Start()
 			return uuid == g_canvases.Default().uuid ? obs_get_video() : g_canvasRuntime->VideoFor(uuid);
 		});
 	g_multistream->onStatusChanged = [] { Bridge::EmitMultistreamChanged(); };
+
+	// Bring up the audio mixer manager and seed it from the current active audio
+	// sources, then arm the global signals that change which sources have audio so
+	// the set + the UI stay in sync. Built last (after the default scene + modules)
+	// so the initial Rebuild sees the steady-state pipeline.
+	g_audioMonitor = std::make_unique<::AudioMonitor>();
+	g_audioMonitor->Rebuild();
+	ConnectAudioSourceSignals();
+	HostLog("[obs] audio monitor up; active audio sources=" + std::to_string(g_audioMonitor->List().size()));
 
 	return true;
 }
@@ -1488,10 +1556,120 @@ void ObsBootstrap::RunPreviewSurfaceIsolationSelfTest()
 		(gone ? "removed" : "STILL PRESENT (BUG)"));
 }
 
+void ObsBootstrap::RunAudioMixerSelfTest()
+{
+	using Bridge::json;
+
+	auto run = [](const std::string &method, const json &params, bool &ok) -> json {
+		json result;
+		std::string error;
+		ok = Bridge::Dispatch(method, params, result, error);
+		if (!ok) {
+			HostLog("[selftest] " + method + " FAILED: " + error);
+			return json(nullptr);
+		}
+		return result;
+	};
+
+	bool ok = false;
+
+	// 1) audio.list against the steady state. The default color source has no
+	// audio, so this may legitimately be empty until a temp subject is added.
+	json list0 = run("audio.list", json(nullptr), ok);
+	const size_t baseCount = (ok && list0.is_object() && list0["sources"].is_array()) ? list0["sources"].size() : 0;
+	HostLog("[selftest] audio-mixer audio.list (baseline) -> " + std::to_string(baseCount) + " source(s)");
+
+	// 2) Add a temporary audio-capable source (desktop audio) bound to a free
+	// global output channel so it activates, then rebuild the monitor so the new
+	// source picks up a fader + volmeter. wasapi_output_capture is a synchronous
+	// audio source: audio_active stays true even without a live device.
+	constexpr int kTempChannel = 6; // high channel, unlikely bound by the bootstrap
+	OBSSourceAutoRelease prior = obs_get_output_source(kTempChannel); // save to restore
+	obs_source_t *audioSrc = obs_source_create("wasapi_output_capture", "selftest-audio", nullptr, nullptr);
+	if (!audioSrc) {
+		HostLog("[selftest] audio-mixer: wasapi_output_capture create FAILED (skipping)");
+		return;
+	}
+	obs_set_output_source(kTempChannel, audioSrc);
+
+	const char *uuidPtr = obs_source_get_uuid(audioSrc);
+	const std::string uuid = uuidPtr ? uuidPtr : std::string();
+	const bool audioActive = obs_source_audio_active(audioSrc);
+	HostLog("[selftest] audio-mixer temp source created -> uuid=" + uuid + " audioActive=" +
+		(audioActive ? "true" : "false"));
+
+	g_audioMonitor->Rebuild();
+
+	// 3) audio.list now includes the temp source (proof the monitor attached a
+	// fader+volmeter to it -- List() reads the fader's deflection/dB).
+	json list1 = run("audio.list", json(nullptr), ok);
+	bool found = false;
+	float listedDef = -1.0f;
+	if (ok && list1.is_object() && list1["sources"].is_array()) {
+		for (const auto &s : list1["sources"]) {
+			if (s.value("uuid", std::string()) == uuid) {
+				found = true;
+				listedDef = s.value("deflection", -1.0f);
+			}
+		}
+	}
+	HostLog("[selftest] audio-mixer audio.list (with temp) -> " +
+		std::to_string(list1.is_object() && list1["sources"].is_array() ? list1["sources"].size() : 0) +
+		" source(s); temp present=" + (found ? "true (volmeter attached)" : "false (BUG)") +
+		" deflection=" + std::to_string(listedDef));
+
+	// 4) setDeflection round-trip: set ~0.5, read it back from the response.
+	json setDef = run("audio.setDeflection", json{{"uuid", uuid}, {"deflection", 0.5}}, ok);
+	if (ok && setDef.is_object()) {
+		const float appliedDef = setDef.value("deflection", -1.0f);
+		HostLog("[selftest] audio-mixer setDeflection(0.5) -> deflection=" + std::to_string(appliedDef) +
+			" volumeDb=" + std::to_string(setDef.value("volumeDb", 0.0f)) + " (round-trip " +
+			(appliedDef > 0.45f && appliedDef < 0.55f ? "OK" : "MISMATCH") + ")");
+	}
+
+	// 5) setMuted round-trip: mute, confirm via obs_source_muted, then unmute.
+	json setMuted = run("audio.setMuted", json{{"uuid", uuid}, {"muted", true}}, ok);
+	if (ok) {
+		obs_source_t *check = obs_get_source_by_uuid(uuid.c_str());
+		const bool reallyMuted = check && obs_source_muted(check);
+		if (check) {
+			obs_source_release(check);
+		}
+		HostLog(std::string("[selftest] audio-mixer setMuted(true) -> ") +
+			(setMuted.value("muted", false) ? "reported muted" : "reported unmuted") +
+			"; obs_source_muted=" + (reallyMuted ? "true (round-trip OK)" : "false (MISMATCH)"));
+	}
+	run("audio.setMuted", json{{"uuid", uuid}, {"muted", false}}, ok);
+
+	// 6) Restore: unbind the channel (or its prior source), remove + release the
+	// temp source, then rebuild so the monitor drops its entry. Leaves no state.
+	obs_set_output_source(kTempChannel, prior); // null or the prior source
+	obs_source_remove(audioSrc);
+	obs_source_release(audioSrc);
+	g_audioMonitor->Rebuild();
+	json list2 = run("audio.list", json(nullptr), ok);
+	const size_t finalCount =
+		(ok && list2.is_object() && list2["sources"].is_array()) ? list2["sources"].size() : 0;
+	HostLog("[selftest] audio-mixer cleanup -> audio.list back to " + std::to_string(finalCount) +
+		" source(s) (was " + std::to_string(baseCount) + ")");
+}
+
 void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.
 	Bridge::Shutdown();
+
+	// Tear the audio mixer down while libobs is still up: disconnect the global
+	// source signals FIRST (so no further Rebuild/audio.changed fires during
+	// teardown), then ClearAll removes every volmeter callback before destroying
+	// the volmeter/fader (the callback-fires-during-destroy hazard) and reset. Done
+	// before the destroy-queue drains + obs_shutdown so every fader/volmeter is
+	// released within the leak measurement.
+	DisconnectAudioSourceSignals();
+	if (g_audioMonitor) {
+		g_audioMonitor->ClearAll();
+		g_audioMonitor.reset();
+	}
 
 	// Deferred source destruction can cascade across the destruction-task
 	// thread; drain in a loop until no more work is spawned before

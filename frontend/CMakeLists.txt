@@ -64,6 +64,8 @@ target_sources(
     src/obs_bootstrap.hpp
     src/preview_window.cpp
     src/preview_window.hpp
+    src/audio/AudioMonitor.cpp
+    src/audio/AudioMonitor.hpp
     src/log.hpp
     api-impl/frontend_callbacks.cpp
     api-impl/frontend_callbacks.hpp
@@ -128,6 +130,7 @@ set_source_files_properties(
   src/bridge.cpp
   src/properties_serializer.cpp
   src/preview_window.cpp
+  src/audio/AudioMonitor.cpp
   api-impl/frontend_callbacks.cpp
   "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasDefinition.cpp"
   "${CMAKE_SOURCE_DIR}/frontend_old/utility/OBSCanvas.cpp"

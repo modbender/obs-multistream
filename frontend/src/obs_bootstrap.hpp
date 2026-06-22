@@ -17,6 +17,7 @@ class StreamProfileStore;
 class OutputBindingStore;
 class MultistreamEngine;
 class CanvasRuntime;
+class AudioMonitor;
 
 namespace ObsBootstrap {
 bool Start();
@@ -47,6 +48,13 @@ MultistreamEngine &Multistream();
 // the stores clear). Exposed so the canvas CRUD bridge methods can keep the mixes
 // in sync with the definitions. Valid between Start() and Stop().
 CanvasRuntime &CanvasRuntime();
+
+// The audio mixer's per-source fader/volmeter manager, owned by the bootstrap
+// (built in Start after the default scene + modules, torn down in Stop BEFORE
+// obs_shutdown with its volmeter callbacks removed first). Exposed so the audio.*
+// bridge methods + the throttled audio.levels emit can read/write over it. Valid
+// between Start() and Stop().
+AudioMonitor &AudioMonitor();
 
 // Re-fire OBS_FRONTEND_EVENT_SCENE_CHANGED through the shim so the loaded UI page
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).
@@ -124,6 +132,13 @@ void RunCanvasSceneSelfTest();
 // cross-surface bleed. Removes the temp canvas afterward; never Saves. Gated by
 // the caller to the smoke path.
 void RunPreviewSurfaceIsolationSelfTest();
+// Headless proof for the audio mixer: drive audio.list, a setDeflection
+// round-trip, and a setMuted round-trip through the bridge, and confirm a
+// volmeter attaches to a real audio source. The default color source has no
+// audio, so this creates a temporary audio-capable source (added to output 0's
+// scene so it activates), rebuilds the monitor, exercises the methods, then
+// removes the temp source + restores state. Gated by the caller to the smoke path.
+void RunAudioMixerSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 

@@ -54,6 +54,16 @@ void EmitEvent(const std::string &name, const json &payload);
 // (EmitEvent marshals to TID_UI).
 void EmitMultistreamChanged();
 
+// Push the coalesced per-source audio levels as the "audio.levels" event. Called
+// by the AudioMonitor's volmeter callback FROM THE AUDIO THREAD; this marshals to
+// TID_UI, throttles to ~30 Hz, then snapshots the monitor's levels and builds the
+// payload on the UI thread (the 4.4.4 cross-thread-read discipline).
+void EmitAudioLevels();
+
+// Push "audio.changed" so the UI re-lists when the active audio source set
+// changes. Safe to call off the UI thread (EmitEvent marshals to TID_UI).
+void EmitAudioChanged();
+
 } // namespace Bridge
 
 // Browser-side query handler for the window.cefQuery() bridge. Parses the
