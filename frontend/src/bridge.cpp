@@ -177,6 +177,22 @@ bool MethodStreamingStop(const json & /*params*/, json &result, std::string & /*
 // single-preview caller (which sends no `canvas`) is unchanged.
 std::string PreviewCanvasParam(const json &params);
 
+// THROWAWAY (P0 windowing spike). The originating window id. The Svelte side knows
+// its own windowId (from the ?window= query string) and passes it as `window`;
+// absent => 0 (main window), so production callers (no `window`) are unchanged.
+// The spec's P1 design resolves this host-side from the calling browser; the
+// explicit param is the faster throwaway proof.
+int PreviewWindowParam(const json &params)
+{
+	if (params.is_object()) {
+		auto it = params.find("window");
+		if (it != params.end() && it->is_number_integer()) {
+			return it->get<int>();
+		}
+	}
+	return 0; // main window
+}
+
 bool MethodPreviewSetRect(const json &params, json & /*result*/, std::string &error)
 {
 	PreviewManager *pm = Preview::Instance();
@@ -200,11 +216,12 @@ bool MethodPreviewSetRect(const json &params, json & /*result*/, std::string &er
 	const int w = int(num("w", 0.0) * dpr + 0.5);
 	const int h = int(num("h", 0.0) * dpr + 0.5);
 	const std::string canvas = PreviewCanvasParam(params);
+	const int windowId = PreviewWindowParam(params);
 
-	HostLog("[bridge] preview.setRect dev-px x=" + std::to_string(x) + " y=" + std::to_string(y) +
-		" w=" + std::to_string(w) + " h=" + std::to_string(h) + " (dpr=" + std::to_string(dpr) +
-		(canvas.empty() ? ")" : ", canvas=" + canvas + ")"));
-	pm->SetRect(canvas, x, y, w, h);
+	HostLog("[bridge] preview.setRect window=" + std::to_string(windowId) + " dev-px x=" + std::to_string(x) +
+		" y=" + std::to_string(y) + " w=" + std::to_string(w) + " h=" + std::to_string(h) +
+		" (dpr=" + std::to_string(dpr) + (canvas.empty() ? ")" : ", canvas=" + canvas + ")"));
+	pm->SetRect(windowId, canvas, x, y, w, h);
 	return true;
 }
 
@@ -215,7 +232,7 @@ bool MethodPreviewHide(const json &params, json & /*result*/, std::string &error
 		error = "preview not ready";
 		return false;
 	}
-	pm->Hide(PreviewCanvasParam(params));
+	pm->Hide(PreviewWindowParam(params), PreviewCanvasParam(params));
 	return true;
 }
 
@@ -229,7 +246,7 @@ bool MethodPreviewDestroy(const json &params, json & /*result*/, std::string &er
 		error = "preview not ready";
 		return false;
 	}
-	pm->Destroy(PreviewCanvasParam(params));
+	pm->Destroy(PreviewWindowParam(params), PreviewCanvasParam(params));
 	return true;
 }
 
@@ -617,7 +634,7 @@ bool MethodPreviewSelect(const json &params, json &result, std::string &error)
 		}
 	}
 
-	if (!Preview::SelectFromBridge(PreviewCanvasParam(params), scene, id, hasId)) {
+	if (!Preview::SelectFromBridge(PreviewCanvasParam(params), scene, id, hasId, PreviewWindowParam(params))) {
 		error = "preview selection failed (no scene or scene mismatch)";
 		return false;
 	}

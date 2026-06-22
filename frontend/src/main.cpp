@@ -120,7 +120,7 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			if (g_windows && getenv("FE_SMOKE_QUIT_SECONDS")) {
 				Bridge::json result;
 				std::string err;
-				if (Bridge::Dispatch("window.detach", Bridge::json{{"dock", "scenes"}}, result, err)) {
+				if (Bridge::Dispatch("window.detach", Bridge::json{{"dock", "preview"}}, result, err)) {
 					HostLog("[host] smoke window.detach result=" + result.dump());
 				} else {
 					HostLog("[host] smoke window.detach FAILED: " + err);
@@ -244,6 +244,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 	// canvas renders exactly into the region the Svelte app designates.
 	g_preview = std::make_unique<PreviewManager>(host, hInstance);
 	Preview::SetInstance(g_preview.get());
+	// Main window is windowId 0; its surfaces parent to this host HWND. (id 0 also
+	// falls back to the constructor's host_, so this is symmetry with detached
+	// windows registering theirs in WindowManager::Detach.)
+	g_preview->RegisterWindow(0, host);
 
 	// Probe the test source's size after its async CEF browser has spun up.
 	SetTimer(host, kSizeProbeTimerId, 4000, nullptr);

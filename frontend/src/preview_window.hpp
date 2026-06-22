@@ -103,16 +103,25 @@ private:
 	void *display_ = nullptr;    // obs_display_t* (opaque here)
 };
 
-// Owns the native preview surfaces, one per canvas, keyed by canvas uuid. The
+// Owns the native preview surfaces, keyed by (windowId, canvasUuid). windowId 0 is
+// the main window; detached windows (P0 windowing spike) carry windowId > 0. The
 // empty/Default canvas uuid maps to a null-targetCanvas surface (global mix +
 // output 0), byte-identical to the original single-preview behavior; any other
 // uuid is resolved to its obs_canvas_t mix via CanvasRuntime on first use. The
 // single live PreviewManager is reachable process-wide via Preview::Instance().
 //
+// Each window registers its host HWND (RegisterWindow); a surface's overlay HWND
+// is parented to its window's host. windowId 0 falls back to the constructor's
+// host_, so the main window need not register (main.cpp registers it anyway for
+// symmetry). The windowId params default to 0, so every existing single-window
+// caller is unchanged and the flag-off build is byte-identical.
+//
 // SetRect/Hide/Destroy run on the host UI thread (the bridge router callback
 // thread). DestroyAll runs at teardown, while libobs is up and BEFORE the canvas
 // mixes are freed -- an additional surface's display renders a canvas mix, so its
-// obs_display must die before that mix.
+// obs_display must die before that mix. DestroyWindow(windowId) is the per-window
+// teardown primitive WindowManager calls before a detached window's browser closes
+// and before its canvas mix is freed.
 class PreviewManager {
 public:
 	PreviewManager(HWND host, HINSTANCE instance);
@@ -121,29 +130,44 @@ public:
 	PreviewManager(const PreviewManager &) = delete;
 	PreviewManager &operator=(const PreviewManager &) = delete;
 
-	// Position/size the surface for `canvasUuid` (empty/Default uuid => the Default
-	// surface). Lazily creates the surface on first use; an unknown non-Default
-	// uuid (no live canvas mix) is a no-op.
-	void SetRect(const std::string &canvasUuid, int x, int y, int cx, int cy);
-	void Hide(const std::string &canvasUuid);
-	void Destroy(const std::string &canvasUuid);
+	// Register/unregister a window's host HWND so this window's surfaces parent to
+	// the right top-level window. windowId 0 (main) is optional -- it falls back to
+	// the constructor's host_ when not registered.
+	void RegisterWindow(int windowId, HWND host);
+	void UnregisterWindow(int windowId);
+
+	// Position/size the surface for (windowId, canvasUuid) (empty/Default uuid =>
+	// the Default surface). Lazily creates the surface on first use; an unknown
+	// non-Default uuid (no live canvas mix) is a no-op. The single-arg overloads
+	// target the main window (windowId 0) so every existing caller is unchanged
+	// (windowId can't be a defaulted leading param, so these are overloads).
+	void SetRect(int windowId, const std::string &canvasUuid, int x, int y, int cx, int cy);
+	void Hide(int windowId, const std::string &canvasUuid);
+	void Destroy(int windowId, const std::string &canvasUuid);
+	void SetRect(const std::string &canvasUuid, int x, int y, int cx, int cy)
+	{
+		SetRect(0, canvasUuid, x, y, cx, cy);
+	}
+	void Hide(const std::string &canvasUuid) { Hide(0, canvasUuid); }
+	void Destroy(const std::string &canvasUuid) { Destroy(0, canvasUuid); }
 
 	// Destroy every surface's display + overlay HWND. Called at teardown before the
 	// canvas mixes (CanvasRuntime::ClearAll) and obs_shutdown.
 	void DestroyAll();
 
-	// THROWAWAY (P0 windowing spike). Tear down only the surfaces owned by one
-	// detached window. Surfaces are still keyed solely by canvas uuid in this
-	// task (T5), so this is a no-op placeholder; Task 7 re-keys surfaces by
-	// (windowId, canvasUuid) and gives this its real per-window teardown body. It
-	// exists now so WindowManager's WndProc/Redock/DestroyAll compile against the
-	// final contract. windowId 0 is the main window (never passed here).
+	// Tear down every surface owned by one window (display + overlay HWND), erasing
+	// each from the registry. WindowManager calls this for a detached windowId
+	// before that window's browser closes and before its canvas mix is freed,
+	// preserving the UAF rule (display dies before its mix). windowId 0 is the main
+	// window (never passed here).
 	void DestroyWindow(int windowId);
 
-	// The surface for `canvasUuid`, creating it if absent. Empty/Default uuid =>
-	// the Default surface (null targetCanvas). Returns null for a non-Default uuid
-	// with no live canvas mix. Used by the bridge select/hit-test/reset paths.
-	PreviewSurface *SurfaceFor(const std::string &canvasUuid);
+	// The surface for (windowId, canvasUuid), creating it if absent. Empty/Default
+	// uuid => the Default surface (null targetCanvas). Returns null for a
+	// non-Default uuid with no live canvas mix. Used by the bridge
+	// select/hit-test/reset paths. The single-arg overload targets the main window.
+	PreviewSurface *SurfaceFor(int windowId, const std::string &canvasUuid);
+	PreviewSurface *SurfaceFor(const std::string &canvasUuid) { return SurfaceFor(0, canvasUuid); }
 
 	// Apply OnVideoReset to every live surface (global-mix reset). Runs on the UI
 	// thread.
@@ -164,17 +188,19 @@ namespace Preview {
 void SetInstance(PreviewManager *pm);
 PreviewManager *Instance();
 
-// Drive selection from JS (the SourcesPanel) on the surface for `canvas` (empty =>
-// the Default surface, output channel 0). `scene` is validated against that
-// surface's current scene name (a mismatch is ignored, keeping "preview shows the
-// current scene" intact). When `hasId` is false the selection is cleared. Emits
-// sceneItem.selected like a mouse-driven change. Runs on the UI thread.
-bool SelectFromBridge(const std::string &canvas, const std::string &scene, int64_t id, bool hasId);
+// Drive selection from JS (the SourcesPanel) on the surface for (windowId, canvas)
+// (empty canvas => the Default surface, output channel 0). `scene` is validated
+// against that surface's current scene name (a mismatch is ignored, keeping
+// "preview shows the current scene" intact). When `hasId` is false the selection
+// is cleared. Emits sceneItem.selected like a mouse-driven change. Runs on the UI
+// thread. windowId defaults to 0 (main window).
+bool SelectFromBridge(const std::string &canvas, const std::string &scene, int64_t id, bool hasId, int windowId = 0);
 
-// Hit-test at a canvas-space coordinate against the surface for `canvas` (empty =>
-// the Default surface); returns the topmost matching scene-item id, or -1. Used by
-// the smoke self-tests to prove hit-testing without a real cursor.
-int64_t HitTestForTest(const std::string &canvas, float canvasX, float canvasY);
+// Hit-test at a canvas-space coordinate against the surface for (windowId, canvas)
+// (empty canvas => the Default surface); returns the topmost matching scene-item
+// id, or -1. Used by the smoke self-tests to prove hit-testing without a real
+// cursor. windowId defaults to 0 (main window).
+int64_t HitTestForTest(const std::string &canvas, float canvasX, float canvasY, int windowId = 0);
 
 // Re-validate every live surface after an obs_reset_video of the global mix. The
 // obs_display swapchains + draw callbacks survive a video reset (it rebuilds the

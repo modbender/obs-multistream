@@ -1075,18 +1075,20 @@ LRESULT CALLBACK PreviewWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 
 } // namespace
 
-// One managed surface: its canvas uuid key ("" for the Default surface) and the
-// owned PreviewSurface. unique_ptr so the surface keeps a stable address while the
-// list grows (the WndProc maps an HWND to a surface by pointer).
+// One managed surface: its (windowId, canvas uuid) key ("" uuid for the Default
+// surface) and the owned PreviewSurface. unique_ptr so the surface keeps a stable
+// address while the list grows (the WndProc maps an HWND to a surface by pointer).
 struct ManagedSurface {
+	int windowId; // 0 = main window
 	std::string uuid; // "" => Default surface
 	std::unique_ptr<PreviewSurface> surface;
 };
 
-// pimpl body: the surface list, kept out of the header so it stays free of
-// <vector>/<memory> and the PreviewSurface definition.
+// pimpl body: the surface list + per-window host HWND map, kept out of the header
+// so it stays free of <vector>/<memory> and the PreviewSurface definition.
 struct PreviewManager::Impl {
 	std::vector<ManagedSurface> surfaces;
+	std::vector<std::pair<int, HWND>> windowHosts; // windowId -> host HWND
 };
 
 PreviewManager::PreviewManager(HWND host, HINSTANCE instance) : impl_(new Impl()), host_(host), instance_(instance) {}
@@ -1097,20 +1099,53 @@ PreviewManager::~PreviewManager()
 	delete impl_;
 }
 
-PreviewSurface *PreviewManager::SurfaceFor(const std::string &canvasUuid)
+void PreviewManager::RegisterWindow(int windowId, HWND host)
+{
+	for (auto &h : impl_->windowHosts) {
+		if (h.first == windowId) {
+			h.second = host;
+			return;
+		}
+	}
+	impl_->windowHosts.push_back({windowId, host});
+	HostLog("[preview] RegisterWindow id=" + std::to_string(windowId));
+}
+
+void PreviewManager::UnregisterWindow(int windowId)
+{
+	for (auto it = impl_->windowHosts.begin(); it != impl_->windowHosts.end(); ++it) {
+		if (it->first == windowId) {
+			impl_->windowHosts.erase(it);
+			HostLog("[preview] UnregisterWindow id=" + std::to_string(windowId));
+			return;
+		}
+	}
+}
+
+PreviewSurface *PreviewManager::SurfaceFor(int windowId, const std::string &canvasUuid)
 {
 	const bool isDefault = IsDefaultCanvasUuid(canvasUuid);
 	const std::string key = isDefault ? std::string() : canvasUuid;
 
 	for (ManagedSurface &s : impl_->surfaces) {
-		if (s.uuid == key) {
+		if (s.windowId == windowId && s.uuid == key) {
 			return s.surface.get();
 		}
 	}
 
-	// First use of this canvas: bind the surface to the right mix. Default => null
-	// targetCanvas (global mix); otherwise resolve the live obs_canvas_t. An
-	// unknown non-Default uuid (no live mix) gets no surface.
+	// Resolve the host HWND for this window: a registered detached window's host,
+	// else the constructor's host_ (windowId 0 / main, or an unregistered window).
+	HWND host = host_;
+	for (const auto &h : impl_->windowHosts) {
+		if (h.first == windowId) {
+			host = h.second;
+			break;
+		}
+	}
+
+	// First use of this (window, canvas): bind the surface to the right mix.
+	// Default => null targetCanvas (global mix); otherwise resolve the live
+	// obs_canvas_t. An unknown non-Default uuid (no live mix) gets no surface.
 	obs_canvas_t *targetCanvas = nullptr;
 	if (!isDefault) {
 		targetCanvas = ObsBootstrap::CanvasRuntime().Find(canvasUuid);
@@ -1119,34 +1154,37 @@ PreviewSurface *PreviewManager::SurfaceFor(const std::string &canvasUuid)
 		}
 	}
 
-	impl_->surfaces.push_back(ManagedSurface{key, std::make_unique<PreviewSurface>(host_, instance_, targetCanvas)});
+	impl_->surfaces.push_back(
+		ManagedSurface{windowId, key, std::make_unique<PreviewSurface>(host, instance_, targetCanvas)});
+	HostLog("[preview] surface created window=" + std::to_string(windowId) +
+		(key.empty() ? " canvas=Default" : " canvas=" + key));
 	return impl_->surfaces.back().surface.get();
 }
 
-void PreviewManager::SetRect(const std::string &canvasUuid, int x, int y, int cx, int cy)
+void PreviewManager::SetRect(int windowId, const std::string &canvasUuid, int x, int y, int cx, int cy)
 {
-	PreviewSurface *surface = SurfaceFor(canvasUuid);
+	PreviewSurface *surface = SurfaceFor(windowId, canvasUuid);
 	if (surface) {
 		surface->SetRect(x, y, cx, cy);
 	}
 }
 
-void PreviewManager::Hide(const std::string &canvasUuid)
+void PreviewManager::Hide(int windowId, const std::string &canvasUuid)
 {
 	const std::string key = IsDefaultCanvasUuid(canvasUuid) ? std::string() : canvasUuid;
 	for (ManagedSurface &s : impl_->surfaces) {
-		if (s.uuid == key) {
+		if (s.windowId == windowId && s.uuid == key) {
 			s.surface->Hide();
 			return;
 		}
 	}
 }
 
-void PreviewManager::Destroy(const std::string &canvasUuid)
+void PreviewManager::Destroy(int windowId, const std::string &canvasUuid)
 {
 	const std::string key = IsDefaultCanvasUuid(canvasUuid) ? std::string() : canvasUuid;
 	for (auto it = impl_->surfaces.begin(); it != impl_->surfaces.end(); ++it) {
-		if (it->uuid == key) {
+		if (it->windowId == windowId && it->uuid == key) {
 			it->surface->Destroy();
 			impl_->surfaces.erase(it);
 			return;
@@ -1164,10 +1202,21 @@ void PreviewManager::DestroyAll()
 
 void PreviewManager::DestroyWindow(int windowId)
 {
-	// THROWAWAY (P0 spike). Surfaces are keyed only by canvas uuid in T5, so no
-	// surface belongs to a specific detached window yet. Task 7 re-keys to
-	// (windowId, canvasUuid) and tears down the matching surfaces here.
-	HostLog("[preview] DestroyWindow(windowId=" + std::to_string(windowId) + ") -- no per-window surfaces yet (T7)");
+	// Tear down + erase every surface owned by windowId. Destroy() kills the
+	// obs_display before this returns, so it runs (per the UAF rule) before the
+	// window's browser closes and before its canvas mix is freed.
+	int destroyed = 0;
+	for (auto it = impl_->surfaces.begin(); it != impl_->surfaces.end();) {
+		if (it->windowId == windowId) {
+			it->surface->Destroy();
+			it = impl_->surfaces.erase(it);
+			++destroyed;
+		} else {
+			++it;
+		}
+	}
+	HostLog("[preview] DestroyWindow(windowId=" + std::to_string(windowId) +
+		") destroyed " + std::to_string(destroyed) + " surface(s)");
 }
 
 void PreviewManager::OnVideoResetAll()
@@ -1189,24 +1238,24 @@ PreviewManager *Instance()
 	return g_instance;
 }
 
-bool SelectFromBridge(const std::string &canvas, const std::string &scene, int64_t id, bool hasId)
+bool SelectFromBridge(const std::string &canvas, const std::string &scene, int64_t id, bool hasId, int windowId)
 {
 	if (!g_instance) {
 		return false;
 	}
-	PreviewSurface *surface = g_instance->SurfaceFor(canvas);
+	PreviewSurface *surface = g_instance->SurfaceFor(windowId, canvas);
 	if (!surface) {
 		return false;
 	}
 	return surface->SelectFromBridge(scene, id, hasId);
 }
 
-int64_t HitTestForTest(const std::string &canvas, float canvasX, float canvasY)
+int64_t HitTestForTest(const std::string &canvas, float canvasX, float canvasY, int windowId)
 {
 	if (!g_instance) {
 		return -1;
 	}
-	PreviewSurface *surface = g_instance->SurfaceFor(canvas);
+	PreviewSurface *surface = g_instance->SurfaceFor(windowId, canvas);
 	if (!surface) {
 		return -1;
 	}

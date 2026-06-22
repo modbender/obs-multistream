@@ -108,6 +108,13 @@ int WindowManager::Detach(const std::string &dockId)
 		SetWindowLongPtrW(bh, GWL_STYLE, GetWindowLongPtrW(bh, GWL_STYLE) | WS_CLIPSIBLINGS);
 	}
 
+	// Register this window's host HWND so its preview surfaces parent to THIS
+	// top-level window (its overlay HWND becomes a child of hwnd, z-ordered above
+	// the child CEF browser), not the main window.
+	if (PreviewManager *pm = Preview::Instance()) {
+		pm->RegisterWindow(windowId, hwnd);
+	}
+
 	windows_.push_back(Window{windowId, dockId, hwnd, browser});
 	HostLog("[window] detached id=" + std::to_string(windowId) + " dock=" + dockId + " url=" + url);
 	return windowId;
@@ -157,6 +164,7 @@ void WindowManager::DestroyAll()
 	for (Window &w : windows_) {
 		if (PreviewManager *pm = Preview::Instance()) {
 			pm->DestroyWindow(w.windowId);
+			pm->UnregisterWindow(w.windowId);
 		}
 		if (w.browser) {
 			w.browser->GetHost()->CloseBrowser(true);
@@ -189,9 +197,11 @@ LRESULT CALLBACK WindowManager::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	case WM_CLOSE:
 		if (wm) {
 			if (Window *w = wm->FindByHwnd(hwnd)) {
-				// Surfaces must die before the browser/window (UAF discipline).
+				// Surfaces must die before the browser/window (UAF discipline);
+				// drop the host-HWND registration once they are gone.
 				if (PreviewManager *pm = Preview::Instance()) {
 					pm->DestroyWindow(w->windowId);
+					pm->UnregisterWindow(w->windowId);
 				}
 				if (w->browser) {
 					w->browser->GetHost()->CloseBrowser(true);
