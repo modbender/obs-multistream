@@ -22,10 +22,10 @@ void Client::OnAfterCreated(CefRefPtr<CefBrowser> browser)
 
 	browser_list_.push_back(browser);
 
-	// The first browser created is the UI browser: it is the EmitEvent target
-	// for server->client push. (obs-browser OSR sources have no Client and are
-	// never seen here.)
-	Bridge::SetUiBrowser(browser);
+	// Register this browser as an EmitEvent target: server->client push
+	// broadcasts to every live UI browser. (obs-browser OSR sources have no
+	// Client and are never seen here.)
+	Bridge::AddBrowser(browser);
 
 	HostLog("[cef] browser created");
 }
@@ -38,8 +38,8 @@ void Client::OnBeforeClose(CefRefPtr<CefBrowser> browser)
 		message_router_->OnBeforeClose(browser);
 	}
 
-	// Drop the EmitEvent target so a late event push can't touch a dying browser.
-	Bridge::ClearUiBrowser();
+	// Unregister this browser so a late event push can't touch a dying browser.
+	Bridge::RemoveBrowser(browser);
 
 	for (BrowserList::iterator it = browser_list_.begin(); it != browser_list_.end(); ++it) {
 		if ((*it)->IsSame(browser)) {

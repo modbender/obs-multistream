@@ -17,11 +17,12 @@
 // msg). Methods are data, not branches: adding one is a single registry
 // insertion in bridge.cpp.
 //
-// Event push (C++->JS): Bridge::EmitEvent posts to the CEF UI thread, gets the
-// UI browser's main frame, and ExecuteJavaScripts window.__obsEmit(name,
-// payload), which the JS client (obs-bridge.js) fans out to obs.on()
-// subscribers. The UI browser ref is held via Bridge::SetUiBrowser; emits no-op
-// safely before it exists or after it is gone.
+// Event push (C++->JS): Bridge::EmitEvent posts to the CEF UI thread and
+// broadcasts window.__obsEmit(name, payload) to every registered browser's main
+// frame, which the JS client (obs-bridge.js) fans out to obs.on() subscribers.
+// Browsers register via Bridge::AddBrowser / drop via Bridge::RemoveBrowser;
+// emits no-op safely before any browser exists or after all are gone. With a
+// single registered browser this is behavior-identical to a single-target emit.
 namespace Bridge {
 
 using json = nlohmann::json;
@@ -35,10 +36,11 @@ void Init();
 // is still up (before obs_shutdown), on the UI thread.
 void Shutdown();
 
-// Hold / drop the UI browser used as the EmitEvent target. Called from the CEF
-// UI thread (Client life-span callbacks).
-void SetUiBrowser(CefRefPtr<CefBrowser> browser);
-void ClearUiBrowser();
+// Register / unregister a live browser as an EmitEvent target. Called from the
+// CEF UI thread (Client life-span callbacks). EmitEvent broadcasts to ALL
+// registered browsers so a state change in one window updates every window.
+void AddBrowser(CefRefPtr<CefBrowser> browser);
+void RemoveBrowser(CefRefPtr<CefBrowser> browser);
 
 // Dispatch one envelope. Returns true on success (result populated), false on
 // failure (error populated with a human-readable message). Runs on the browser

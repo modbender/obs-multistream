@@ -4,6 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <obs.h>
 #include <obs-frontend-api.h>
@@ -36,10 +37,12 @@ using MethodFn = std::function<bool(const json &params, json &result, std::strin
 
 std::unordered_map<std::string, MethodFn> g_methods;
 
-// The UI browser EmitEvent targets. Set/cleared on the UI thread; read on the UI
-// thread (EmitEvent posts there first). guarded for paranoia across the post.
+// All live UI browsers; EmitEvent broadcasts to each. Registered/unregistered on
+// the UI thread; read on the UI thread (EmitEvent posts there first). The mutex
+// guards the registry against the (off-thread) registration paths and snapshots
+// it before iterating so an emit never holds the lock across ExecuteJavaScript.
 std::mutex g_browser_mutex;
-CefRefPtr<CefBrowser> g_ui_browser;
+std::vector<CefRefPtr<CefBrowser>> g_browsers;
 
 // obs frontend event enum -> stable string name forwarded to JS. Data-driven so
 // adding a forwarded event is one row, not a switch arm.
@@ -2394,30 +2397,35 @@ bool MethodAudioSetMuted(const json &params, json &result, std::string &error)
 	return true;
 }
 
-// Post the actual ExecuteJavaScript on TID_UI. Built from JSON dumps so the name
-// and payload are correctly quoted/escaped.
+// Post the actual ExecuteJavaScript on TID_UI, broadcasting to every registered
+// browser. Built from JSON dumps so the name and payload are correctly
+// quoted/escaped. With a single registered browser this is identical to a
+// single-target emit.
 void DoEmit(const std::string &name, const std::string &payloadDump)
 {
 	CEF_REQUIRE_UI_THREAD();
 
-	CefRefPtr<CefBrowser> browser;
+	// Snapshot the registry so a callback can't mutate it under iteration and so
+	// we never hold the lock across ExecuteJavaScript.
+	std::vector<CefRefPtr<CefBrowser>> browsers;
 	{
 		std::lock_guard<std::mutex> lock(g_browser_mutex);
-		browser = g_ui_browser;
-	}
-	if (!browser) {
-		return; // UI browser not yet created or already gone
-	}
-	CefRefPtr<CefFrame> frame = browser->GetMainFrame();
-	if (!frame) {
-		return;
+		browsers = g_browsers;
 	}
 
 	// window.__obsEmit("<name>", <payload>); guarded so it no-ops before the
 	// bridge client script has defined the sink.
 	const std::string nameDump = json(name).dump();
-	std::string script = "if(window.__obsEmit){window.__obsEmit(" + nameDump + "," + payloadDump + ");}";
-	frame->ExecuteJavaScript(script, frame->GetURL(), 0);
+	const std::string script = "if(window.__obsEmit){window.__obsEmit(" + nameDump + "," + payloadDump + ");}";
+	for (const CefRefPtr<CefBrowser> &browser : browsers) {
+		if (!browser) {
+			continue;
+		}
+		CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+		if (frame) {
+			frame->ExecuteJavaScript(script, frame->GetURL(), 0);
+		}
+	}
 }
 
 } // namespace
@@ -2491,16 +2499,26 @@ void Shutdown()
 	g_methods.clear();
 }
 
-void SetUiBrowser(CefRefPtr<CefBrowser> browser)
+void AddBrowser(CefRefPtr<CefBrowser> browser)
 {
 	std::lock_guard<std::mutex> lock(g_browser_mutex);
-	g_ui_browser = browser;
+	for (const auto &b : g_browsers) {
+		if (b && b->IsSame(browser)) {
+			return; // already registered
+		}
+	}
+	g_browsers.push_back(browser);
 }
 
-void ClearUiBrowser()
+void RemoveBrowser(CefRefPtr<CefBrowser> browser)
 {
 	std::lock_guard<std::mutex> lock(g_browser_mutex);
-	g_ui_browser = nullptr;
+	for (auto it = g_browsers.begin(); it != g_browsers.end(); ++it) {
+		if (*it && (*it)->IsSame(browser)) {
+			g_browsers.erase(it);
+			return;
+		}
+	}
 }
 
 bool Dispatch(const std::string &method, const json &params, json &result, std::string &error)
