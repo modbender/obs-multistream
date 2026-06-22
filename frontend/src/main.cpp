@@ -10,6 +10,7 @@
 #include "include/cef_browser.h"
 
 #include "app.hpp"
+#include "bridge.hpp"
 #include "client.hpp"
 #include "log.hpp"
 #include "obs_bootstrap.hpp"
@@ -111,11 +112,24 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				ObsBootstrap::RunAudioMixerSelfTest();
 			}
 			// THROWAWAY (P0 spike). Headless evidence path: with the spike flag
-			// + smoke timer on, auto-detach one window so the second host window
-			// + child browser loading spike.html?window=... is observable in the
-			// log without a real bridge trigger (Task 6 wires the real call).
+			// + smoke timer on, drive the REAL window.detach bridge method (Task 6)
+			// rather than WindowManager directly, so the full path -- dispatch ->
+			// WindowManager::Detach -> window.opened broadcast -- is exercised
+			// without a click (the SpikeApp button covers the interactive path).
+			// Then list the detached windows to prove window.list reflects it.
 			if (g_windows && getenv("FE_SMOKE_QUIT_SECONDS")) {
-				g_windows->Detach("preview");
+				Bridge::json result;
+				std::string err;
+				if (Bridge::Dispatch("window.detach", Bridge::json{{"dock", "scenes"}}, result, err)) {
+					HostLog("[host] smoke window.detach result=" + result.dump());
+				} else {
+					HostLog("[host] smoke window.detach FAILED: " + err);
+				}
+				Bridge::json listResult;
+				std::string listErr;
+				if (Bridge::Dispatch("window.list", Bridge::json(nullptr), listResult, listErr)) {
+					HostLog("[host] smoke window.list result=" + listResult.dump());
+				}
 			}
 		} else if (wparam == kSmokeQuitTimerId) {
 			KillTimer(hwnd, kSmokeQuitTimerId);
