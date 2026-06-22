@@ -16,5 +16,8 @@
     "svelte-check": "^4.1.4",
     "typescript": "^5.7.3",
     "vite": "^6.0.11"
+  },
+  "dependencies": {
+    "dockview-core": "^6.6.1"
   }
 }

@@ -35,6 +35,11 @@ std::unique_ptr<PreviewManager> g_preview;
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
 {
+	// THROWAWAY (P0 windowing spike): FE_SPIKE_WINDOWING swaps the production
+	// bundle for the spike route. Unset => byte-identical production behavior.
+	if (getenv("FE_SPIKE_WINDOWING")) {
+		return "app://app/spike.html";
+	}
 	return "app://app/index.html";
 }
 

@@ -59,7 +59,7 @@ build-aux/flatpak-github-action-modified-*
 .superpowers/
 
 # Throwaway CEF-host spike (local-only)
-spike/
+/spike/
 
 # Frontend Svelte UI build artifacts (source + bun.lock are tracked)
 /frontend/web/node_modules/
