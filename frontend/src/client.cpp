@@ -8,6 +8,22 @@
 
 Client::Client() = default;
 
+namespace {
+// The single process-wide Client (main window + every detached window's browser
+// share it). Only touched on the CEF UI thread.
+CefRefPtr<Client> g_shared_client;
+} // namespace
+
+CefRefPtr<Client> Client::Shared()
+{
+	return g_shared_client;
+}
+
+void Client::SetShared(CefRefPtr<Client> client)
+{
+	g_shared_client = client;
+}
+
 bool Client::OnBeforePopup(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> /*frame*/,
 			   const CefString &target_url, const CefString & /*target_frame_name*/,
 			   CefLifeSpanHandler::WindowOpenDisposition /*target_disposition*/, bool /*user_gesture*/,

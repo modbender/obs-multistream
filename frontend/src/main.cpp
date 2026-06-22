@@ -15,6 +15,7 @@
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "scheme.hpp"
+#include "window_manager.hpp"
 
 namespace {
 
@@ -31,6 +32,11 @@ CefRefPtr<CefBrowser> g_browser;
 // HWND). Created after ObsBootstrap::Start() succeeds; all surfaces destroyed
 // before ObsBootstrap::Stop() (which frees the canvas mixes those displays render).
 std::unique_ptr<PreviewManager> g_preview;
+
+// THROWAWAY (P0 windowing spike). Owns the detached top-level host windows + their
+// child CEF browsers. Constructed only under FE_SPIKE_WINDOWING; null otherwise so
+// production is byte-identical.
+std::unique_ptr<WindowManager> g_windows;
 
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
@@ -104,12 +110,29 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				ObsBootstrap::RunPreviewSurfaceIsolationSelfTest();
 				ObsBootstrap::RunAudioMixerSelfTest();
 			}
+			// THROWAWAY (P0 spike). Headless evidence path: with the spike flag
+			// + smoke timer on, auto-detach one window so the second host window
+			// + child browser loading spike.html?window=... is observable in the
+			// log without a real bridge trigger (Task 6 wires the real call).
+			if (g_windows && getenv("FE_SMOKE_QUIT_SECONDS")) {
+				g_windows->Detach("preview");
+			}
 		} else if (wparam == kSmokeQuitTimerId) {
 			KillTimer(hwnd, kSmokeQuitTimerId);
 			HostLog("[host] smoke-quit timer fired -> WM_CLOSE");
 			PostMessageW(hwnd, WM_CLOSE, 0, 0);
 		}
 		return 0;
+	case WM_CLOSE:
+		// THROWAWAY (P0 spike). Closing the main window must also close every
+		// detached window, or a live detached browser keeps the shared browser_list_
+		// non-empty and CefRunMessageLoop never quits (the N-browsers guard). Their
+		// WM_CLOSE posts drain before the loop empties. Then fall through to the
+		// default close that destroys the main browser.
+		if (g_windows) {
+			g_windows->CloseAll();
+		}
+		break;
 	case WM_DESTROY:
 		// Closing the host destroys its child browser window, which drives
 		// Client::OnBeforeClose -> CefQuitMessageLoop.
@@ -221,7 +244,12 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 		}
 	}
 
+	// ONE Client for the whole process: the main browser and every detached
+	// window's child browser share it (Client::Shared), so all browsers land in
+	// the same browser_list_ + Bridge emit registry and the loop quits only when
+	// the LAST browser closes.
 	CefRefPtr<Client> client(new Client());
+	Client::SetShared(client);
 	CefBrowserSettings browser_settings;
 	CefWindowInfo window_info;
 	RECT host_rc;
@@ -251,9 +279,31 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 
 	LayoutBrowser(host);
 
+	// THROWAWAY (P0 windowing spike). Under FE_SPIKE_WINDOWING, stand up the
+	// WindowManager so window.detach (Task 6) can spawn detached top-level windows.
+	// Detached child browsers reuse the shared Client (Client::Shared), so they join
+	// the same browser_list_ + Bridge emit registry. Flag off => never constructed =>
+	// production byte-identical.
+	if (getenv("FE_SPIKE_WINDOWING")) {
+		g_windows = std::make_unique<WindowManager>(hInstance, "app://app/spike.html");
+		WindowManager::SetInstance(g_windows.get());
+	}
+
 	CefRunMessageLoop();
 
 	g_browser = nullptr;
+
+	// THROWAWAY (P0 spike). Tear down every detached window's surfaces + browser
+	// before the Default surfaces and before ObsBootstrap::Stop() frees the canvas
+	// mixes those surfaces render (the UAF discipline; full teardown is Task 8).
+	if (g_windows) {
+		WindowManager::SetInstance(nullptr);
+		g_windows->DestroyAll();
+		g_windows.reset();
+	}
+
+	// Drop the process-wide shared Client ref so it doesn't outlive teardown.
+	Client::SetShared(nullptr);
 
 	// Destroy every preview surface's obs_display + overlay HWND while libobs is
 	// still up. This must precede ObsBootstrap::Stop(): an additional canvas's

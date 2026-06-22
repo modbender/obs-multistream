@@ -1162,6 +1162,14 @@ void PreviewManager::DestroyAll()
 	impl_->surfaces.clear();
 }
 
+void PreviewManager::DestroyWindow(int windowId)
+{
+	// THROWAWAY (P0 spike). Surfaces are keyed only by canvas uuid in T5, so no
+	// surface belongs to a specific detached window yet. Task 7 re-keys to
+	// (windowId, canvasUuid) and tears down the matching surfaces here.
+	HostLog("[preview] DestroyWindow(windowId=" + std::to_string(windowId) + ") -- no per-window surfaces yet (T7)");
+}
+
 void PreviewManager::OnVideoResetAll()
 {
 	for (ManagedSurface &s : impl_->surfaces) {

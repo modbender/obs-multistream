@@ -25,6 +25,14 @@ class Client : public CefClient,
 public:
 	Client();
 
+	// The single process-wide Client. The main window's browser and every
+	// detached window's child browser share ONE Client instance, so all browsers
+	// register in the same browser_list_ + Bridge emit registry and the message
+	// loop quits only when the LAST browser across all windows closes. Set once in
+	// wWinMain after the main client is constructed; read by WindowManager::Detach.
+	static CefRefPtr<Client> Shared();
+	static void SetShared(CefRefPtr<Client> client);
+
 	// CefClient methods:
 	CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
 	CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }

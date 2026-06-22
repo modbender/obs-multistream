@@ -132,6 +132,14 @@ public:
 	// canvas mixes (CanvasRuntime::ClearAll) and obs_shutdown.
 	void DestroyAll();
 
+	// THROWAWAY (P0 windowing spike). Tear down only the surfaces owned by one
+	// detached window. Surfaces are still keyed solely by canvas uuid in this
+	// task (T5), so this is a no-op placeholder; Task 7 re-keys surfaces by
+	// (windowId, canvasUuid) and gives this its real per-window teardown body. It
+	// exists now so WindowManager's WndProc/Redock/DestroyAll compile against the
+	// final contract. windowId 0 is the main window (never passed here).
+	void DestroyWindow(int windowId);
+
 	// The surface for `canvasUuid`, creating it if absent. Empty/Default uuid =>
 	// the Default surface (null targetCanvas). Returns null for a non-Default uuid
 	// with no live canvas mix. Used by the bridge select/hit-test/reset paths.
