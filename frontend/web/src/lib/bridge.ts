@@ -311,6 +311,28 @@ export interface MultistreamStatus {
   lastError: string;
 }
 
+// --- audio mixer (per-source faders + volmeters, levels) --------------------
+
+/** One active audio source as reported by audio.list. */
+export interface AudioSource {
+  uuid: string;
+  name: string;
+  /** Fader position, 0..1 (LOG mapping). */
+  deflection: number;
+  /** Current volume in dB. */
+  volumeDb: number;
+  muted: boolean;
+}
+
+/** One source's coalesced levels (dB) in an audio.levels push. */
+export interface AudioLevel {
+  uuid: string;
+  /** Smoothed magnitude in dB (<= 0; ~-96 = silence). */
+  magnitude: number;
+  /** Peak in dB (<= 0). */
+  peak: number;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -334,6 +356,11 @@ export interface ObsMethods {
   "scenes.remove": { removed: string };
   "scenes.setCurrent": { name: string };
   "scenes.rename": { name: string };
+  // Scene reorder is NOT supported by the backend: libobs enumerates scenes in
+  // creation order and the new frontend has no scene-collection persistence to
+  // store a custom order, so this method always rejects with a clear error. Kept
+  // typed so a caller gets a compile-time shape; expect the call to throw.
+  "scenes.reorder": never;
   // Scene items (top-first draw order; omit `scene` to target the current scene).
   // Pass an optional `canvas` uuid to target an additional canvas's current scene.
   "sceneItems.list": SceneItem[];
@@ -379,6 +406,12 @@ export interface ObsMethods {
   "multistream.status": { outputs: MultistreamStatus[] };
   "multistream.startOutput": { ok: boolean };
   "multistream.stopOutput": { ok: boolean };
+  // Audio mixer (per-source faders + volmeters). list returns the active audio
+  // sources; set* return the applied value. Levels arrive via the audio.levels
+  // push (throttled to ~30 Hz), not a method.
+  "audio.list": { sources: AudioSource[] };
+  "audio.setDeflection": { uuid: string; deflection: number; volumeDb: number };
+  "audio.setMuted": { uuid: string; muted: boolean };
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -396,6 +429,12 @@ export interface ObsEvents {
   "streamProfile.changed": Record<string, never>;
   "outputBinding.changed": Record<string, never>;
   "multistream.changed": { outputs: MultistreamStatus[] };
+  // Coalesced per-source audio levels, pushed at most ~30 Hz off the volmeter
+  // callbacks. The UI maps dB -> meter width and applies peak hold.
+  "audio.levels": { levels: AudioLevel[] };
+  // The active audio source set changed (source activated/deactivated); the UI
+  // re-runs audio.list to rebuild its rows.
+  "audio.changed": Record<string, never>;
 }
 
 export interface BridgeError extends Error {
