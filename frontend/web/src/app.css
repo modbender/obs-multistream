@@ -97,3 +97,47 @@ button.accent {
   --dv-tabs-container-scrollbar-color: var(--color-border);
   height: 100%;
 }
+
+/* Custom dock-header chrome (DockTab renderer): title + ⧉ tear-out + ✕ close, per
+   dock-model.html. Replaces dockview's default tab content; styled here so it
+   re-skins live with the active theme and stays 0-radius. */
+.obs-dock-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px;
+}
+.obs-dock-title {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-dock-tab.accent .obs-dock-title {
+  color: var(--color-accent);
+}
+.obs-dock-btns {
+  display: inline-flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.obs-dock-btn {
+  background: transparent;
+  border: 0;
+  height: auto;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-muted);
+}
+.obs-dock-btn:hover {
+  color: var(--color-accent);
+  border: 0;
+}
