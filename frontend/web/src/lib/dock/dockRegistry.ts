@@ -5,6 +5,7 @@ import PreviewDock from "../docks/PreviewDock.svelte";
 import ControlsDock from "../docks/ControlsDock.svelte";
 import ScenesDock from "../docks/ScenesDock.svelte";
 import SourcesDock from "../docks/SourcesDock.svelte";
+import MultistreamDock from "../docks/MultistreamDock.svelte";
 
 // One entry per dock in the §3.5 inventory. `id` is the stable Dockview panel id
 // (also the dock id the future window.detach uses). `accent` marks Controls /
@@ -32,13 +33,7 @@ export const DOCKS: DockDef[] = [
     params: { label: "Canvas preview", phase: "P3" },
     accent: true,
   },
-  {
-    id: "multistream",
-    title: "Multistream",
-    component: PlaceholderDock,
-    params: { label: "Destinations", phase: "P3" },
-    accent: true,
-  },
+  { id: "multistream", title: "Multistream", component: MultistreamDock, params: {}, accent: true },
 ];
 
 export function dockById(id: string): DockDef | undefined {
