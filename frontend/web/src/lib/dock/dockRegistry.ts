@@ -1,6 +1,7 @@
 import type { Component } from "svelte";
 import type { AddPanelOptions } from "dockview-core";
 import PlaceholderDock from "../docks/PlaceholderDock.svelte";
+import PreviewDock from "../docks/PreviewDock.svelte";
 import ControlsDock from "../docks/ControlsDock.svelte";
 import ScenesDock from "../docks/ScenesDock.svelte";
 import SourcesDock from "../docks/SourcesDock.svelte";
@@ -18,12 +19,7 @@ export interface DockDef {
 }
 
 export const DOCKS: DockDef[] = [
-  {
-    id: "preview",
-    title: "Preview · Default Canvas",
-    component: PlaceholderDock,
-    params: { label: "Program / Preview", phase: "P2" },
-  },
+  { id: "preview", title: "Preview · Default Canvas", component: PreviewDock, params: {} },
   { id: "scenes", title: "Scenes", component: ScenesDock, params: {} },
   { id: "sources", title: "Sources", component: SourcesDock, params: {} },
   { id: "mixer", title: "Audio Mixer", component: PlaceholderDock, params: { label: "Faders", phase: "P4" } },
