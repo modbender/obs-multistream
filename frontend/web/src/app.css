@@ -1,26 +1,45 @@
+/* Token defaults = Industrial (the JS theme store overwrites these on load; these
+   are the no-flash initial paint). The hard 0-radius rule is global and a token
+   (--radius) so a custom theme can never reintroduce rounding. */
 :root {
   color-scheme: dark;
 
-  --bg: #16181d;
-  --bg-raised: #1c1f26;
-  --bg-sunken: #0f1115;
-  --border: #2a2e37;
-  --text: #e6e8ec;
-  --text-dim: #9aa0aa;
-  --text-soft: #d7dae0;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --on: #4ade80;
-  --off: #f87171;
+  --color-base: #0a0a0a;
+  --color-surface: #141414;
+  --color-border: #333333;
+  --color-text: #bbbbbb;
+  --color-muted: #666666;
+  --color-accent: #e0a23c;
+  --color-accent-contrast: #0a0a0a;
+  --color-live: #ef4444;
+  --meter-green: #3fae4a;
+  --meter-yellow: #eab308;
+  --meter-red: #ef4444;
 
-  font-family: system-ui, "Segoe UI", sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
+  --font-ui: "Consolas", "SF Mono", ui-monospace, monospace;
+  --font-mono: "Consolas", "SF Mono", ui-monospace, monospace;
+  --label-case: uppercase;
+  --letter-spacing: 0.1em;
+
+  --density: comfortable;
+  --space-unit: 8px;
+  --control-height: 30px;
+
+  --meter-style: segmented;
+  --selection-style: left-bar;
+  --border-weight: 1px;
+  --radius: 0;
+
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-base);
 }
 
+/* Hard global rule: zero radius everywhere, no exceptions. */
 * {
   box-sizing: border-box;
+  border-radius: 0 !important;
 }
 
 html,
@@ -36,15 +55,15 @@ body {
 button {
   font: inherit;
   cursor: pointer;
-  border: 0;
-  border-radius: 8px;
-  padding: 8px 16px;
-  background: var(--accent);
-  color: #fff;
+  border: var(--border-weight) solid var(--color-border);
+  padding: 0 12px;
+  height: var(--control-height);
+  background: var(--color-surface);
+  color: var(--color-text);
 }
 
 button:hover {
-  background: var(--accent-hover);
+  border-color: var(--color-accent);
 }
 
 button:disabled {
@@ -52,14 +71,29 @@ button:disabled {
   cursor: default;
 }
 
-button.ghost {
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  padding: 6px 12px;
+button.accent {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+  font-weight: 700;
+  letter-spacing: var(--letter-spacing);
+  text-transform: var(--label-case);
 }
 
-button.ghost:hover {
-  background: var(--bg-raised);
-  color: var(--text);
+/* Dockview theme: drive its CSS variables off our tokens so the docking chrome
+   matches the active preset and stays 0-radius. dockview-core ships unstyled
+   beyond these variables; we own the rest. */
+.dockview-theme-obs {
+  --dv-background-color: var(--color-base);
+  --dv-group-view-background-color: var(--color-surface);
+  --dv-tabs-and-actions-container-background-color: var(--color-surface);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-base);
+  --dv-tab-divider-color: var(--color-border);
+  --dv-separator-border: var(--color-border);
+  --dv-paneview-active-outline-color: var(--color-accent);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-muted);
+  --dv-tabs-container-scrollbar-color: var(--color-border);
+  height: 100%;
 }
