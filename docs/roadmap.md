@@ -433,10 +433,15 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   per-canvas scene persistence (additional canvases still rebuild empty); audio
   volume/mute persistence (only the device persists today); multiple named scene
   collections (single collection for now).
-- 🔭 **Source filters.** Zero support — no filter bridge, no Filters dialog at all.
-  Chroma key, color correction, LUT, scaling, noise gate/suppression, etc. are
-  unreachable. Needs a filter bridge (list/add/remove/reorder + per-filter
-  `obs_properties`) and a Filters UI.
+- ✅ **Source filters — DONE 2026-06-24.** `filterTypes.list` + `filters.list/add/
+  remove/setEnabled/reorder/rename` + a `"filter"` property kind (resolve a filter by
+  uuid → reuse the generic `obs_properties` renderer). Filters dialog (list + add
+  type-picker + reorder/enable/remove/rename, with the selected filter's properties via
+  `PropertyForm kind=filter`) reachable from the Sources / Canvas / preview source
+  context menus AND the audio-mixer rows (mic noise suppression). Filters persist
+  automatically with their parent source via the scene collection. Dup default names
+  auto-suffix. **Follow-up:** in-dialog live preview (the dialog suspends the overlay
+  while open, so effects show in the main preview after closing, not live in-dialog).
 - 🔭 **Scene transitions.** The Transitions dock is a placeholder ("Fade"); no
   transition bridge; scene switches are hard cuts. Add transition list/select/duration
   + apply on scene switch. (was 3b precursor)
