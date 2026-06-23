@@ -3,6 +3,7 @@
   import { obs, type SceneInfo, type SceneItem, type ReorderDirection, type MultistreamState } from "../bridge";
   import { openSettings } from "../settingsOpener.svelte";
   import { previewSuspended } from "../previewGate.svelte";
+  import { WINDOW_ID } from "../windowContext";
 
   // A composite, inseparable dock for one NON-DEFAULT canvas (hierarchy-model.html
   // §1 right column): an inline preview + this canvas's own scenes + its own
@@ -32,6 +33,7 @@
     obs
       .call("preview.setRect", {
         canvas: canvasUuid,
+        window: WINDOW_ID,
         x: r.left,
         y: r.top,
         w: r.width,
@@ -41,10 +43,10 @@
       .catch((e) => console.log("preview.setRect failed: " + (e as Error).message));
   }
   function hidePreview() {
-    obs.call("preview.hide", { canvas: canvasUuid }).catch(() => {});
+    obs.call("preview.hide", { canvas: canvasUuid, window: WINDOW_ID }).catch(() => {});
   }
   function destroyPreview() {
-    obs.call("preview.destroy", { canvas: canvasUuid }).catch(() => {});
+    obs.call("preview.destroy", { canvas: canvasUuid, window: WINDOW_ID }).catch(() => {});
   }
 
   // ---- scenes (this canvas's own scene list) ---------------------------------
@@ -91,7 +93,7 @@
   }
   function selectItem(item: SceneItem) {
     selectedId = item.id;
-    void obs.call("preview.select", { canvas: canvasUuid, scene: currentScene, id: item.id });
+    void obs.call("preview.select", { canvas: canvasUuid, window: WINDOW_ID, scene: currentScene, id: item.id });
   }
   async function toggleVisible(item: SceneItem) {
     try {

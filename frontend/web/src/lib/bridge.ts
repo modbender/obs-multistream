@@ -420,6 +420,12 @@ export interface ObsMethods {
   "theme.load": { activePreset: string };
   "layout.save": { saved: boolean };
   "layout.load": { layout: string };
+  // Floating dock tear-out (P3a). detach opens a new OS window whose browser
+  // loads index.html?window=<id>&dock=<dock>; redock destroys that window. list
+  // enumerates the live detached windows.
+  "window.detach": { windowId: number };
+  "window.redock": { redocked: number };
+  "window.list": { windows: { windowId: number; dock: string }[] };
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -446,6 +452,11 @@ export interface ObsEvents {
   // The active audio source set changed (source activated/deactivated); the UI
   // re-runs audio.list to rebuild its rows.
   "audio.changed": Record<string, never>;
+  // Floating dock tear-out (P3a). Broadcast to ALL browsers (main + detached).
+  // opened fires after a detached window's browser exists; closed fires on
+  // explicit redock AND on user OS-close (NOT during app shutdown).
+  "window.opened": { windowId: number; dock: string };
+  "window.closed": { windowId: number; dock: string };
 }
 
 export interface BridgeError extends Error {

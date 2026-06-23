@@ -29,10 +29,18 @@
       .catch((e) => (version = "error: " + (e as Error).message));
   });
 
-  // Single tear-out seam. P1 defers real floating-window detach to next phase
-  // (see the plan's floating-scope decision); the ⧉ affordance routes here.
-  function detachDock(panelId: string): void {
-    console.log("OBSSHELL: detach requested for " + panelId + " (wired next phase)");
+  // Tear-out seam (P3a). The ⧉ affordance asks the host to open a real OS window
+  // owning this dock, then drops the panel from this (main) window. The dock comes
+  // back via the window.closed subscription wired in onReady.
+  async function detachDock(panelId: string): Promise<void> {
+    try {
+      await obs.call("window.detach", { dock: panelId });
+      // The panel now lives in the detached window; remove it from this one.
+      const p = api?.getPanel(panelId);
+      if (p) api?.removePanel(p);
+    } catch (e) {
+      console.log("OBSSHELL: detach failed for " + panelId + ": " + (e as Error).message);
+    }
   }
 
   // Build the dock-model.html default arrangement:
@@ -104,6 +112,20 @@
     }
     // Output-gated per-canvas composite docks (added/removed as canvases enable).
     stopReconciler = startCanvasDockReconciler(dv, detachDock);
+
+    // A detached window closed (explicit redock or user OS-close): restore the
+    // dock to the main window. Static docks re-add from DOCKS; dynamic canvas docks
+    // are left to the reconciler. Main-window only -- App mounts only here.
+    obs.on("window.closed", (p) => {
+      if (!api) return;
+      if (api.getPanel(p.dock)) return; // already present
+      if (p.dock.startsWith("canvas:")) {
+        void reconcileCanvasDocks(api, detachDock);
+      } else if (DOCKS.some((d) => d.id === p.dock)) {
+        api.addPanel(panelOptions(p.dock, detachDock));
+      }
+      refreshVisible();
+    });
   }
 
   function toggleDock(id: string): void {

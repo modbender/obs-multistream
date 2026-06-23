@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { obs } from "../bridge";
   import { previewSuspended } from "../previewGate.svelte";
+  import { WINDOW_ID } from "../windowContext";
 
   let {}: Record<string, unknown> = $props();
 
@@ -18,6 +19,7 @@
     const r = previewEl.getBoundingClientRect();
     obs
       .call("preview.setRect", {
+        window: WINDOW_ID,
         x: r.left,
         y: r.top,
         w: r.width,
@@ -28,11 +30,11 @@
   }
 
   function hidePreview() {
-    obs.call("preview.hide", {}).catch(() => {});
+    obs.call("preview.hide", { window: WINDOW_ID }).catch(() => {});
   }
 
   function destroyPreview() {
-    obs.call("preview.destroy", {}).catch(() => {});
+    obs.call("preview.destroy", { window: WINDOW_ID }).catch(() => {});
   }
 
   onMount(() => {
