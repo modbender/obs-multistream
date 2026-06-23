@@ -3,6 +3,7 @@
   import MenuBar from "./lib/MenuBar.svelte";
   import DockHost from "./lib/dock/DockHost.svelte";
   import { DOCKS, panelOptions } from "./lib/dock/dockRegistry";
+  import { layoutStore } from "./lib/dock/layoutStore.svelte";
   import { themeStore } from "./lib/theme/themeStore.svelte";
   import SettingsModal from "./lib/SettingsModal.svelte";
   import { settingsOpener, closeSettings } from "./lib/settingsOpener.svelte";
@@ -76,10 +77,30 @@
     visibleDocks = next;
   }
 
-  function onReady(dv: DockviewApi): void {
+  // Coalesce the save bursts Dockview emits while a layout is being assembled
+  // (one onDidLayoutChange per addPanel) into a single trailing write.
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  function persistLayoutSoon(dv: DockviewApi): void {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => void layoutStore.save(dv), 250);
+  }
+
+  async function onReady(dv: DockviewApi): Promise<void> {
     api = dv;
-    dv.onDidLayoutChange(() => refreshVisible());
-    buildDefaultLayout(dv);
+    dv.onDidLayoutChange(() => {
+      refreshVisible();
+      persistLayoutSoon(dv);
+    });
+    // Restore the saved arrangement if one exists; otherwise build the default.
+    // fromJSON itself fires onDidLayoutChange, which re-persists the restored
+    // (or default) layout, so the on-disk copy stays current.
+    const restored = await layoutStore.restore(dv);
+    if (restored) {
+      console.log("OBSSHELL: layout restored (" + dv.panels.length + " docks)");
+      refreshVisible();
+    } else {
+      buildDefaultLayout(dv);
+    }
   }
 
   function toggleDock(id: string): void {

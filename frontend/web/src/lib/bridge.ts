@@ -413,12 +413,13 @@ export interface ObsMethods {
   "audio.setDeflection": { uuid: string; deflection: number; volumeDb: number };
   "audio.setMuted": { uuid: string; muted: boolean };
   // Shell persistence (P1). theme.* stores the active preset id; layout.* stores
-  // the serialized Dockview state. The C++ handlers land with the persistence task;
-  // callers treat a missing handler as "nothing saved yet" (non-fatal).
-  "theme.save": null;
-  "theme.load": { activePreset?: string } | null;
-  "layout.save": null;
-  "layout.load": { layout?: unknown } | null;
+  // the serialized Dockview state (a JSON string). load returns "" when nothing
+  // is saved yet, so the shell falls back to the default preset / default layout;
+  // a missing handler also resolves to null (treated as "nothing saved").
+  "theme.save": { saved: boolean };
+  "theme.load": { activePreset: string };
+  "layout.save": { saved: boolean };
+  "layout.load": { layout: string };
 }
 
 /** Known server->client push events and their payload shapes. */

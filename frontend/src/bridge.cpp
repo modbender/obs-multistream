@@ -1,6 +1,7 @@
 #include "bridge.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <unordered_map>
@@ -23,6 +24,7 @@
 #include "multistream/CanvasStore.hpp"
 #include "multistream/MultistreamEngine.hpp"
 #include "multistream/OutputBindingStore.hpp"
+#include "multistream/StorePaths.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include <util/dstr.h>
 #include <util/platform.h>
@@ -2444,6 +2446,83 @@ void DoEmit(const std::string &name, const std::string &payloadDump)
 	}
 }
 
+// --- theme + layout persistence (P1) ----------------------------------------
+// The Svelte shell persists the active theme preset and the Dockview layout JSON
+// to <config>/obs-multistream/basic/{theme,layout}.json, reusing the same
+// obs_data_* round-trip the stream/canvas stores use. The payloads are opaque
+// strings to C++ (the shell owns their shape); we read and write them verbatim.
+
+bool WriteJsonString(const char *file, const char *key, const std::string &value)
+{
+	const std::string path = MultistreamBasicPath(file);
+	if (path.empty()) {
+		return false;
+	}
+	std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
+	os_mkdirs(dir.u8string().c_str());
+	OBSDataAutoRelease root = obs_data_create();
+	obs_data_set_string(root, key, value.c_str());
+	return obs_data_save_json_pretty_safe(root, path.c_str(), "tmp", "bak");
+}
+
+std::string ReadJsonString(const char *file, const char *key)
+{
+	const std::string path = MultistreamBasicPath(file);
+	if (path.empty()) {
+		return std::string();
+	}
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
+	if (!root) {
+		return std::string();
+	}
+	const char *v = obs_data_get_string(root, key);
+	return v ? std::string(v) : std::string();
+}
+
+bool MethodThemeSave(const json &params, json &result, std::string &error)
+{
+	const std::string active = OptString(params, "activePreset");
+	if (active.empty()) {
+		error = "theme.save requires a non-empty 'activePreset'";
+		return false;
+	}
+	if (!WriteJsonString("theme.json", "activePreset", active)) {
+		error = "failed to write theme.json";
+		return false;
+	}
+	result = json{{"saved", true}};
+	return true;
+}
+
+bool MethodThemeLoad(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	// Empty => no saved theme yet; the shell falls back to the default preset.
+	result = json{{"activePreset", ReadJsonString("theme.json", "activePreset")}};
+	return true;
+}
+
+bool MethodLayoutSave(const json &params, json &result, std::string &error)
+{
+	const std::string layout = OptString(params, "layout");
+	if (layout.empty()) {
+		error = "layout.save requires a non-empty 'layout' string";
+		return false;
+	}
+	if (!WriteJsonString("layout.json", "layout", layout)) {
+		error = "failed to write layout.json";
+		return false;
+	}
+	result = json{{"saved", true}};
+	return true;
+}
+
+bool MethodLayoutLoad(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	// Empty => no saved layout yet; the shell builds the default arrangement.
+	result = json{{"layout", ReadJsonString("layout.json", "layout")}};
+	return true;
+}
+
 } // namespace
 
 void Init()
@@ -2503,6 +2582,10 @@ void Init()
 		{"audio.list", MethodAudioList},
 		{"audio.setDeflection", MethodAudioSetDeflection},
 		{"audio.setMuted", MethodAudioSetMuted},
+		{"theme.save", MethodThemeSave},
+		{"theme.load", MethodThemeLoad},
+		{"layout.save", MethodLayoutSave},
+		{"layout.load", MethodLayoutLoad},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);
