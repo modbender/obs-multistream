@@ -422,12 +422,17 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
 
 **High — core usability gaps:**
 
-- 🔭 **Scene / source persistence (scene collections).** The biggest gap: the app
-  rebuilds a fresh "Default Scene" + placeholder color source **every boot** (no
-  `obs_save_sources`/`obs_load_sources`), so anything the user adds disappears on
-  restart. Needs a scene-collection save/load layer (sources, scenes, scene-items,
-  per-canvas scenes + bindings, current scene). Global audio + multistream config
-  already persist on their own JSON; scenes/sources do not.
+- ✅ **Scene / source persistence (global / Default canvas) — DONE 2026-06-23.**
+  `scene_collection.json` save/load via `obs_save_sources_filtered` + `obs_load_sources`
+  (round-trips scenes WITH full item layout). Loads on boot (placeholder fallback when
+  absent); saves on every global scene/source mutation, on drag-end, and on clean exit.
+  Excludes the channel 1-6 global-audio sources (restored from `audio_devices.json`) and
+  additional-canvas-scoped sources. Note: Default/global scenes live on libobs's
+  `main_canvas`, so the filter keeps `canvas == obs_get_main_canvas()` + null-canvas
+  inputs, drops additional-canvas scenes. Round-trip + `leaks: 2` verified. **Follow-ups:**
+  per-canvas scene persistence (additional canvases still rebuild empty); audio
+  volume/mute persistence (only the device persists today); multiple named scene
+  collections (single collection for now).
 - 🔭 **Source filters.** Zero support — no filter bridge, no Filters dialog at all.
   Chroma key, color correction, LUT, scaling, noise gate/suppression, etc. are
   unreachable. Needs a filter bridge (list/add/remove/reorder + per-filter
