@@ -6,6 +6,7 @@ import ControlsDock from "../docks/ControlsDock.svelte";
 import ScenesDock from "../docks/ScenesDock.svelte";
 import SourcesDock from "../docks/SourcesDock.svelte";
 import MultistreamDock from "../docks/MultistreamDock.svelte";
+import AudioMixerDock from "../docks/AudioMixerDock.svelte";
 
 // One entry per dock in the §3.5 inventory. `id` is the stable Dockview panel id
 // (also the dock id the future window.detach uses). `accent` marks Controls /
@@ -23,7 +24,7 @@ export const DOCKS: DockDef[] = [
   { id: "preview", title: "Preview · Default Canvas", component: PreviewDock, params: {} },
   { id: "scenes", title: "Scenes", component: ScenesDock, params: {} },
   { id: "sources", title: "Sources", component: SourcesDock, params: {} },
-  { id: "mixer", title: "Audio Mixer", component: PlaceholderDock, params: { label: "Faders", phase: "P4" } },
+  { id: "mixer", title: "Audio Mixer", component: AudioMixerDock, params: {} },
   { id: "transitions", title: "Transitions", component: PlaceholderDock, params: { label: "Fade", phase: "P4" } },
   { id: "controls", title: "Controls", component: ControlsDock, params: {}, accent: true },
   { id: "multistream", title: "Multistream", component: MultistreamDock, params: {}, accent: true },
