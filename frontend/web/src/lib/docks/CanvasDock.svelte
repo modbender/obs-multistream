@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { obs, type SceneInfo, type SceneItem, type ReorderDirection, type MultistreamState } from "../bridge";
   import { openSettings } from "../settingsOpener.svelte";
-  import { previewSuspended } from "../previewGate.svelte";
+  import { previewSuspended, suspendPreview } from "../previewGate.svelte";
   import { WINDOW_ID } from "../windowContext";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
 
@@ -28,8 +28,11 @@
     node.select();
   }
 
-  // One context menu for the whole dock (scene rows and source rows both use it).
-  let menu = $state<{ x: number; y: number; items: (ContextMenuItem | null)[] } | null>(null);
+  // One context menu for the whole dock (scene rows, source rows, and the preview
+  // all use it). `suspendOverlay` is set only by the preview menu: it opens over
+  // the native overlay and must blank it; row menus open in the list area and must
+  // not (blanking would flash the preview off for no reason).
+  let menu = $state<{ x: number; y: number; items: (ContextMenuItem | null)[]; suspendOverlay?: boolean } | null>(null);
 
   // ---- inline preview region (native overlay scoped to this canvas) -----------
   let previewEl = $state<HTMLElement | undefined>();
@@ -237,6 +240,30 @@
     };
   }
 
+  // ---- preview right-click menu (this canvas's hit scene item) ---------------
+  // No Properties (matches the row menu, which omits it for additional-canvas
+  // private sources). Every call carries this canvas's uuid + scene + item id.
+  function buildPreviewItems(p: {
+    scene: string | null;
+    id: number | null;
+    visible: boolean;
+    locked: boolean;
+  }): (ContextMenuItem | null)[] {
+    const call = (method: string, params: Record<string, unknown>) =>
+      obs.call(method, { canvas: canvasUuid, scene: p.scene, id: p.id, ...params }).catch(report);
+    return [
+      { label: p.visible ? "Hide" : "Show", action: () => void call("sceneItems.setVisible", { visible: !p.visible }) },
+      { label: p.locked ? "Unlock" : "Lock", action: () => void call("sceneItems.setLocked", { locked: !p.locked }) },
+      null,
+      { label: "Move Up", action: () => void call("sceneItems.reorder", { direction: "up" }) },
+      { label: "Move Down", action: () => void call("sceneItems.reorder", { direction: "down" }) },
+      { label: "Move to Top", action: () => void call("sceneItems.reorder", { direction: "top" }) },
+      { label: "Move to Bottom", action: () => void call("sceneItems.reorder", { direction: "bottom" }) },
+      null,
+      { label: "Remove", danger: true, action: () => void call("sceneItems.remove", {}) },
+    ];
+  }
+
   // ---- footer: polled live-status dot for this canvas ------------------------
   let liveState = $state<MultistreamState | "off">("off");
   function recomputeState(rows: { canvasUuid: string; state: MultistreamState }[]) {
@@ -299,6 +326,17 @@
     });
     const offStatus = obs.on("multistream.changed", (p) => recomputeState(p.outputs));
 
+    // Right-click in this canvas's overlay: filter to our uuid in this window with
+    // a real hit, then map the device-px cursor to viewport coords via the rect.
+    const offMenu = obs.on("preview.contextMenu", (p) => {
+      if (p.canvas !== canvasUuid || p.window !== WINDOW_ID || p.id == null || !previewEl) {
+        return;
+      }
+      const r = previewEl.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      menu = { x: r.left + p.x / dpr, y: r.top + p.y / dpr, items: buildPreviewItems(p), suspendOverlay: true };
+    });
+
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", reportRect);
@@ -307,6 +345,7 @@
       offItems();
       offSel();
       offStatus();
+      offMenu();
       destroyPreview();
     };
   });
@@ -323,6 +362,14 @@
       hidePreview();
     } else {
       reportRect();
+    }
+  });
+
+  // The preview menu opens at the cursor inside the overlay (which sits above CEF
+  // and would occlude it); suspend the overlay only for that menu, not row menus.
+  $effect(() => {
+    if (menu?.suspendOverlay) {
+      return suspendPreview();
     }
   });
 </script>

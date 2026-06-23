@@ -444,6 +444,21 @@ export interface ObsEvents {
   // channel-0 path); a per-canvas dock filters to its own canvas (scene names
   // collide across canvases).
   "sceneItem.selected": { scene: string | null; id: number | null; canvas: string | null };
+  // Right-click in a native preview overlay (WM_RBUTTONUP). Broadcast to ALL
+  // windows; the host dock filters by `window === WINDOW_ID` + its own canvas
+  // (null = Default surface) and maps the device-px cursor to viewport coords via
+  // the preview rect + devicePixelRatio. `id == null` = empty area (ignore).
+  "preview.contextMenu": {
+    canvas: string | null;
+    window: number;
+    x: number;
+    y: number;
+    id: number | null;
+    scene: string | null;
+    source: string | null;
+    visible: boolean;
+    locked: boolean;
+  };
   "settings.videoChanged": VideoSettings;
   "settings.audioChanged": AudioSettings;
   "canvas.changed": Record<string, never>;
