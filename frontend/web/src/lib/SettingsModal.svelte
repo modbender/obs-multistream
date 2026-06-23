@@ -407,7 +407,7 @@
   .chip.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
   .wh {
     display: flex;
@@ -464,7 +464,7 @@
   .btn.primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
   .btn.primary:disabled {
     opacity: 0.45;

@@ -358,7 +358,7 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #fff;
+    color: var(--color-accent-contrast);
     background: var(--accent);
     border-radius: 999px;
     padding: 1px 7px;
@@ -462,7 +462,7 @@
   .chip.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
   .wh {
     display: flex;
@@ -514,7 +514,7 @@
   .btn.primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
   .btn.primary:disabled {
     opacity: 0.45;

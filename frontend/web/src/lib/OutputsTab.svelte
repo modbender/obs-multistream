@@ -380,7 +380,7 @@
   .btn.primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
   .btn.primary:disabled {
     opacity: 0.45;
