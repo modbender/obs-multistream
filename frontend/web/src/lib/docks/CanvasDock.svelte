@@ -224,13 +224,13 @@
   });
 </script>
 
-<div class="canvas-dock">
+<div class="dock-body">
   <div class="preview" bind:this={previewEl}>
     <span class="cap">{canvasName}</span>
   </div>
 
   {#if error}
-    <p class="msg err">{error}</p>
+    <p class="dock-msg err">{error}</p>
   {/if}
 
   <div class="lists">
@@ -238,12 +238,12 @@
       <div class="col-head">Scenes</div>
       <ul class="list">
         {#each scenes as scene (scene.name)}
-          <li class="row" class:sel={scene.current}>
-            <button class="label" onclick={() => setCurrentScene(scene.name)}>{scene.name}</button>
+          <li class="dock-row" class:sel={scene.current}>
+            <button class="dock-label" onclick={() => setCurrentScene(scene.name)}>{scene.name}</button>
           </li>
         {/each}
         {#if loaded && scenes.length === 0}
-          <li class="row dim">No scenes</li>
+          <li class="dock-row dim">No scenes</li>
         {/if}
       </ul>
     </div>
@@ -252,29 +252,29 @@
       <div class="col-head">Sources</div>
       <ul class="list">
         {#each items as item, idx (item.id)}
-          <li class="row" class:sel={item.id === selectedId} class:hidden-src={!item.visible}>
-            <button class="icon" title={item.visible ? "Hide" : "Show"} onclick={() => void toggleVisible(item)}>
+          <li class="dock-row" class:sel={item.id === selectedId} class:dimmed={!item.visible}>
+            <button class="dock-icon" title={item.visible ? "Hide" : "Show"} onclick={() => void toggleVisible(item)}>
               {item.visible ? "👁" : "🚫"}
             </button>
-            <button class="icon" title={item.locked ? "Unlock" : "Lock"} onclick={() => void toggleLocked(item)}>
+            <button class="dock-icon" title={item.locked ? "Unlock" : "Lock"} onclick={() => void toggleLocked(item)}>
               {item.locked ? "🔒" : "🔓"}
             </button>
-            <button class="label" onclick={() => selectItem(item)}>{item.source ?? "(unnamed)"}</button>
-            <span class="actions">
-              <button class="icon" title="Move up" disabled={idx === 0} onclick={() => void reorder(item, "up")}>▲</button
+            <button class="dock-label" onclick={() => selectItem(item)}>{item.source ?? "(unnamed)"}</button>
+            <span class="dock-actions">
+              <button class="dock-icon" title="Move up" disabled={idx === 0} onclick={() => void reorder(item, "up")}>▲</button
               >
               <button
-                class="icon"
+                class="dock-icon"
                 title="Move down"
                 disabled={idx === items.length - 1}
                 onclick={() => void reorder(item, "down")}>▼</button
               >
-              <button class="icon" title="Remove" onclick={() => void remove(item)}>🗑</button>
+              <button class="dock-icon" title="Remove" onclick={() => void remove(item)}>🗑</button>
             </span>
           </li>
         {/each}
         {#if currentScene && items.length === 0}
-          <li class="row dim">No sources</li>
+          <li class="dock-row dim">No sources</li>
         {/if}
       </ul>
     </div>
@@ -283,19 +283,17 @@
   <footer class="foot">
     <span class="dot" style:background={STATE_COLOR[liveState]} title={liveState}></span>
     <span class="foot-name">{canvasName}</span>
-    <button class="icon gear" title="Edit canvas (Settings)" onclick={() => openSettings("canvases", canvasUuid)}>⚙</button
+    <button class="dock-icon gear" title="Edit canvas (Settings)" onclick={() => openSettings("canvases", canvasUuid)}>⚙</button
     >
   </footer>
 </div>
 
 <style>
-  .canvas-dock {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    font-family: var(--font-ui);
+  /* Override the shared .dock-body: this composite owns its inner scroll regions,
+     so the body itself must not scroll (shared default sets overflow: auto). */
+  .dock-body {
     min-height: 0;
+    overflow: visible;
   }
   .preview {
     flex: 0 0 auto;
@@ -345,73 +343,29 @@
     margin: 0;
     padding: 0;
   }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 3px;
+  /* Compact overrides on the shared dock list classes: this dock is denser
+     (10px labels, 4px padding) than the shared defaults. Each rule tweaks only
+     the properties that differ; structure/selection comes from app.css. */
+  .dock-row {
     padding: 4px 6px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-    border-left: 3px solid transparent;
+    gap: 3px;
   }
-  :global(:root[data-selection-style="left-bar"]) .row.sel {
-    border-left-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  }
-  :global(:root[data-selection-style="fill"]) .row.sel {
-    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  }
-  .row.sel .label {
-    color: var(--color-accent);
-  }
-  .row.hidden-src .label {
-    color: var(--color-muted);
-    text-decoration: line-through;
-  }
-  .row.dim {
-    color: var(--color-muted);
+  .dock-label {
     font-size: 10px;
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
   }
-  .label {
-    flex: 1;
-    text-align: left;
-    background: none;
-    border: none;
-    height: auto;
-    padding: 0;
-    color: var(--color-text);
-    font-family: var(--font-ui);
-    font-size: 10px;
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .actions {
-    display: none;
-    gap: 1px;
-  }
-  .row:hover .actions {
-    display: inline-flex;
-  }
-  .icon {
-    background: none;
-    border: none;
-    height: auto;
+  .dock-icon {
     padding: 1px 3px;
     font-size: 10px;
-    line-height: 1;
+  }
+  .dock-actions {
+    gap: 1px;
+  }
+  /* "No scenes / No sources" placeholder row (not a selectable list item). */
+  .dock-row.dim {
     color: var(--color-muted);
-  }
-  .icon:hover:not(:disabled) {
-    color: var(--color-accent);
-  }
-  .icon:disabled {
-    opacity: 0.3;
-    cursor: default;
+    font-size: 10px;
+    letter-spacing: var(--letter-spacing);
+    text-transform: var(--label-case);
   }
   .foot {
     flex: 0 0 auto;
@@ -440,10 +394,11 @@
   .gear {
     font-size: 12px;
   }
-  .msg {
-    margin: 0;
+  /* This dock only ever shows an error message; keep the original tight pad/size
+     and no letter-spacing (shared .dock-msg is roomier and tracks the token). */
+  .dock-msg {
     padding: 6px 7px;
     font-size: 10px;
-    color: var(--color-live);
+    letter-spacing: normal;
   }
 </style>

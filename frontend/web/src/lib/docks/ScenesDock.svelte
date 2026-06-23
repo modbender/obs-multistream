@@ -94,19 +94,19 @@
   }
 </script>
 
-<div class="dock">
-  <div class="toolbar">
-    <button class="add" title="Add scene" onclick={beginAdd}>＋</button>
+<div class="dock-body">
+  <div class="dock-toolbar">
+    <button class="dock-add" title="Add scene" onclick={beginAdd}>＋</button>
   </div>
 
   {#if defaultCanvas.error}
-    <p class="msg err">{defaultCanvas.error}</p>
+    <p class="dock-msg err">{defaultCanvas.error}</p>
   {:else if !defaultCanvas.loaded}
-    <p class="msg">Loading…</p>
+    <p class="dock-msg">Loading…</p>
   {:else}
-    <ul class="list">
+    <ul class="dock-list">
       {#each defaultCanvas.scenes as scene (scene.name)}
-        <li class="row" class:sel={scene.current}>
+        <li class="dock-row" class:sel={scene.current}>
           {#if renamingFrom === scene.name}
             <input
               class="inline"
@@ -116,13 +116,13 @@
               use:focusOnMount
             />
           {:else}
-            <button class="label" ondblclick={() => beginRename(scene.name)} onclick={() => setCurrent(scene.name)}>
+            <button class="dock-label" ondblclick={() => beginRename(scene.name)} onclick={() => setCurrent(scene.name)}>
               {scene.name}
             </button>
-            <span class="actions">
-              <button class="icon" title="Rename" onclick={() => beginRename(scene.name)}>✎</button>
+            <span class="dock-actions">
+              <button class="dock-icon" title="Rename" onclick={() => beginRename(scene.name)}>✎</button>
               <button
-                class="icon"
+                class="dock-icon"
                 title="Remove"
                 disabled={defaultCanvas.scenes.length <= 1}
                 onclick={() => void remove(scene.name)}>🗑</button
@@ -133,7 +133,7 @@
       {/each}
 
       {#if adding}
-        <li class="row">
+        <li class="dock-row">
           <input
             class="inline"
             placeholder="Scene name"
@@ -147,110 +147,16 @@
     </ul>
 
     {#if defaultCanvas.scenes.length === 0 && !adding}
-      <p class="msg">No scenes</p>
+      <p class="dock-msg">No scenes</p>
     {/if}
   {/if}
 
   {#if actionError}
-    <p class="msg err">{actionError}</p>
+    <p class="dock-msg err">{actionError}</p>
   {/if}
 </div>
 
 <style>
-  .dock {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    font-family: var(--font-ui);
-    overflow: auto;
-  }
-  .toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 4px 6px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-  }
-  .add {
-    height: auto;
-    padding: 2px 8px;
-    font-size: 13px;
-    line-height: 1;
-    background: transparent;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-muted);
-  }
-  .add:hover {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-  .list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    flex: 1;
-    min-height: 0;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 5px 7px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-    border-left: 3px solid transparent;
-  }
-  /* Selection style is token-driven (visual-style.html): Industrial = left bar,
-     Slate = fill. Reflected via :root[data-selection-style] from applyTheme. */
-  :global(:root[data-selection-style="left-bar"]) .row.sel {
-    border-left-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  }
-  :global(:root[data-selection-style="fill"]) .row.sel {
-    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  }
-  .row.sel .label {
-    color: var(--color-accent);
-  }
-  .label {
-    flex: 1;
-    text-align: left;
-    background: none;
-    border: none;
-    height: auto;
-    padding: 0;
-    color: var(--color-text);
-    font-family: var(--font-ui);
-    font-size: 11px;
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .actions {
-    display: none;
-    gap: 2px;
-  }
-  .row:hover .actions {
-    display: inline-flex;
-  }
-  .icon {
-    background: none;
-    border: none;
-    height: auto;
-    padding: 2px 4px;
-    font-size: 11px;
-    line-height: 1;
-    color: var(--color-muted);
-  }
-  .icon:hover:not(:disabled) {
-    color: var(--color-accent);
-  }
-  .icon:disabled {
-    opacity: 0.3;
-    cursor: default;
-  }
   .inline {
     flex: 1;
     background: var(--color-base);
@@ -262,17 +168,5 @@
   }
   .inline:focus {
     outline: none;
-  }
-  .msg {
-    margin: 0;
-    padding: 8px 7px;
-    font-size: 11px;
-    color: var(--color-muted);
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-  }
-  .msg.err {
-    color: var(--color-live);
-    text-transform: none;
   }
 </style>

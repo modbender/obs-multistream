@@ -126,42 +126,42 @@
   }
 </script>
 
-<div class="dock">
-  <div class="toolbar">
-    <button class="add" title="Add source" disabled={!currentScene} onclick={() => (adding = true)}>＋</button>
+<div class="dock-body">
+  <div class="dock-toolbar">
+    <button class="dock-add" title="Add source" disabled={!currentScene} onclick={() => (adding = true)}>＋</button>
   </div>
 
   {#if error}
-    <p class="msg err">{error}</p>
+    <p class="dock-msg err">{error}</p>
   {:else if !currentScene}
-    <p class="msg">No scene selected</p>
+    <p class="dock-msg">No scene selected</p>
   {:else if !loaded}
-    <p class="msg">Loading…</p>
+    <p class="dock-msg">Loading…</p>
   {:else if items.length === 0}
-    <p class="msg">No sources</p>
+    <p class="dock-msg">No sources</p>
   {:else}
-    <ul class="list">
+    <ul class="dock-list">
       {#each items as item, idx (item.id)}
-        <li class="row" class:sel={item.id === selectedItemId} class:hidden-src={!item.visible}>
-          <button class="icon" title={item.visible ? "Hide" : "Show"} onclick={() => void toggleVisible(item)}>
+        <li class="dock-row" class:sel={item.id === selectedItemId} class:dimmed={!item.visible}>
+          <button class="dock-icon" title={item.visible ? "Hide" : "Show"} onclick={() => void toggleVisible(item)}>
             {item.visible ? "👁" : "🚫"}
           </button>
-          <button class="icon" title={item.locked ? "Unlock" : "Lock"} onclick={() => void toggleLocked(item)}>
+          <button class="dock-icon" title={item.locked ? "Unlock" : "Lock"} onclick={() => void toggleLocked(item)}>
             {item.locked ? "🔒" : "🔓"}
           </button>
-          <button class="label" onclick={() => selectItem(item)} ondblclick={() => openProperties(item)}>
+          <button class="dock-label" onclick={() => selectItem(item)} ondblclick={() => openProperties(item)}>
             {item.source ?? "(unnamed)"}
           </button>
-          <span class="actions">
-            <button class="icon" title="Properties" onclick={() => openProperties(item)}>⚙</button>
-            <button class="icon" title="Move up" disabled={idx === 0} onclick={() => void reorder(item, "up")}>▲</button>
+          <span class="dock-actions">
+            <button class="dock-icon" title="Properties" onclick={() => openProperties(item)}>⚙</button>
+            <button class="dock-icon" title="Move up" disabled={idx === 0} onclick={() => void reorder(item, "up")}>▲</button>
             <button
-              class="icon"
+              class="dock-icon"
               title="Move down"
               disabled={idx === items.length - 1}
               onclick={() => void reorder(item, "down")}>▼</button
             >
-            <button class="icon" title="Remove" onclick={() => void remove(item)}>🗑</button>
+            <button class="dock-icon" title="Remove" onclick={() => void remove(item)}>🗑</button>
           </span>
         </li>
       {/each}
@@ -184,7 +184,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-label="Source properties">
       <header class="modal-head">
         <h3>Properties — {propsForSource}</h3>
-        <button class="icon close" title="Close" onclick={() => (propsForSource = null)}>✕</button>
+        <button class="dock-icon close" title="Close" onclick={() => (propsForSource = null)}>✕</button>
       </header>
       <div class="modal-body">
         <PropertyForm kind="source" ref={propsForSource} />
@@ -194,113 +194,9 @@
 {/if}
 
 <style>
-  .dock {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    font-family: var(--font-ui);
-    overflow: auto;
-  }
-  .toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 4px 6px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-  }
-  .add {
-    height: auto;
-    padding: 2px 8px;
-    font-size: 13px;
-    line-height: 1;
-    background: transparent;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-muted);
-  }
-  .add:hover:not(:disabled) {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-  .list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    flex: 1;
-    min-height: 0;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  /* Sources rows are one row shorter than the shared default (5px 7px). */
+  .dock-row {
     padding: 4px 7px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-    border-left: 3px solid transparent;
-  }
-  :global(:root[data-selection-style="left-bar"]) .row.sel {
-    border-left-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  }
-  :global(:root[data-selection-style="fill"]) .row.sel {
-    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  }
-  .row.sel .label {
-    color: var(--color-accent);
-  }
-  .row.hidden-src .label {
-    color: var(--color-muted);
-    text-decoration: line-through;
-  }
-  .label {
-    flex: 1;
-    text-align: left;
-    background: none;
-    border: none;
-    height: auto;
-    padding: 0;
-    color: var(--color-text);
-    font-family: var(--font-ui);
-    font-size: 11px;
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .actions {
-    display: none;
-    gap: 2px;
-  }
-  .row:hover .actions {
-    display: inline-flex;
-  }
-  .icon {
-    background: none;
-    border: none;
-    height: auto;
-    padding: 2px 4px;
-    font-size: 11px;
-    line-height: 1;
-    color: var(--color-muted);
-  }
-  .icon:hover:not(:disabled) {
-    color: var(--color-accent);
-  }
-  .icon:disabled {
-    opacity: 0.3;
-    cursor: default;
-  }
-  .msg {
-    margin: 0;
-    padding: 8px 7px;
-    font-size: 11px;
-    color: var(--color-muted);
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-  }
-  .msg.err {
-    color: var(--color-live);
-    text-transform: none;
   }
   .modal-backdrop {
     position: fixed;

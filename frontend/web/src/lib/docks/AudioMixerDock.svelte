@@ -121,15 +121,15 @@
   }
 </script>
 
-<div class="dock">
+<div class="dock-body">
   {#if error}
-    <p class="msg err">{error}</p>
+    <p class="dock-msg err">{error}</p>
   {/if}
 
   {#if !loaded}
-    <p class="msg">Loading…</p>
+    <p class="dock-msg">Loading…</p>
   {:else if sources.length === 0}
-    <p class="msg">No active audio sources</p>
+    <p class="dock-msg">No active audio sources</p>
   {:else}
     <ul class="list">
       {#each sources as src (src.uuid)}
@@ -171,14 +171,6 @@
 </div>
 
 <style>
-  .dock {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    font-family: var(--font-ui);
-    overflow: auto;
-  }
   .list {
     list-style: none;
     margin: 0;
@@ -275,16 +267,8 @@
     min-width: 0;
     accent-color: var(--color-accent);
   }
-  .msg {
-    margin: 0;
+  /* Audio mixer messages use a roomier pad than the shared 8px 7px default. */
+  .dock-msg {
     padding: 10px 9px;
-    font-size: 11px;
-    color: var(--color-muted);
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-  }
-  .msg.err {
-    color: var(--color-live);
-    text-transform: none;
   }
 </style>

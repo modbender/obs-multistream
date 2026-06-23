@@ -62,19 +62,19 @@
   }
 </script>
 
-<div class="dock">
-  <div class="toolbar">
-    <button class="add" title="Add output (Settings)" onclick={() => openSettings("outputs")}>＋</button>
+<div class="dock-body">
+  <div class="dock-toolbar">
+    <button class="dock-add" title="Add output (Settings)" onclick={() => openSettings("outputs")}>＋</button>
   </div>
 
   {#if error}
-    <p class="msg err">{error}</p>
+    <p class="dock-msg err">{error}</p>
   {/if}
 
   {#if !loaded}
-    <p class="msg">Loading…</p>
+    <p class="dock-msg">Loading…</p>
   {:else if outputs.length === 0}
-    <p class="msg">No enabled outputs — add one in Settings → Outputs.</p>
+    <p class="dock-msg">No enabled outputs — add one in Settings → Outputs.</p>
   {:else}
     <ul class="list">
       {#each outputs as o (o.bindingUuid)}
@@ -100,33 +100,6 @@
 </div>
 
 <style>
-  .dock {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    font-family: var(--font-ui);
-    overflow: auto;
-  }
-  .toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 4px 6px;
-    border-bottom: var(--border-weight) solid var(--color-border);
-  }
-  .add {
-    height: auto;
-    padding: 2px 8px;
-    font-size: 13px;
-    line-height: 1;
-    background: transparent;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-muted);
-  }
-  .add:hover {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
   .list {
     list-style: none;
     margin: 0;
@@ -205,16 +178,8 @@
     border-color: var(--color-live);
     color: #fff;
   }
-  .msg {
-    margin: 0;
+  /* Multistream messages use a roomier pad than the shared 8px 7px default. */
+  .dock-msg {
     padding: 10px 9px;
-    font-size: 11px;
-    color: var(--color-muted);
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-  }
-  .msg.err {
-    color: var(--color-live);
-    text-transform: none;
   }
 </style>
