@@ -29,6 +29,7 @@
 #include "paths.hpp"
 #include "preview_window.hpp"
 #include "scene_persistence.hpp"
+#include "transitions.hpp"
 
 namespace {
 
@@ -437,6 +438,11 @@ bool ObsBootstrap::Start()
 		CreateDefaultScene();
 	}
 
+	// Route channel 0 through the program transition: it wraps the scene just bound
+	// above and rebinds itself to channel 0, so scene switches animate (Fade by
+	// default). Sized to the base canvas, hence after obs_reset_video above.
+	Transitions::Init();
+
 	LoadMultistreamModel();
 
 	// Bring up the live obs_canvas_t mixes for the additional canvases before the
@@ -601,7 +607,7 @@ void ObsBootstrap::RunPropertiesSelfTest()
 
 void ObsBootstrap::RunPreviewEditSelfTest()
 {
-	obs_source_t *sceneSource = obs_get_output_source(0); // addref'd
+	obs_source_t *sceneSource = Transitions::GetProgramScene(); // addref'd; unwraps the ch0 transition
 	if (!sceneSource) {
 		HostLog("[selftest] preview-edit: no scene bound to output 0");
 		return;
@@ -720,7 +726,7 @@ void ObsBootstrap::RunSettingsSelfTest()
 		HostLog("[selftest] preview display after video reset -> " +
 			std::string(alive ? "ALIVE (re-validated)" : "not yet created"));
 		// Prove the default scene is still bound to output channel 0.
-		obs_source_t *scene = obs_get_output_source(0);
+		obs_source_t *scene = Transitions::GetProgramScene();
 		HostLog("[selftest] output ch0 scene after reset -> " +
 			std::string(scene ? obs_source_get_name(scene) : "NULL"));
 		if (scene) {
@@ -1670,6 +1676,11 @@ void ObsBootstrap::Stop()
 {
 	// Drop the bridge's obs frontend event callback while libobs is still up.
 	Bridge::Shutdown();
+
+	// Unbind channel 0 and destroy the program transition while libobs is still up,
+	// before the scene-removal pass below, so the transition releases its wrapped
+	// scene first (and its own free lands in the drain loops here, not obs_shutdown).
+	Transitions::Shutdown();
 
 	// Tear the audio mixer down while libobs is still up: disconnect the global
 	// source signals FIRST (so no further Rebuild/audio.changed fires during

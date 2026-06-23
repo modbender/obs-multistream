@@ -2,6 +2,7 @@
 
 #include "log.hpp"
 #include "multistream/StorePaths.hpp"
+#include "transitions.hpp"
 
 #include <obs.h>
 #include <obs.hpp>
@@ -39,6 +40,12 @@ struct SaveContext {
 bool SaveFilter(void *data, obs_source_t *source)
 {
 	const auto *ctx = static_cast<const SaveContext *>(data);
+	// The active program transition lives on channel 0 wrapping the current scene;
+	// it is restored from transitions.json, not the scene collection (same as the
+	// global audio channels above).
+	if (obs_source_get_type(source) == OBS_SOURCE_TYPE_TRANSITION) {
+		return false;
+	}
 	for (obs_source_t *audio : ctx->audio) {
 		if (audio && source == audio) {
 			return false;
@@ -66,7 +73,7 @@ void Save()
 
 	OBSDataArrayAutoRelease sources = obs_save_sources_filtered(SaveFilter, &ctx);
 
-	OBSSourceAutoRelease current = obs_get_output_source(0); // addref'd; may be null
+	OBSSourceAutoRelease current = Transitions::GetProgramScene(); // addref'd; unwraps the ch0 transition
 	const char *currentName = current ? obs_source_get_name(current) : nullptr;
 
 	OBSDataAutoRelease root = obs_data_create();

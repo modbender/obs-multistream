@@ -8,6 +8,7 @@
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
 #include "obs_bootstrap.hpp"
+#include "transitions.hpp"
 #include "scene_persistence.hpp"
 
 #include <CanvasDefinition.hpp>
@@ -598,7 +599,7 @@ namespace {
 obs_source_t *AcquireSurfaceSceneSource(obs_canvas_t *targetCanvas)
 {
 	if (!targetCanvas) {
-		return obs_get_output_source(0); // addref'd; null if unbound
+		return Transitions::GetProgramScene(); // addref'd; unwraps the ch0 transition; null if unbound
 	}
 	const char *uuid = obs_canvas_get_uuid(targetCanvas);
 	if (!uuid) {

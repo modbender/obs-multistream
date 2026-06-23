@@ -21,6 +21,7 @@
 #include "preview_window.hpp"
 #include "properties_serializer.hpp"
 #include "scene_persistence.hpp"
+#include "transitions.hpp"
 #include "window_manager.hpp"
 
 #include "multistream/CanvasRuntime.hpp"
@@ -405,6 +406,10 @@ bool MethodSettingsSetVideo(const json &params, json &result, std::string &error
 	// letterbox transform so the next frame re-letterboxes to the new base size.
 	Preview::OnVideoReset();
 
+	// Re-size the program transition on ch0 to the new base canvas so the composited
+	// output isn't clipped at the old dimensions until the next type-swap.
+	Transitions::OnVideoReset();
+
 	obs_video_info applied = {};
 	obs_get_video_info(&applied);
 	result = VideoInfoToJson(applied);
@@ -508,7 +513,7 @@ std::string OptString(const json &params, const char *key)
 obs_source_t *ResolveSceneSource(const std::string &name)
 {
 	if (name.empty()) {
-		return obs_get_output_source(0); // already addref'd; null if unbound
+		return Transitions::GetProgramScene(); // addref'd; unwraps the ch0 transition; null if unbound
 	}
 	obs_source_t *source = obs_get_source_by_name(name.c_str()); // addref'd
 	if (!source) {
@@ -669,8 +674,8 @@ bool MethodScenesList(const json &params, json &result, std::string &error)
 	}
 	(void)error;
 	// Enumerate scene sources in creation order. `current` flags the scene bound
-	// to output channel 0.
-	obs_source_t *current = obs_get_output_source(0); // addref'd; may be null
+	// to output channel 0 (unwrapped from the program transition).
+	obs_source_t *current = Transitions::GetProgramScene(); // addref'd; may be null
 	const char *currentName = current ? obs_source_get_name(current) : nullptr;
 	const std::string currentStr = currentName ? currentName : std::string();
 
@@ -807,14 +812,15 @@ bool MethodScenesRemove(const json &params, json &result, std::string &error)
 		return false;
 	}
 
-	// If the target is the current scene, switch output 0 to the fallback first.
-	obs_source_t *current = obs_get_output_source(0); // addref'd
+	// If the target is the current scene, switch the program scene to the fallback
+	// first (non-animated -- the target is about to be removed).
+	obs_source_t *current = Transitions::GetProgramScene(); // addref'd; unwraps the ch0 transition
 	const bool removingCurrent = current && current == target;
 	if (current) {
 		obs_source_release(current);
 	}
 	if (removingCurrent && ctx.fallback) {
-		obs_set_output_source(0, ctx.fallback);
+		Transitions::SetProgramScene(ctx.fallback, false);
 	}
 
 	obs_source_remove(target);
@@ -857,7 +863,7 @@ bool MethodScenesSetCurrent(const json &params, json &result, std::string &error
 		error = "no scene named '" + name + "'";
 		return false;
 	}
-	obs_set_output_source(0, source);
+	Transitions::SetProgramScene(source, true); // animate through the program transition
 	obs_source_release(source);
 
 	EmitScenesChanged(std::string());
@@ -2872,11 +2878,6 @@ bool MethodAudioSetMuted(const json &params, json &result, std::string &error)
 // stayed empty. One row per global output channel: a wasapi capture source bound
 // to the channel shows in the mixer (AudioMonitor enumerates channels 1..6).
 
-// Defined below with the theme/layout persistence; declared here so the seed/
-// restore helpers can read+write the per-channel device map.
-bool WriteJsonString(const char *file, const char *key, const std::string &value);
-std::string ReadJsonString(const char *file, const char *key);
-
 struct GlobalAudioSlot {
 	int channel;          // obs output channel 1..6
 	bool input;           // true = mic/aux (wasapi_input_capture), false = desktop (wasapi_output_capture)
@@ -3169,32 +3170,76 @@ void DoEmit(const std::string &name, const std::string &payloadDump)
 // to <config>/obs-multistream/basic/{theme,layout}.json, reusing the same
 // obs_data_* round-trip the stream/canvas stores use. The payloads are opaque
 // strings to C++ (the shell owns their shape); we read and write them verbatim.
+// WriteJsonString/ReadJsonString are defined at namespace-Bridge scope (below the
+// anonymous namespace) so other TUs (transitions.cpp) can share them.
 
-bool WriteJsonString(const char *file, const char *key, const std::string &value)
+// --- transitions ------------------------------------------------------------
+
+bool MethodTransitionTypesList(const json & /*params*/, json &result, std::string & /*error*/)
 {
-	const std::string path = MultistreamBasicPath(file);
-	if (path.empty()) {
-		return false;
+	json types = json::array();
+	for (const auto &[id, name] : Transitions::TypeList()) {
+		types.push_back(json{{"id", id}, {"name", name}});
 	}
-	std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
-	os_mkdirs(dir.u8string().c_str());
-	OBSDataAutoRelease root = obs_data_create();
-	obs_data_set_string(root, key, value.c_str());
-	return obs_data_save_json_pretty_safe(root, path.c_str(), "tmp", "bak");
+	result = std::move(types);
+	return true;
 }
 
-std::string ReadJsonString(const char *file, const char *key)
+bool MethodTransitionsGetCurrent(const json & /*params*/, json &result, std::string & /*error*/)
 {
-	const std::string path = MultistreamBasicPath(file);
-	if (path.empty()) {
-		return std::string();
+	std::string id;
+	std::string name;
+	uint32_t durationMs = 0;
+	Transitions::Current(id, name, durationMs);
+	result = json{{"id", id}, {"name", name}, {"durationMs", durationMs}};
+	return true;
+}
+
+bool MethodTransitionsSetCurrent(const json &params, json &result, std::string &error)
+{
+	const std::string id = OptString(params, "id");
+	if (id.empty()) {
+		error = "transitions.setCurrent requires a non-empty 'id'";
+		return false;
 	}
-	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
-	if (!root) {
-		return std::string();
+	if (!Transitions::SetCurrentType(id, error)) {
+		return false;
 	}
-	const char *v = obs_data_get_string(root, key);
-	return v ? std::string(v) : std::string();
+
+	std::string curId;
+	std::string curName;
+	uint32_t durationMs = 0;
+	Transitions::Current(curId, curName, durationMs);
+	result = json{{"id", curId}, {"name", curName}};
+	EmitEvent("transitions.changed", json::object());
+	return true;
+}
+
+bool MethodTransitionsSetDuration(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "transitions.setDuration requires a 'durationMs'";
+		return false;
+	}
+	auto it = params.find("durationMs");
+	int64_t ms = -1;
+	if (it != params.end() && it->is_number_integer()) {
+		ms = it->get<int64_t>();
+	} else if (it != params.end() && it->is_string()) {
+		try {
+			ms = std::stoll(it->get<std::string>());
+		} catch (const std::exception &) {
+			ms = -1;
+		}
+	}
+	if (ms < 0) {
+		error = "transitions.setDuration requires a non-negative integer 'durationMs'";
+		return false;
+	}
+	Transitions::SetDuration(static_cast<uint32_t>(ms));
+	result = json{{"durationMs", static_cast<uint32_t>(ms)}};
+	EmitEvent("transitions.changed", json::object());
+	return true;
 }
 
 bool MethodThemeSave(const json &params, json &result, std::string &error)
@@ -3314,6 +3359,33 @@ bool MethodWindowList(const json & /*params*/, json &result, std::string & /*err
 
 } // namespace
 
+bool WriteJsonString(const char *file, const char *key, const std::string &value)
+{
+	const std::string path = MultistreamBasicPath(file);
+	if (path.empty()) {
+		return false;
+	}
+	std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
+	os_mkdirs(dir.u8string().c_str());
+	OBSDataAutoRelease root = obs_data_create();
+	obs_data_set_string(root, key, value.c_str());
+	return obs_data_save_json_pretty_safe(root, path.c_str(), "tmp", "bak");
+}
+
+std::string ReadJsonString(const char *file, const char *key)
+{
+	const std::string path = MultistreamBasicPath(file);
+	if (path.empty()) {
+		return std::string();
+	}
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
+	if (!root) {
+		return std::string();
+	}
+	const char *v = obs_data_get_string(root, key);
+	return v ? std::string(v) : std::string();
+}
+
 void Init()
 {
 	g_methods = {
@@ -3383,6 +3455,10 @@ void Init()
 		{"audio.listDevices", MethodAudioListDevices},
 		{"audio.getGlobalDevices", MethodAudioGetGlobalDevices},
 		{"audio.setGlobalDevice", MethodAudioSetGlobalDevice},
+		{"transitionTypes.list", MethodTransitionTypesList},
+		{"transitions.getCurrent", MethodTransitionsGetCurrent},
+		{"transitions.setCurrent", MethodTransitionsSetCurrent},
+		{"transitions.setDuration", MethodTransitionsSetDuration},
 		{"theme.save", MethodThemeSave},
 		{"theme.load", MethodThemeLoad},
 		{"layout.save", MethodLayoutSave},

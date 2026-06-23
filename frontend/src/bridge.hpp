@@ -76,6 +76,12 @@ void EmitAudioLevels();
 // changes. Safe to call off the UI thread (EmitEvent marshals to TID_UI).
 void EmitAudioChanged();
 
+// Write/read a single string value under `key` to/from a MultistreamBasicPath
+// JSON file (atomic, with a .bak). Shared by the per-feature key/value stores
+// (audio_devices.json / theme.json / layout.json / transitions.json).
+bool WriteJsonString(const char *file, const char *key, const std::string &value);
+std::string ReadJsonString(const char *file, const char *key);
+
 } // namespace Bridge
 
 // Browser-side query handler for the window.cefQuery() bridge. Parses the
