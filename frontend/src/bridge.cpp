@@ -2602,12 +2602,12 @@ std::string ReadJsonString(const char *file, const char *key)
 
 bool MethodThemeSave(const json &params, json &result, std::string &error)
 {
-	const std::string active = OptString(params, "activePreset");
-	if (active.empty()) {
-		error = "theme.save requires a non-empty 'activePreset'";
+	const std::string state = OptString(params, "state");
+	if (state.empty()) {
+		error = "theme.save requires a non-empty 'state' string";
 		return false;
 	}
-	if (!WriteJsonString("theme.json", "activePreset", active)) {
+	if (!WriteJsonString("theme.json", "state", state)) {
 		error = "failed to write theme.json";
 		return false;
 	}
@@ -2617,8 +2617,9 @@ bool MethodThemeSave(const json &params, json &result, std::string &error)
 
 bool MethodThemeLoad(const json & /*params*/, json &result, std::string & /*error*/)
 {
-	// Empty => no saved theme yet; the shell falls back to the default preset.
-	result = json{{"activePreset", ReadJsonString("theme.json", "activePreset")}};
+	// Empty => nothing saved yet; the shell falls back to the default preset/tokens.
+	// `state` is an opaque JSON string the JS theme store stringifies/parses itself.
+	result = json{{"state", ReadJsonString("theme.json", "state")}};
 	return true;
 }
 
