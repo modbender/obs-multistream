@@ -18,7 +18,6 @@
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "properties_serializer.hpp"
-#include "window_manager.hpp"
 
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
@@ -177,11 +176,10 @@ bool MethodStreamingStop(const json & /*params*/, json &result, std::string & /*
 // single-preview caller (which sends no `canvas`) is unchanged.
 std::string PreviewCanvasParam(const json &params);
 
-// THROWAWAY (P0 windowing spike). The originating window id. The Svelte side knows
-// its own windowId (from the ?window= query string) and passes it as `window`;
-// absent => 0 (main window), so production callers (no `window`) are unchanged.
-// The spec's P1 design resolves this host-side from the calling browser; the
-// explicit param is the faster throwaway proof.
+// The originating window id for a preview surface. Absent => 0 (main window), so
+// single-window callers (no `window`) address the main window's surfaces. Carried
+// so per-window preview surfaces stay keyed by (windowId, canvasUuid) when
+// additional windows are introduced.
 int PreviewWindowParam(const json &params)
 {
 	if (params.is_object()) {
@@ -2446,70 +2444,6 @@ void DoEmit(const std::string &name, const std::string &payloadDump)
 	}
 }
 
-// --- P0 windowing spike (THROWAWAY) -----------------------------------------
-// Detached-window control surface. The methods just drive WindowManager (Task 5)
-// and announce the lifecycle via the broadcast EmitEvent (Task 3) so EVERY live
-// browser learns a window opened/closed. Harmless with FE_SPIKE_WINDOWING off:
-// no WindowManager exists, so detach/redock error cleanly and list returns empty.
-
-bool MethodWindowDetach(const json &params, json &result, std::string &error)
-{
-	WindowManager *wm = WindowManager::Instance();
-	if (!wm) {
-		error = "window manager not active (set FE_SPIKE_WINDOWING)";
-		return false;
-	}
-	const std::string dock = OptString(params, "dock");
-	if (dock.empty()) {
-		error = "window.detach requires a non-empty 'dock'";
-		return false;
-	}
-	const int windowId = wm->Detach(dock);
-	if (windowId <= 0) {
-		error = "failed to create detached window";
-		return false;
-	}
-	EmitEvent("window.opened", json{{"windowId", windowId}, {"dock", dock}});
-	HostLog("[bridge] window.detach -> ok id=" + std::to_string(windowId) + " dock=" + dock);
-	result = json{{"windowId", windowId}};
-	return true;
-}
-
-bool MethodWindowRedock(const json &params, json &result, std::string &error)
-{
-	WindowManager *wm = WindowManager::Instance();
-	if (!wm) {
-		error = "window manager not active";
-		return false;
-	}
-	if (!params.is_object() || !params.contains("windowId") || !params["windowId"].is_number_integer()) {
-		error = "window.redock requires an integer 'windowId'";
-		return false;
-	}
-	const int windowId = params["windowId"].get<int>();
-	if (!wm->Redock(windowId)) {
-		error = "no detached window with id " + std::to_string(windowId);
-		return false;
-	}
-	EmitEvent("window.closed", json{{"windowId", windowId}});
-	HostLog("[bridge] window.redock -> ok id=" + std::to_string(windowId));
-	result = json{{"redocked", windowId}};
-	return true;
-}
-
-bool MethodWindowList(const json & /*params*/, json &result, std::string & /*error*/)
-{
-	WindowManager *wm = WindowManager::Instance();
-	json arr = json::array();
-	if (wm) {
-		for (const WindowManager::WindowInfo &w : wm->List()) {
-			arr.push_back(json{{"windowId", w.windowId}, {"dock", w.dockId}});
-		}
-	}
-	result = json{{"windows", std::move(arr)}};
-	return true;
-}
-
 } // namespace
 
 void Init()
@@ -2569,10 +2503,6 @@ void Init()
 		{"audio.list", MethodAudioList},
 		{"audio.setDeflection", MethodAudioSetDeflection},
 		{"audio.setMuted", MethodAudioSetMuted},
-		// P0 windowing spike (THROWAWAY): detached-window control + lifecycle events.
-		{"window.detach", MethodWindowDetach},
-		{"window.redock", MethodWindowRedock},
-		{"window.list", MethodWindowList},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);

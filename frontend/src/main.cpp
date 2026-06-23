@@ -16,7 +16,6 @@
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "scheme.hpp"
-#include "window_manager.hpp"
 
 namespace {
 
@@ -25,33 +24,18 @@ constexpr int kHostHeight = 720;
 constexpr wchar_t kHostClassName[] = L"ObsMultiStreamShell";
 constexpr UINT_PTR kSizeProbeTimerId = 1;
 constexpr UINT_PTR kSmokeQuitTimerId = 2;
-constexpr UINT_PTR kSmokeRedockTimerId = 3;
 
 // Host-window-owned handles. Single-threaded (browser process UI thread).
 CefRefPtr<CefBrowser> g_browser;
-
-// THROWAWAY (P0 spike). The windowId the smoke path detached, so the later redock
-// timer can drive window.redock against it. 0 => nothing detached.
-int g_smokeDetachedWindowId = 0;
 
 // Owns the per-canvas preview surfaces (each an obs_display on its own child
 // HWND). Created after ObsBootstrap::Start() succeeds; all surfaces destroyed
 // before ObsBootstrap::Stop() (which frees the canvas mixes those displays render).
 std::unique_ptr<PreviewManager> g_preview;
 
-// THROWAWAY (P0 windowing spike). Owns the detached top-level host windows + their
-// child CEF browsers. Constructed only under FE_SPIKE_WINDOWING; null otherwise so
-// production is byte-identical.
-std::unique_ptr<WindowManager> g_windows;
-
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
 {
-	// THROWAWAY (P0 windowing spike): FE_SPIKE_WINDOWING swaps the production
-	// bundle for the spike route. Unset => byte-identical production behavior.
-	if (getenv("FE_SPIKE_WINDOWING")) {
-		return "app://app/spike.html";
-	}
 	return "app://app/index.html";
 }
 
@@ -116,76 +100,12 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				ObsBootstrap::RunPreviewSurfaceIsolationSelfTest();
 				ObsBootstrap::RunAudioMixerSelfTest();
 			}
-			// THROWAWAY (P0 spike). Headless evidence path: with the spike flag
-			// + smoke timer on, drive the REAL window.detach bridge method (Task 6)
-			// rather than WindowManager directly, so the full path -- dispatch ->
-			// WindowManager::Detach -> window.opened broadcast -- is exercised
-			// without a click (the SpikeApp button covers the interactive path).
-			// Then list the detached windows to prove window.list reflects it.
-			if (g_windows && getenv("FE_SMOKE_QUIT_SECONDS")) {
-				Bridge::json result;
-				std::string err;
-				if (Bridge::Dispatch("window.detach", Bridge::json{{"dock", "preview"}}, result, err)) {
-					HostLog("[host] smoke window.detach result=" + result.dump());
-					// Capture the detached id and arm the redock timer so the full
-					// detach->surface-created->redock->surface-destroyed->window.closed
-					// round-trip is exercised headlessly (Task 8). Delayed long enough
-					// for the detached browser to load + report its preview rect (which
-					// lazily creates the surface) before we tear it back down.
-					if (result.is_object() && result.contains("windowId") &&
-					    result["windowId"].is_number_integer()) {
-						g_smokeDetachedWindowId = result["windowId"].get<int>();
-						SetTimer(hwnd, kSmokeRedockTimerId, 4000, nullptr);
-						HostLog("[host] smoke redock armed for id=" +
-							std::to_string(g_smokeDetachedWindowId) + " in 4s");
-					}
-				} else {
-					HostLog("[host] smoke window.detach FAILED: " + err);
-				}
-				Bridge::json listResult;
-				std::string listErr;
-				if (Bridge::Dispatch("window.list", Bridge::json(nullptr), listResult, listErr)) {
-					HostLog("[host] smoke window.list result=" + listResult.dump());
-				}
-			}
-		} else if (wparam == kSmokeRedockTimerId) {
-			KillTimer(hwnd, kSmokeRedockTimerId);
-			// THROWAWAY (P0 spike). Drive the REAL window.redock bridge method (Task 6)
-			// for the smoke-detached window so the round-trip -- Redock -> surface
-			// teardown (preview display destroyed BEFORE the browser closes) ->
-			// window.closed broadcast -- is proven without a click. Then re-list to
-			// prove window.list no longer reports it (the entry was erased).
-			if (g_windows && g_smokeDetachedWindowId > 0) {
-				Bridge::json result;
-				std::string err;
-				if (Bridge::Dispatch("window.redock", Bridge::json{{"windowId", g_smokeDetachedWindowId}},
-						     result, err)) {
-					HostLog("[host] smoke window.redock result=" + result.dump());
-				} else {
-					HostLog("[host] smoke window.redock FAILED: " + err);
-				}
-				Bridge::json listResult;
-				std::string listErr;
-				if (Bridge::Dispatch("window.list", Bridge::json(nullptr), listResult, listErr)) {
-					HostLog("[host] smoke window.list (post-redock) result=" + listResult.dump());
-				}
-			}
 		} else if (wparam == kSmokeQuitTimerId) {
 			KillTimer(hwnd, kSmokeQuitTimerId);
 			HostLog("[host] smoke-quit timer fired -> WM_CLOSE");
 			PostMessageW(hwnd, WM_CLOSE, 0, 0);
 		}
 		return 0;
-	case WM_CLOSE:
-		// THROWAWAY (P0 spike). Closing the main window must also close every
-		// detached window, or a live detached browser keeps the shared browser_list_
-		// non-empty and CefRunMessageLoop never quits (the N-browsers guard). Their
-		// WM_CLOSE posts drain before the loop empties. Then fall through to the
-		// default close that destroys the main browser.
-		if (g_windows) {
-			g_windows->CloseAll();
-		}
-		break;
 	case WM_DESTROY:
 		// Closing the host destroys its child browser window, which drives
 		// Client::OnBeforeClose -> CefQuitMessageLoop.
@@ -284,8 +204,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 	g_preview = std::make_unique<PreviewManager>(host, hInstance);
 	Preview::SetInstance(g_preview.get());
 	// Main window is windowId 0; its surfaces parent to this host HWND. (id 0 also
-	// falls back to the constructor's host_, so this is symmetry with detached
-	// windows registering theirs in WindowManager::Detach.)
+	// falls back to the constructor's host_; future detached windows register their
+	// own host HWND under their windowId via the same RegisterWindow seam.)
 	g_preview->RegisterWindow(0, host);
 
 	// Probe the test source's size after its async CEF browser has spun up.
@@ -301,10 +221,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 		}
 	}
 
-	// ONE Client for the whole process: the main browser and every detached
-	// window's child browser share it (Client::Shared), so all browsers land in
-	// the same browser_list_ + Bridge emit registry and the loop quits only when
-	// the LAST browser closes.
+	// ONE Client for the whole process, published via Client::SetShared so future
+	// additional browsers (e.g. detached windows) reuse it: all browsers land in the
+	// same browser_list_ + Bridge emit registry and the loop quits only when the
+	// LAST browser closes.
 	CefRefPtr<Client> client(new Client());
 	Client::SetShared(client);
 	CefBrowserSettings browser_settings;
@@ -336,28 +256,9 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 
 	LayoutBrowser(host);
 
-	// THROWAWAY (P0 windowing spike). Under FE_SPIKE_WINDOWING, stand up the
-	// WindowManager so window.detach (Task 6) can spawn detached top-level windows.
-	// Detached child browsers reuse the shared Client (Client::Shared), so they join
-	// the same browser_list_ + Bridge emit registry. Flag off => never constructed =>
-	// production byte-identical.
-	if (getenv("FE_SPIKE_WINDOWING")) {
-		g_windows = std::make_unique<WindowManager>(hInstance, "app://app/spike.html");
-		WindowManager::SetInstance(g_windows.get());
-	}
-
 	CefRunMessageLoop();
 
 	g_browser = nullptr;
-
-	// THROWAWAY (P0 spike). Tear down every detached window's surfaces + browser
-	// before the Default surfaces and before ObsBootstrap::Stop() frees the canvas
-	// mixes those surfaces render (the UAF discipline; full teardown is Task 8).
-	if (g_windows) {
-		WindowManager::SetInstance(nullptr);
-		g_windows->DestroyAll();
-		g_windows.reset();
-	}
 
 	// Drop the process-wide shared Client ref so it doesn't outlive teardown.
 	Client::SetShared(nullptr);

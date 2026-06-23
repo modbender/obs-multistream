@@ -33,7 +33,7 @@ bool Client::OnBeforePopup(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame
 {
 	CEF_REQUIRE_UI_THREAD();
 	HostLog("[cef] OnBeforePopup canceled (host-driven detach): " + target_url.ToString());
-	return true; // cancel: detach is host-driven via window.detach
+	return true; // cancel: all real windows are host-driven, never page popups
 }
 
 void Client::OnAfterCreated(CefRefPtr<CefBrowser> browser)

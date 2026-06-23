@@ -42,9 +42,8 @@ public:
 				      CefProcessId source_process, CefRefPtr<CefProcessMessage> message) override;
 
 	// CefLifeSpanHandler methods:
-	// Cancel every page-initiated popup (window.open / target=_blank). Detach is
-	// host-driven via window.detach, so the page must never spawn an unmanaged CEF
-	// popup; WindowManager owns all real windows.
+	// Cancel every page-initiated popup (window.open / target=_blank): all real
+	// windows are host-driven, so the page must never spawn an unmanaged CEF popup.
 	bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &target_url,
 			   const CefString &target_frame_name, CefLifeSpanHandler::WindowOpenDisposition target_disposition,
 			   bool user_gesture,

@@ -104,7 +104,7 @@ private:
 };
 
 // Owns the native preview surfaces, keyed by (windowId, canvasUuid). windowId 0 is
-// the main window; detached windows (P0 windowing spike) carry windowId > 0. The
+// the main window; future additional windows carry windowId > 0. The
 // empty/Default canvas uuid maps to a null-targetCanvas surface (global mix +
 // output 0), byte-identical to the original single-preview behavior; any other
 // uuid is resolved to its obs_canvas_t mix via CanvasRuntime on first use. The

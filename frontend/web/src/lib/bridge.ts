@@ -412,12 +412,6 @@ export interface ObsMethods {
   "audio.list": { sources: AudioSource[] };
   "audio.setDeflection": { uuid: string; deflection: number; volumeDb: number };
   "audio.setMuted": { uuid: string; muted: boolean };
-  // --- P0 windowing spike (THROWAWAY) ---
-  // Detached-window control. Only active under FE_SPIKE_WINDOWING; detach/redock
-  // reject cleanly otherwise and list returns no windows.
-  "window.detach": { windowId: number };
-  "window.redock": { redocked: number };
-  "window.list": { windows: { windowId: number; dock: string }[] };
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -441,11 +435,6 @@ export interface ObsEvents {
   // The active audio source set changed (source activated/deactivated); the UI
   // re-runs audio.list to rebuild its rows.
   "audio.changed": Record<string, never>;
-  // --- P0 windowing spike (THROWAWAY) ---
-  // Broadcast (Task 3) when a detached window appears/disappears so every browser
-  // can reconcile its dock layout.
-  "window.opened": { windowId: number; dock: string };
-  "window.closed": { windowId: number };
 }
 
 export interface BridgeError extends Error {
