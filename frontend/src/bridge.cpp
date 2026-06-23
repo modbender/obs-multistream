@@ -909,6 +909,57 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 	return true;
 }
 
+// scenes.duplicate {name, canvas?}: duplicate a global scene (Default path only)
+// using shared source refs, matching OBS's "Duplicate Scene". Additional-canvas
+// duplication is unsupported (same limitation as scenes.reorder).
+bool MethodScenesDuplicate(const json &params, json &result, std::string &error)
+{
+	const std::string name = OptString(params, "name");
+	if (name.empty()) {
+		error = "scenes.duplicate requires a non-empty 'name'";
+		return false;
+	}
+	const CanvasTarget target = ResolveCanvasTarget(params);
+	if (target.isAdditional) {
+		error = "scene duplication is not supported for additional canvases";
+		return false;
+	}
+	obs_source_t *srcScene = obs_get_source_by_name(name.c_str()); // addref'd
+	if (!srcScene || !obs_scene_from_source(srcScene)) {
+		if (srcScene) {
+			obs_source_release(srcScene);
+		}
+		error = "no scene named '" + name + "'";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(srcScene);
+
+	// Find a free "<name> N" (N starting at 2).
+	std::string newName;
+	for (int n = 2;; ++n) {
+		std::string candidate = name + " " + std::to_string(n);
+		obs_source_t *taken = obs_get_source_by_name(candidate.c_str());
+		if (taken) {
+			obs_source_release(taken);
+			continue;
+		}
+		newName = std::move(candidate);
+		break;
+	}
+
+	obs_scene_t *dup = obs_scene_duplicate(scene, newName.c_str(), OBS_SCENE_DUP_REFS); // new ref
+	obs_source_release(srcScene);
+	if (!dup) {
+		error = "obs_scene_duplicate failed";
+		return false;
+	}
+	obs_scene_release(dup); // the new scene source persists in the registry
+
+	EmitScenesChanged(std::string());
+	result = json{{"name", newName}};
+	return true;
+}
+
 // scenes.reorder {name, direction:"up"|"down", canvas?}: reorder a scene within
 // the (canvas or global) scene list.
 //
@@ -1284,6 +1335,57 @@ bool MethodSourcesAddExisting(const json &params, json &result, std::string &err
 		return false;
 	}
 	result = json{{"id", itemId}, {"source", name}};
+	return true;
+}
+
+// Rename a scene item's underlying source by scene-item id (works on both the
+// global and additional-canvas paths via ResolveTargetScene). params:
+// {canvas?, scene?, id, name}. Rejects a clash with a DIFFERENT existing source.
+bool MethodSourcesRename(const json &params, json &result, std::string &error)
+{
+	int64_t id = 0;
+	if (!ItemIdFromParams(params, id, error)) {
+		return false;
+	}
+	const std::string name = OptString(params, "name");
+	if (name.empty()) {
+		error = "sources.rename requires a non-empty 'name'";
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	obs_sceneitem_t *item = FindSceneItem(scene, id);
+	if (!item) {
+		obs_source_release(sceneSource);
+		error = "no scene item with id " + std::to_string(id);
+		return false;
+	}
+	obs_source_t *src = obs_sceneitem_get_source(item); // borrowed, no ref
+	const char *curName = src ? obs_source_get_name(src) : nullptr;
+	if (curName && name == curName) {
+		obs_source_release(sceneSource);
+		result = json{{"id", id}, {"source", name}};
+		return true;
+	}
+	// Reject a clash with a DIFFERENT existing source (same source is fine above).
+	obs_source_t *clash = obs_get_source_by_name(name.c_str()); // addref'd or null
+	if (clash) {
+		const bool isSelf = clash == src;
+		obs_source_release(clash);
+		if (!isSelf) {
+			obs_source_release(sceneSource);
+			error = "a source named '" + name + "' already exists";
+			return false;
+		}
+	}
+	obs_source_set_name(src, name.c_str());
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
+	obs_source_release(sceneSource);
+	result = json{{"id", id}, {"source", name}};
 	return true;
 }
 
@@ -2632,6 +2734,7 @@ void Init()
 		{"scenes.remove", MethodScenesRemove},
 		{"scenes.setCurrent", MethodScenesSetCurrent},
 		{"scenes.rename", MethodScenesRename},
+		{"scenes.duplicate", MethodScenesDuplicate},
 		{"scenes.reorder", MethodScenesReorder},
 		{"sceneItems.list", MethodSceneItemsList},
 		{"sceneItems.setVisible", MethodSceneItemsSetVisible},
@@ -2642,6 +2745,7 @@ void Init()
 		{"sources.create", MethodSourcesCreate},
 		{"sources.listExisting", MethodSourcesListExisting},
 		{"sources.addExisting", MethodSourcesAddExisting},
+		{"sources.rename", MethodSourcesRename},
 		{"properties.get", MethodPropertiesGet},
 		{"properties.set", MethodPropertiesSet},
 		{"properties.button", MethodPropertiesButton},
