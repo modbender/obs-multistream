@@ -2,6 +2,7 @@
 
 #include "include/cef_browser.h"
 
+#include "bridge.hpp"
 #include "client.hpp"
 #include "log.hpp"
 #include "preview_window.hpp"
@@ -165,6 +166,10 @@ std::vector<WindowManager::WindowInfo> WindowManager::List() const
 
 void WindowManager::CloseAll()
 {
+	// App is shutting down: suppress the per-window "window.closed" redock broadcast
+	// each WM_CLOSE would otherwise emit, so the (also-closing) main window does not
+	// try to re-dock panels during teardown.
+	closingAll_ = true;
 	// Post WM_CLOSE to each detached window so its own WndProc drives the uniform
 	// surface-teardown + CloseBrowser + entry-erase path. Still inside the message
 	// loop here (main window's WM_CLOSE), so these posts are processed before the
@@ -214,16 +219,19 @@ LRESULT CALLBACK WindowManager::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	case WM_CLOSE:
 		if (wm) {
 			if (Window *w = wm->FindByHwnd(hwnd)) {
+				const int windowId = w->windowId;
+				const std::string dockId = w->dockId;
+				const bool announce = !wm->closingAll_;
 				// Surfaces must die before the browser/window (UAF discipline);
 				// drop the host-HWND registration once they are gone.
 				if (PreviewManager *pm = Preview::Instance()) {
-					pm->DestroyWindow(w->windowId);
-					pm->UnregisterWindow(w->windowId);
+					pm->DestroyWindow(windowId);
+					pm->UnregisterWindow(windowId);
 				}
 				if (w->browser) {
 					w->browser->GetHost()->CloseBrowser(true);
 				}
-				HostLog("[window] closing id=" + std::to_string(w->windowId));
+				HostLog("[window] closing id=" + std::to_string(windowId));
 				// Erase the tracking entry; the browser's OnBeforeClose still fires
 				// to unregister it from the emit set.
 				for (auto it = wm->windows_.begin(); it != wm->windows_.end(); ++it) {
@@ -231,6 +239,12 @@ LRESULT CALLBACK WindowManager::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 						wm->windows_.erase(it);
 						break;
 					}
+				}
+				// A user-driven OS close (not app shutdown) must return the dock to
+				// the main window, so broadcast the same lifecycle event Redock does.
+				if (announce) {
+					Bridge::EmitEvent("window.closed",
+							  Bridge::json{{"windowId", windowId}, {"dock", dockId}});
 				}
 			}
 		}

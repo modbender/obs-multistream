@@ -68,6 +68,7 @@ private:
 	std::string bundleBaseUrl_; // e.g. "app://app/index.html"
 	int nextId_ = 1;            // windowId 0 is reserved for the main window
 	std::vector<Window> windows_;
+	bool closingAll_ = false; // app-shutdown: suppress per-window window.closed redock broadcasts
 };
 
 #endif // OBS_MULTISTREAM_FRONTEND_WINDOW_MANAGER_HPP_

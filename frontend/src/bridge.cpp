@@ -2562,11 +2562,20 @@ bool MethodWindowRedock(const json &params, json &result, std::string &error)
 		return false;
 	}
 	const int windowId = params["windowId"].get<int>();
+	// Capture the dock id before Redock removes the window, so the broadcast can tell
+	// the main window which dock to restore.
+	std::string dock;
+	for (const WindowManager::WindowInfo &w : wm->List()) {
+		if (w.windowId == windowId) {
+			dock = w.dockId;
+			break;
+		}
+	}
 	if (!wm->Redock(windowId)) {
 		error = "no detached window with id " + std::to_string(windowId);
 		return false;
 	}
-	EmitEvent("window.closed", json{{"windowId", windowId}});
+	EmitEvent("window.closed", json{{"windowId", windowId}, {"dock", dock}});
 	HostLog("[bridge] window.redock -> ok id=" + std::to_string(windowId));
 	result = json{{"redocked", windowId}};
 	return true;
