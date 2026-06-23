@@ -448,6 +448,12 @@ bool ObsBootstrap::Start()
 		});
 	g_multistream->onStatusChanged = [] { Bridge::EmitMultistreamChanged(); };
 
+	// Seed (first run) or restore the global audio devices (Desktop Audio / Mic) on
+	// output channels 1..6 -- stock OBS sets these up but the new frontend never did,
+	// leaving the mixer empty. Done before the AudioMonitor below so its initial
+	// Rebuild enumerates the seeded channels.
+	Bridge::SeedGlobalAudio();
+
 	// Bring up the audio mixer manager and seed it from the current active audio
 	// sources, then arm the global signals that change which sources have audio so
 	// the set + the UI stay in sync. Built last (after the default scene + modules)
@@ -1670,6 +1676,12 @@ void ObsBootstrap::Stop()
 		g_audioMonitor->ClearAll();
 		g_audioMonitor.reset();
 	}
+
+	// Unbind the global audio channels (Desktop Audio / Mic) so the wasapi sources
+	// are destroyed before obs_shutdown, mirroring the channel-0 unbind in
+	// TeardownScene. Done after the monitor teardown (its volmeters are detached
+	// first) and before the drain loop so the source frees are captured here.
+	Bridge::ClearGlobalAudio();
 
 	// Deferred source destruction can cascade across the destruction-task
 	// thread; drain in a loop until no more work is spawned before

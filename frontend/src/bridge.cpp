@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <obs.h>
+#include <obs.hpp>
 #include <obs-frontend-api.h>
 
 #include "include/base/cef_callback.h"
@@ -2536,6 +2537,272 @@ bool MethodAudioSetMuted(const json &params, json &result, std::string &error)
 	return true;
 }
 
+// --- global audio devices (Desktop Audio / Mic on output channels 1..6) ------
+// Stock OBS seeds these on first run; the new frontend never did, so the mixer
+// stayed empty. One row per global output channel: a wasapi capture source bound
+// to the channel shows in the mixer (AudioMonitor enumerates channels 1..6).
+
+// Defined below with the theme/layout persistence; declared here so the seed/
+// restore helpers can read+write the per-channel device map.
+bool WriteJsonString(const char *file, const char *key, const std::string &value);
+std::string ReadJsonString(const char *file, const char *key);
+
+struct GlobalAudioSlot {
+	int channel;          // obs output channel 1..6
+	bool input;           // true = mic/aux (wasapi_input_capture), false = desktop (wasapi_output_capture)
+	const char *sourceId; // "wasapi_input_capture" | "wasapi_output_capture"
+	const char *label;    // "Desktop Audio", "Mic/Aux", ...
+	const char *role;     // "desktop" | "mic"
+};
+
+static const GlobalAudioSlot kGlobalAudioSlots[] = {
+	{1, false, "wasapi_output_capture", "Desktop Audio", "desktop"},
+	{2, false, "wasapi_output_capture", "Desktop Audio 2", "desktop"},
+	{3, true, "wasapi_input_capture", "Mic/Aux", "mic"},
+	{4, true, "wasapi_input_capture", "Mic/Aux 2", "mic"},
+	{5, true, "wasapi_input_capture", "Mic/Aux 3", "mic"},
+	{6, true, "wasapi_input_capture", "Mic/Aux 4", "mic"},
+};
+
+const GlobalAudioSlot *SlotForChannel(int ch)
+{
+	for (const GlobalAudioSlot &slot : kGlobalAudioSlots) {
+		if (slot.channel == ch) {
+			return &slot;
+		}
+	}
+	return nullptr;
+}
+
+// Enumerate {id,name} audio devices for the matching wasapi type. Reads the
+// "device_id" string-list property off the source type. Some libobs builds need a
+// live instance for the list to populate, so fall back to a temp source if the
+// type-level property list is empty.
+std::vector<std::pair<std::string, std::string>> EnumAudioDevices(bool input)
+{
+	const char *typeId = input ? "wasapi_input_capture" : "wasapi_output_capture";
+
+	auto readList = [](obs_properties_t *props, std::vector<std::pair<std::string, std::string>> &out) -> bool {
+		if (!props) {
+			return false;
+		}
+		obs_property_t *p = obs_properties_get(props, "device_id");
+		if (!p) {
+			return false;
+		}
+		const size_t count = obs_property_list_item_count(p);
+		for (size_t i = 0; i < count; ++i) {
+			const char *name = obs_property_list_item_name(p, i);
+			const char *id = obs_property_list_item_string(p, i);
+			out.emplace_back(id ? id : std::string(), name ? name : std::string());
+		}
+		return count > 0;
+	};
+
+	std::vector<std::pair<std::string, std::string>> out;
+
+	// Path 1: properties straight off the source type.
+	obs_properties_t *typeProps = obs_get_source_properties(typeId);
+	const bool typePath = readList(typeProps, out);
+	if (typeProps) {
+		obs_properties_destroy(typeProps);
+	}
+	if (typePath) {
+		HostLog(std::string("[bridge] audio.enumDevices ") + typeId + " -> " + std::to_string(out.size()) +
+			" via source-type properties");
+		return out;
+	}
+
+	// Path 2 (fallback): a temp instance whose properties carry the populated list.
+	out.clear();
+	OBSSourceAutoRelease tmp = obs_source_create(typeId, "audio-enum-probe", nullptr, nullptr);
+	if (tmp) {
+		obs_properties_t *instProps = obs_source_properties(tmp);
+		readList(instProps, out);
+		if (instProps) {
+			obs_properties_destroy(instProps);
+		}
+	}
+	HostLog(std::string("[bridge] audio.enumDevices ") + typeId + " -> " + std::to_string(out.size()) +
+		" via temp-instance properties (type-level list empty)");
+	return out;
+}
+
+// Persist the current per-channel device map ({"<channel>":"<deviceId>", ...})
+// for every channel that has a slot source bound, as a stringified-JSON blob under
+// "state" in audio_devices.json (the theme.json convention).
+void PersistGlobalAudio()
+{
+	json obj = json::object();
+	for (const GlobalAudioSlot &slot : kGlobalAudioSlots) {
+		OBSSourceAutoRelease cur = obs_get_output_source(slot.channel); // addref'd; may be null
+		if (!cur) {
+			continue;
+		}
+		OBSDataAutoRelease settings = obs_source_get_settings(cur);
+		const char *deviceId = settings ? obs_data_get_string(settings, "device_id") : nullptr;
+		obj[std::to_string(slot.channel)] = deviceId ? std::string(deviceId) : std::string();
+	}
+	WriteJsonString("audio_devices.json", "state", obj.dump());
+}
+
+// Bind/update/disable the device on one global channel. Does NOT persist or
+// rebuild -- callers do, so seeding can batch.
+bool ApplyGlobalDevice(int ch, const std::string &deviceId, std::string &error)
+{
+	const GlobalAudioSlot *slot = SlotForChannel(ch);
+	if (!slot) {
+		error = "channel " + std::to_string(ch) + " is not a global audio slot";
+		return false;
+	}
+
+	if (deviceId.empty()) {
+		// DISABLE: drop the channel's ref so the source is destroyed.
+		obs_set_output_source(ch, nullptr);
+		return true;
+	}
+
+	// If the channel already carries this slot's source type, just update its
+	// device_id in place rather than recreating it.
+	OBSSourceAutoRelease cur = obs_get_output_source(ch); // addref'd; may be null
+	if (cur) {
+		const char *curId = obs_source_get_id(cur);
+		if (curId && std::string(curId) == slot->sourceId) {
+			OBSDataAutoRelease s = obs_source_get_settings(cur);
+			obs_data_set_string(s, "device_id", deviceId.c_str());
+			obs_source_update(cur, s);
+			return true;
+		}
+	}
+
+	// Otherwise create a fresh source and bind it (the channel takes its own ref).
+	OBSDataAutoRelease settings = obs_data_create();
+	obs_data_set_string(settings, "device_id", deviceId.c_str());
+	obs_source_t *source = obs_source_create(slot->sourceId, slot->label, settings, nullptr); // create-ref
+	if (!source) {
+		error = std::string("obs_source_create failed for ") + slot->sourceId;
+		return false;
+	}
+	obs_set_output_source(ch, source); // channel takes its own ref
+	obs_source_release(source);        // drop the create-ref
+	return true;
+}
+
+// First run: seed Desktop Audio (ch1) + Mic/Aux (ch3) to the OS default device and
+// persist. Subsequent runs: restore the saved per-channel map. Never throws.
+void SeedOrRestoreGlobalAudio()
+{
+	const std::string state = ReadJsonString("audio_devices.json", "state");
+
+	auto firstRunSeed = []() {
+		std::string err;
+		ApplyGlobalDevice(1, "default", err);
+		ApplyGlobalDevice(3, "default", err);
+		PersistGlobalAudio();
+		HostLog("[bridge] global audio: first-run seed (Desktop Audio + Mic/Aux -> default)");
+	};
+
+	if (state.empty()) {
+		firstRunSeed();
+		return;
+	}
+
+	json parsed;
+	try {
+		parsed = json::parse(state);
+	} catch (...) {
+		HostLog("[bridge] global audio: state parse failed; falling back to first-run seed");
+		firstRunSeed();
+		return;
+	}
+	if (!parsed.is_object()) {
+		firstRunSeed();
+		return;
+	}
+
+	int restored = 0;
+	for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+		int ch = 0;
+		try {
+			ch = std::stoi(it.key());
+		} catch (...) {
+			continue;
+		}
+		if (!it.value().is_string()) {
+			continue;
+		}
+		std::string err;
+		if (ApplyGlobalDevice(ch, it.value().get<std::string>(), err)) {
+			++restored;
+		} else {
+			HostLog("[bridge] global audio: restore ch" + std::to_string(ch) + " failed: " + err);
+		}
+	}
+	HostLog("[bridge] global audio: restored " + std::to_string(restored) + " channel(s) from audio_devices.json");
+}
+
+bool MethodAudioListDevices(const json &params, json &result, std::string & /*error*/)
+{
+	const std::string kind = OptString(params, "kind");
+	const bool input = kind == "input"; // default "output"
+	json arr = json::array();
+	for (const auto &dev : EnumAudioDevices(input)) {
+		arr.push_back(json{{"id", dev.first}, {"name", dev.second}});
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodAudioGetGlobalDevices(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (const GlobalAudioSlot &slot : kGlobalAudioSlots) {
+		OBSSourceAutoRelease cur = obs_get_output_source(slot.channel); // addref'd; may be null
+		json deviceId = nullptr;
+		if (cur) {
+			OBSDataAutoRelease settings = obs_source_get_settings(cur);
+			const char *id = settings ? obs_data_get_string(settings, "device_id") : nullptr;
+			deviceId = id ? json(std::string(id)) : json(std::string());
+		}
+		arr.push_back(json{
+			{"channel", slot.channel},
+			{"role", slot.role},
+			{"label", slot.label},
+			{"isInput", slot.input},
+			{"deviceId", deviceId},
+			{"active", !deviceId.is_null()},
+		});
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodAudioSetGlobalDevice(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object() || !params.contains("channel") || !params["channel"].is_number_integer()) {
+		error = "audio.setGlobalDevice requires an integer 'channel'";
+		return false;
+	}
+	const int channel = params["channel"].get<int>();
+
+	// null/absent/"" all mean disable.
+	std::string deviceId;
+	auto it = params.find("deviceId");
+	if (it != params.end() && it->is_string()) {
+		deviceId = it->get<std::string>();
+	}
+
+	if (!ApplyGlobalDevice(channel, deviceId, error)) {
+		return false;
+	}
+	PersistGlobalAudio();
+	ObsBootstrap::AudioMonitor().Rebuild();
+	EmitEvent("audio.changed", json::object());
+
+	result = json{{"channel", channel}, {"deviceId", deviceId.empty() ? json(nullptr) : json(deviceId)}};
+	return true;
+}
+
 // Post the actual ExecuteJavaScript on TID_UI, broadcasting to every registered
 // browser. Built from JSON dumps so the name and payload are correctly
 // quoted/escaped. With a single registered browser this is identical to a
@@ -2776,6 +3043,9 @@ void Init()
 		{"audio.list", MethodAudioList},
 		{"audio.setDeflection", MethodAudioSetDeflection},
 		{"audio.setMuted", MethodAudioSetMuted},
+		{"audio.listDevices", MethodAudioListDevices},
+		{"audio.getGlobalDevices", MethodAudioGetGlobalDevices},
+		{"audio.setGlobalDevice", MethodAudioSetGlobalDevice},
 		{"theme.save", MethodThemeSave},
 		{"theme.load", MethodThemeLoad},
 		{"layout.save", MethodLayoutSave},
@@ -2793,6 +3063,19 @@ void Shutdown()
 {
 	obs_frontend_remove_event_callback(OnFrontendEvent, nullptr);
 	g_methods.clear();
+}
+
+void SeedGlobalAudio()
+{
+	SeedOrRestoreGlobalAudio();
+}
+
+void ClearGlobalAudio()
+{
+	// Drop each global channel's ref so the wasapi sources die before obs_shutdown.
+	for (const GlobalAudioSlot &slot : kGlobalAudioSlots) {
+		obs_set_output_source(slot.channel, nullptr);
+	}
 }
 
 void AddBrowser(CefRefPtr<CefBrowser> browser)
