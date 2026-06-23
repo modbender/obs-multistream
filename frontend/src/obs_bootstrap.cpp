@@ -28,6 +28,7 @@
 #include "multistream/StreamProfileStore.hpp"
 #include "paths.hpp"
 #include "preview_window.hpp"
+#include "scene_persistence.hpp"
 
 namespace {
 
@@ -429,7 +430,12 @@ bool ObsBootstrap::Start()
 
 	RunProbes();
 
-	CreateDefaultScene();
+	// Restore the saved global scene collection; first run (no file) falls back to
+	// the placeholder default scene. On the Load path g_scene stays null, which the
+	// null-safe TeardownScene handles.
+	if (!SceneCollection::Load()) {
+		CreateDefaultScene();
+	}
 
 	LoadMultistreamModel();
 
@@ -1715,6 +1721,23 @@ void ObsBootstrap::Stop()
 		g_canvasRuntime.reset();
 		while (obs_wait_for_destroy_queue()) {
 		}
+	}
+
+	// Remove the loaded global scene collection while libobs is still up, mirroring
+	// the legacy ClearSceneData. On the Load() boot path TeardownScene early-returns
+	// (g_scene is null), so the restored main-canvas scenes + their input sources
+	// would otherwise survive to obs_shutdown -- which force-frees them, growing the
+	// leak count and tripping a double-destroy. Unbind channel 0, remove every
+	// remaining scene and source, then drain the destruction queue so the frees land
+	// here. No-op-safe when nothing is loaded (default-scene path already cleared).
+	obs_set_output_source(0, nullptr);
+	auto removeCb = [](void *, obs_source_t *source) -> bool {
+		obs_source_remove(source);
+		return true;
+	};
+	obs_enum_scenes(removeCb, nullptr);
+	obs_enum_sources(removeCb, nullptr);
+	while (obs_wait_for_destroy_queue()) {
 	}
 
 	// Release the multistream model's obs_data while libobs is still up, so the

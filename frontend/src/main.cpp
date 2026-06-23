@@ -15,6 +15,7 @@
 #include "log.hpp"
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
+#include "scene_persistence.hpp"
 #include "scheme.hpp"
 #include "window_manager.hpp"
 
@@ -301,6 +302,11 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 		g_preview->DestroyAll();
 		g_preview.reset();
 	}
+
+	// Capture the latest global scene collection on a clean exit, while channel 0
+	// and every scene source are still bound -- TeardownScene below unbinds and
+	// removes the placeholder default scene, so this must run first.
+	SceneCollection::Save();
 
 	// Release the test scene + browser source, then pump CEF so the source's
 	// posted `delete this` / CloseBrowser tasks drain (the run-loop has already

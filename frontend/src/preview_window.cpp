@@ -8,6 +8,7 @@
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
 #include "obs_bootstrap.hpp"
+#include "scene_persistence.hpp"
 
 #include <CanvasDefinition.hpp>
 
@@ -84,6 +85,7 @@ struct PreviewTransform {
 enum class DragMode { None, Move, Resize };
 struct DragState {
 	DragMode mode = DragMode::None;
+	bool moved = false; // true once a drag applied a real transform (gates the save)
 	int64_t id = -1;
 	vec2 startCanvasPos = {}; // mouse canvas pos at mousedown
 	vec2 startItemPos = {};   // item pos at mousedown (move)
@@ -386,6 +388,7 @@ void BeginResize(DragState &drag, obs_sceneitem_t *item, ItemHandle handle, cons
 	vec3 itemUL;
 
 	drag.mode = DragMode::Resize;
+	drag.moved = false;
 	drag.id = obs_sceneitem_get_id(item);
 	drag.handle = handle;
 	drag.startCanvasPos = startCanvasPos;
@@ -877,6 +880,7 @@ void PreviewSurface::OnLeftDown(int mx, int my)
 			state_->selectedId = hitId;
 		}
 		state_->drag.mode = DragMode::Move;
+		state_->drag.moved = false;
 		state_->drag.id = hitId;
 		state_->drag.startCanvasPos = canvasPos;
 		if (item) {
@@ -914,6 +918,7 @@ void PreviewSurface::OnMouseMove(int mx, int my)
 
 	obs_sceneitem_t *item = FindItemById(scene, state_->drag.id);
 	if (item && !obs_sceneitem_locked(item)) {
+		state_->drag.moved = true;
 		if (state_->drag.mode == DragMode::Move) {
 			vec2 newPos;
 			newPos.x = std::round(state_->drag.startItemPos.x +
@@ -931,11 +936,22 @@ void PreviewSurface::OnMouseMove(int mx, int my)
 void PreviewSurface::OnLeftUp()
 {
 	ReleaseCapture();
-	if (state_->drag.mode != DragMode::None) {
+	const bool dragged = state_->drag.mode != DragMode::None;
+	const bool moved = state_->drag.moved;
+	if (dragged) {
 		HostLog("[preview] drag end id=" + std::to_string(state_->drag.id));
 	}
 	state_->drag.mode = DragMode::None;
 	state_->drag.handle = ItemHandle::None;
+	state_->drag.moved = false;
+
+	// A move/resize on the Default surface mutates the global scene's layout;
+	// persist it once at drag-end (never per-mousemove, and only when the drag
+	// actually changed geometry — a bare select-click moves nothing). Additional-
+	// canvas surfaces are persisted per-canvas later.
+	if (moved && targetCanvas_ == nullptr) {
+		SceneCollection::Save();
+	}
 }
 
 void PreviewSurface::OnRightUp(int mx, int my)

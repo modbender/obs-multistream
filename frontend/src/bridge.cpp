@@ -20,6 +20,7 @@
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "properties_serializer.hpp"
+#include "scene_persistence.hpp"
 #include "window_manager.hpp"
 
 #include "multistream/CanvasRuntime.hpp"
@@ -737,6 +738,7 @@ bool MethodScenesCreate(const json &params, json &result, std::string &error)
 	obs_scene_release(scene); // creation ref; the scene source persists in the registry
 
 	EmitScenesChanged(std::string());
+	SceneCollection::Save();
 	result = json{{"name", name}};
 	return true;
 }
@@ -822,6 +824,7 @@ bool MethodScenesRemove(const json &params, json &result, std::string &error)
 	}
 
 	EmitScenesChanged(std::string());
+	SceneCollection::Save();
 	result = json{{"removed", name}};
 	return true;
 }
@@ -858,6 +861,7 @@ bool MethodScenesSetCurrent(const json &params, json &result, std::string &error
 	obs_source_release(source);
 
 	EmitScenesChanged(std::string());
+	SceneCollection::Save();
 	result = json{{"name", name}};
 	return true;
 }
@@ -906,6 +910,7 @@ bool MethodScenesRename(const json &params, json &result, std::string &error)
 	obs_source_release(source);
 
 	EmitScenesChanged(std::string());
+	SceneCollection::Save();
 	result = json{{"name", to}};
 	return true;
 }
@@ -957,6 +962,7 @@ bool MethodScenesDuplicate(const json &params, json &result, std::string &error)
 	obs_scene_release(dup); // the new scene source persists in the registry
 
 	EmitScenesChanged(std::string());
+	SceneCollection::Save();
 	result = json{{"name", newName}};
 	return true;
 }
@@ -1062,6 +1068,9 @@ bool MethodSceneItemsSetVisible(const json &params, json &result, std::string &e
 	obs_sceneitem_set_visible(item, visible);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", id}, {"visible", visible}};
 	return true;
 }
@@ -1088,6 +1097,9 @@ bool MethodSceneItemsSetLocked(const json &params, json &result, std::string &er
 	obs_sceneitem_set_locked(item, locked);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", id}, {"locked", locked}};
 	return true;
 }
@@ -1113,6 +1125,9 @@ bool MethodSceneItemsRemove(const json &params, json &result, std::string &error
 	obs_sceneitem_remove(item);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"removed", id}};
 	return true;
 }
@@ -1162,6 +1177,9 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 	obs_sceneitem_set_order(item, *movement);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", id}, {"direction", direction}};
 	return true;
 }
@@ -1253,6 +1271,9 @@ bool MethodSourcesCreate(const json &params, json &result, std::string &error)
 		error = "obs_scene_add failed";
 		return false;
 	}
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", itemId}, {"source", name}};
 	return true;
 }
@@ -1335,6 +1356,9 @@ bool MethodSourcesAddExisting(const json &params, json &result, std::string &err
 		error = "obs_scene_add failed";
 		return false;
 	}
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", itemId}, {"source", name}};
 	return true;
 }
@@ -1386,6 +1410,9 @@ bool MethodSourcesRename(const json &params, json &result, std::string &error)
 	obs_source_set_name(src, name.c_str());
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
 	result = json{{"id", id}, {"source", name}};
 	return true;
 }
@@ -1694,6 +1721,12 @@ bool MethodPropertiesSet(const json &params, json &result, std::string &error)
 		if (settings) {
 			kind->update(obj, settings);
 			obs_data_release(settings);
+			// Persist source-setting edits to the global collection (encoder/service
+			// kinds persist their own stores in their update closures). Skip the
+			// additional-canvas path -- those are persisted per-canvas later.
+			if (std::string(kind->name) == "source" && !ResolveCanvasTarget(params).isAdditional) {
+				SceneCollection::Save();
+			}
 		}
 	}
 

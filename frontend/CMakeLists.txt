@@ -68,6 +68,8 @@ target_sources(
     src/window_manager.hpp
     src/audio/AudioMonitor.cpp
     src/audio/AudioMonitor.hpp
+    src/scene_persistence.cpp
+    src/scene_persistence.hpp
     src/log.hpp
     api-impl/frontend_callbacks.cpp
     api-impl/frontend_callbacks.hpp
@@ -133,6 +135,7 @@ set_source_files_properties(
   src/properties_serializer.cpp
   src/preview_window.cpp
   src/audio/AudioMonitor.cpp
+  src/scene_persistence.cpp
   api-impl/frontend_callbacks.cpp
   "${CMAKE_SOURCE_DIR}/frontend_old/utility/CanvasDefinition.cpp"
   "${CMAKE_SOURCE_DIR}/frontend_old/utility/OBSCanvas.cpp"
