@@ -283,7 +283,13 @@ main program canvas in several places.
 
 ---
 
-## Phase 4 — Frontend rewrite: CEF-hosted Svelte UI 💭 IN DESIGN
+## Phase 4 — Frontend rewrite: CEF-hosted Svelte UI 🔧 MVP SHIPPED + CUTOVER
+
+The new Svelte/CEF frontend is the default build (`USE_LEGACY_FRONTEND=OFF` at
+cutover); it boots, previews, edits, and multistreams. Core parity + the UI
+redesign + theme editor + global audio are done. The big remaining gaps are
+**scene/source persistence**, **source filters**, and **transitions / studio
+mode / stats** — see "Remaining work" at the end of this phase.
 
 Replace the Qt Widgets desktop frontend with a web UI (**Svelte**) hosted in
 **CEF as the whole application shell**. libobs and the fork's native-multistream
@@ -375,40 +381,98 @@ at cutover (4.6). A CMake flag (e.g. `USE_LEGACY_FRONTEND`, default ON until the
 new frontend reaches MVP) keeps `frontend_old` buildable through the transition
 so a working app is always available; only one frontend ever builds at a time.
 
-**Build progress (sub-projects):** 4.0 CEF-host spike ✅ GO · 4.0b headless
-frontend-api spike ✅ GO · **4.1 (shell + bridge + frontend-api layer) ✅ COMPLETE
-2026-06-21** — all 6 milestones built, verified, pushed: migration scaffold
-(`frontend`→`frontend_old`, `USE_LEGACY_FRONTEND` flag); CEF UI exe serving an
-offline `app://` bundle; single-`CefInitialize` obs-browser coexistence (obs-browser
-forked to `modbender/obs-browser` with an env-gated CEF-deferral patch); full
-20-plugin curated load via a non-Qt `obs_frontend_callbacks` shim; a typed JS↔C++
-bridge (`window.obs.call`/`.on`) with event push; and a Svelte 5 + Vite + TS shell
-(bun-built, offline). Next: **4.2** preview embedding (UI-positioned native
-`obs_display` overlay) → **4.3** core UI parity + generic `obs_properties` renderer →
-**4.4** multistream UI → **4.5** new features (3b Studio Mode, 3e Stats) → **4.6**
-cutover (flip default, retire `frontend_old`).
+### Build progress — DONE ✅
 
-**Deferred within Phase 4 (required later — roadmap as found):**
+Spikes + the full build pipeline + UI redesign + post-redesign features, all
+build-green, headless-smoke clean (leaks 2 baseline), and pushed.
 
-- 🔭 **Cross-platform preview** — the spike and initial build are **Windows-only**
-  (HWND + D3D11 passthrough). macOS (NSView + IOSurface) and Linux (X11/GL)
-  preview embedding come later as their own efforts.
-- ✅ **Headless `obs-frontend-api` shim** (surfaced by the 4.0 spike) — viability
-  proven by spike 4.0b (2026-06-21, GO; see above). 4.1 builds the real non-Qt
-  `OBSStudioAPI` equivalent (~10–15 live callback bodies + typed-zero stubs) and a
-  curated module allowlist that excludes the Qt-coupled plugins (`obs-websocket`
-  pending offscreen-QApplication or native reimpl).
-- ✅ **Visual confirmation of the spike (2026-06-21, windows-mcp)** — the bridge
-  result (`32.1.0-…`) renders in the browser pane, and a temporary green
-  `color_source` rendered on screen in the preview pane, proving the `obs_display`
-  → child-HWND present path visually. (`monitor_capture` showed black only because
-  the captured monitor was playing hardware-overlay/DRM video — a source artifact,
-  not a display-path bug.) All four spike gates now confirmed.
-- 🔭 **4.1 integration deltas** — obs-browser's bundled CEF fork (vs the standalone
-  Spotify CEF used in the spike): sandbox/bootstrap mode, `/MD` vs its flags,
-  message-router surface; and a custom `app://` scheme to serve the Svelte bundle
-  (replacing the spike's `file://` harness).
-- 🔭 Further deferred items discovered during Phase 4 get appended here.
+- ✅ **4.0 / 4.0b spikes** (GO) — CEF-as-shell + libobs-in-process proven; headless
+  non-Qt `obs_frontend_callbacks` shim proven (curated module load; `obs-websocket`
+  + other Qt-coupled plugins denylisted pending offscreen-QApplication).
+- ✅ **4.1 — shell + bridge + frontend-api layer** — migration scaffold
+  (`frontend`→`frontend_old`, `USE_LEGACY_FRONTEND` flag); CEF UI exe serving an
+  offline `app://` bundle; single-`CefInitialize` obs-browser coexistence
+  (`modbender/obs-browser` fork, env-gated CEF-deferral patch); 20-plugin curated
+  load via the non-Qt shim; typed JS↔C++ bridge (`window.obs.call`/`.on` + event
+  push); Svelte 5 + Vite + TS shell (bun-built, offline).
+- ✅ **4.2 — preview embedding** — UI-positioned native `obs_display` child-HWND
+  overlay z-ordered above CEF, per-canvas surfaces keyed `(windowId, canvasUuid)`,
+  letterbox + drag/select/stretch/crop editing, multi-surface isolation.
+- ✅ **4.3 — core parity + properties** — Scenes / Sources / Preview docks on the
+  global channel-0 path; generic `obs_properties` renderer (most types); Add-Source
+  type picker; source defaults fixed (descriptor-built, default-aware values).
+- ✅ **4.4 — multistream UI** — per-canvas composite `CanvasDock` (preview + scenes
+  + sources, output-gated reconciler), Multistream dock (per-output status, toggles),
+  Settings tabs Canvas / Streams / Outputs over the existing native engine.
+- ✅ **UI redesign (locked design spec, mocks-as-acceptance) P1–P5** —
+  P1 shell + token theming (4 axes, 0-radius); P2 core docks on Dockview; P3 canvas
+  composites + reconciler + floating tear-out (host-driven detach/redock, per-window
+  preview surfaces); P4 Audio Mixer (faders + live dB meters); **P5 cutover**
+  (`USE_LEGACY_FRONTEND=OFF`). Layout + theme persisted (`layout.json`/`theme.json`).
+- ✅ **Post-redesign features** —
+  right-click context menus on scene/source/canvas rows (+ `sources.rename`,
+  `scenes.duplicate`); right-click in the native preview overlay (`WM_RBUTTONUP` →
+  `preview.contextMenu` → DOM menu over a suspended overlay); theme editor (edit
+  every token + custom-theme save/delete, live + persisted, opaque JSON blob);
+  **global audio device management** (seed Desktop Audio + Mic on first run, persisted
+  to `audio_devices.json`, Settings → Audio device pickers — fixes the empty mixer,
+  verified against a real device).
+
+### Remaining work 🔭 (priority order)
+
+**High — core usability gaps:**
+
+- 🔭 **Scene / source persistence (scene collections).** The biggest gap: the app
+  rebuilds a fresh "Default Scene" + placeholder color source **every boot** (no
+  `obs_save_sources`/`obs_load_sources`), so anything the user adds disappears on
+  restart. Needs a scene-collection save/load layer (sources, scenes, scene-items,
+  per-canvas scenes + bindings, current scene). Global audio + multistream config
+  already persist on their own JSON; scenes/sources do not.
+- 🔭 **Source filters.** Zero support — no filter bridge, no Filters dialog at all.
+  Chroma key, color correction, LUT, scaling, noise gate/suppression, etc. are
+  unreachable. Needs a filter bridge (list/add/remove/reorder + per-filter
+  `obs_properties`) and a Filters UI.
+- 🔭 **Scene transitions.** The Transitions dock is a placeholder ("Fade"); no
+  transition bridge; scene switches are hard cuts. Add transition list/select/duration
+  + apply on scene switch. (was 3b precursor)
+- 🔭 **Studio Mode (3b).** Preview/program staging + transitions, per canvas. Menu
+  item disabled. Depends on transitions. The hardest item.
+- 🔭 **Stats dock (3e).** Multistream per-output monitoring (bitrate / dropped frames
+  / reconnects / CPU-GPU, grouped by canvas) reading `MultistreamEngine`'s per-output
+  handles. Menu item disabled. Needs a design pass.
+
+**Medium — parity gaps:**
+
+- 🔭 **File-dialog / Browse** — `PathControl`'s Browse button is a no-op; file-based
+  sources (media, image, …) need paths typed by hand. Needs a native file-dialog
+  bridge method.
+- 🔭 **Unsupported property types** — `font`, `editable_list`, `frame_rate` render
+  "Editing not yet supported" in the properties renderer.
+- 🔭 **Undo / Redo** and **Edit → Transform** (numeric transform / reset / fit /
+  center) — menu items present but disabled.
+- 🔭 **Recording / Replay buffer** — dormant by design since Phase 1 (RECORD button
+  + no bridge). Decision owed: do we want recording in the multistream app at all?
+
+**Low / likely out of scope (confirm):**
+
+- 🔭 Projectors / Multiview / fullscreen projector; Hotkeys settings; About dialog;
+  Fullscreen Preview; Recordings list.
+- 🔭 **obs-websocket** — excluded (Qt-coupled, hard-crashes headless). Needs an
+  offscreen-`QApplication` stood up before load, or a native reimplementation, if
+  remote control is wanted.
+
+**Cleanup / infra:**
+
+- 🔭 **`frontend_old` retirement** — the new build still references `frontend_old/api`
+  + the utility model `.cpp`s (`CanvasDefinition`/`OBSCanvas`/`CanvasSceneLink`/
+  `OutputBinding`/`StreamProfile`, see `frontend/CMakeLists.txt`) + the cpack license.
+  Relocate those into `frontend/`, then delete the old Qt tree.
+- 🔭 **Cross-platform preview** — Windows-only today (HWND + D3D11). macOS
+  (NSView + IOSurface) and Linux (X11/GL) embedding are later efforts.
+- 🔧 **Live broadcast test** (owed since Phase 2) + **GUI acceptance** of the recent
+  menu / theme / preview / audio work (none driveable headlessly).
+- ⏸ Minor: `SettingsModal.load()` routes device-fetch errors to the `videoError`
+  label (cosmetic).
 
 ---
 
@@ -427,5 +491,6 @@ cutover (flip default, retire `frontend_old`).
 - ✅ **Canvas-editor input clamping** — FPS num/den (`setRange(1, …)`), SDR white
   level (`setRange(80, 480)`), and the `WxH` parse (`cx > 0 && cy > 0`) already
   floor every numeric input above 0 through the dialog; no separate guard needed.
-- 🔭 **Finish the `canvas-foundation` branch** — merge/PR/cleanup once the open
-  items above are resolved.
+- ✅ **`canvas-foundation` branch** — Phases 1–3 merged to `master` (fast-forward) +
+  pushed to origin 2026-06-21. Phase 4 (frontend rewrite) continues on the
+  `frontend-rewrite` branch (off `master`).
