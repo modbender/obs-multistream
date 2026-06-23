@@ -45,7 +45,8 @@
   // Reflect preview-driven selection (click in the overlay) back into the list.
   $effect(() => {
     return obs.on("sceneItem.selected", (p) => {
-      if (!p.scene || p.scene === currentScene) {
+      // Global channel-0 path: only the Default surface (canvas=null) drives this.
+      if (p.canvas == null && (!p.scene || p.scene === currentScene)) {
         selectedItemId = p.id;
       }
     });

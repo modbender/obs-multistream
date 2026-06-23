@@ -50,6 +50,7 @@
   // ---- scenes (this canvas's own scene list) ---------------------------------
   let scenes = $state<SceneInfo[]>([]);
   let currentScene = $state<string | null>(null);
+  let loaded = $state(false);
 
   async function loadScenes() {
     try {
@@ -59,6 +60,8 @@
       error = null;
     } catch (e) {
       report(e);
+    } finally {
+      loaded = true;
     }
   }
   function setCurrentScene(name: string) {
@@ -185,7 +188,7 @@
       }
     });
     const offSel = obs.on("sceneItem.selected", (p) => {
-      if (!p.scene || p.scene === currentScene) {
+      if (p.canvas === canvasUuid && (!p.scene || p.scene === currentScene)) {
         selectedId = p.id;
       }
     });
@@ -237,7 +240,7 @@
             <button class="label" onclick={() => setCurrentScene(scene.name)}>{scene.name}</button>
           </li>
         {/each}
-        {#if scenes.length === 0}
+        {#if loaded && scenes.length === 0}
           <li class="row dim">No scenes</li>
         {/if}
       </ul>

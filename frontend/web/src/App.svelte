@@ -4,7 +4,8 @@
   import DockHost from "./lib/dock/DockHost.svelte";
   import { DOCKS, panelOptions } from "./lib/dock/dockRegistry";
   import { layoutStore } from "./lib/dock/layoutStore.svelte";
-  import { startCanvasDockReconciler } from "./lib/dock/canvasReconciler";
+  import { startCanvasDockReconciler, reconcileCanvasDocks } from "./lib/dock/canvasReconciler";
+  import { onDestroy } from "svelte";
   import { themeStore } from "./lib/theme/themeStore.svelte";
   import SettingsModal from "./lib/SettingsModal.svelte";
   import { settingsOpener, closeSettings } from "./lib/settingsOpener.svelte";
@@ -14,6 +15,9 @@
   let api = $state<DockviewApi | undefined>(undefined);
   let visibleDocks = $state<Record<string, boolean>>({});
   let locked = $state(false);
+  let stopReconciler: (() => void) | undefined;
+
+  onDestroy(() => stopReconciler?.());
 
   // Apply the saved (or default Industrial) theme before first paint settles.
   void themeStore.hydrate();
@@ -99,7 +103,7 @@
       buildDefaultLayout(dv);
     }
     // Output-gated per-canvas composite docks (added/removed as canvases enable).
-    startCanvasDockReconciler(dv, detachDock);
+    stopReconciler = startCanvasDockReconciler(dv, detachDock);
   }
 
   function toggleDock(id: string): void {
@@ -114,7 +118,11 @@
   }
 
   function resetLayout(): void {
-    if (api) buildDefaultLayout(api);
+    if (!api) return;
+    buildDefaultLayout(api);
+    // buildDefaultLayout clears the dynamic canvas docks; re-assert them (the
+    // reconciler's event subscriptions stay live but only fire on canvas changes).
+    void reconcileCanvasDocks(api, detachDock);
   }
 
   // Dockview 6.6.1 has no `locked` api setter; disabling drag-and-drop via

@@ -645,9 +645,19 @@ void EmitSelection(obs_canvas_t *targetCanvas, int64_t id)
 		}
 	}
 	using Bridge::json;
+	// The addressed canvas uuid, or null for the Default surface (global path), so a
+	// per-canvas dock filters selection to its own canvas (scene names collide).
+	json canvasField = json(nullptr);
+	if (targetCanvas) {
+		const char *uuid = obs_canvas_get_uuid(targetCanvas);
+		if (uuid) {
+			canvasField = json(std::string(uuid));
+		}
+	}
 	json payload = json{
 		{"scene", id >= 0 && !sceneName.empty() ? json(sceneName) : json(nullptr)},
 		{"id", id >= 0 ? json(id) : json(nullptr)},
+		{"canvas", canvasField},
 	};
 	Bridge::EmitEvent("sceneItem.selected", payload);
 }

@@ -430,7 +430,10 @@ export interface ObsEvents {
   // a per-canvas panel filters to its own canvas before reacting (4.4.5b).
   "scenes.changed": { canvas: string | null };
   "sceneItems.changed": { scene: string | null; canvas: string | null };
-  "sceneItem.selected": { scene: string | null; id: number | null };
+  // `canvas` = the addressed canvas uuid, or null for the Default surface (global
+  // channel-0 path); a per-canvas dock filters to its own canvas (scene names
+  // collide across canvases).
+  "sceneItem.selected": { scene: string | null; id: number | null; canvas: string | null };
   "settings.videoChanged": VideoSettings;
   "settings.audioChanged": AudioSettings;
   "canvas.changed": Record<string, never>;
