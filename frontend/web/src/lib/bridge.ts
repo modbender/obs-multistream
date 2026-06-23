@@ -372,6 +372,21 @@ export interface GlobalAudioSlot {
   active: boolean;
 }
 
+// --- transitions (scene transition type + duration) -------------------------
+
+/** A registered transition type as reported by transitionTypes.list. */
+export interface TransitionType {
+  id: string;
+  name: string;
+}
+
+/** The active transition (type + duration) as reported by transitions.getCurrent. */
+export interface TransitionState {
+  id: string;
+  name: string;
+  durationMs: number;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -472,6 +487,13 @@ export interface ObsMethods {
   "audio.listDevices": AudioDevice[];
   "audio.getGlobalDevices": GlobalAudioSlot[];
   "audio.setGlobalDevice": { channel: number; deviceId: string | null };
+  // Scene transitions. transitionTypes.list enumerates the registered transition
+  // types; getCurrent returns the active type + duration. setCurrent/setDuration
+  // mutate and echo the applied value; both also emit transitions.changed.
+  "transitionTypes.list": TransitionType[];
+  "transitions.getCurrent": TransitionState;
+  "transitions.setCurrent": { id: string; name: string };
+  "transitions.setDuration": { durationMs: number };
   // Shell persistence (P1). theme.* stores an opaque JSON blob the JS theme store
   // stringifies/parses into its own schema (active id + live tokens + custom
   // themes); layout.* stores the serialized Dockview state (a JSON string). load
@@ -528,6 +550,9 @@ export interface ObsEvents {
   // The active audio source set changed (source activated/deactivated); the UI
   // re-runs audio.list to rebuild its rows.
   "audio.changed": Record<string, never>;
+  // The active transition type and/or its duration changed; the UI re-runs
+  // transitions.getCurrent to refresh its dropdown + duration field.
+  "transitions.changed": Record<string, never>;
   // Floating dock tear-out (P3a). Broadcast to ALL browsers (main + detached).
   // opened fires after a detached window's browser exists; closed fires on
   // explicit redock AND on user OS-close (NOT during app shutdown).
