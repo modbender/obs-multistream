@@ -64,6 +64,8 @@ target_sources(
     src/obs_bootstrap.hpp
     src/preview_window.cpp
     src/preview_window.hpp
+    src/window_manager.cpp
+    src/window_manager.hpp
     src/audio/AudioMonitor.cpp
     src/audio/AudioMonitor.hpp
     src/log.hpp

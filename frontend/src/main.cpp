@@ -16,6 +16,7 @@
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "scheme.hpp"
+#include "window_manager.hpp"
 
 namespace {
 
@@ -32,6 +33,11 @@ CefRefPtr<CefBrowser> g_browser;
 // HWND). Created after ObsBootstrap::Start() succeeds; all surfaces destroyed
 // before ObsBootstrap::Stop() (which frees the canvas mixes those displays render).
 std::unique_ptr<PreviewManager> g_preview;
+
+// Creates + tracks detached top-level windows torn off the main shell. Each owns
+// its own child browser sharing the process-wide Client, so all browsers drain
+// from one browser_list_ at quit. Stood up after the main browser exists.
+std::unique_ptr<WindowManager> g_windows;
 
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
@@ -106,6 +112,15 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			PostMessageW(hwnd, WM_CLOSE, 0, 0);
 		}
 		return 0;
+	case WM_CLOSE:
+		// Close every detached window first so the shared browser_list_ can drain
+		// to empty -- a live detached browser would otherwise keep
+		// CefRunMessageLoop alive after the main window closes (the N-browsers quit
+		// guard). Their WM_CLOSE posts are processed before the loop drains.
+		if (g_windows) {
+			g_windows->CloseAll();
+		}
+		break;
 	case WM_DESTROY:
 		// Closing the host destroys its child browser window, which drives
 		// Client::OnBeforeClose -> CefQuitMessageLoop.
@@ -256,12 +271,25 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 
 	LayoutBrowser(host);
 
+	// Stand up the detached-window manager. Detached child browsers reuse the shared
+	// Client (Client::Shared) so they join the same browser_list_ + emit registry.
+	g_windows = std::make_unique<WindowManager>(hInstance, "app://app/index.html");
+	WindowManager::SetInstance(g_windows.get());
+
 	CefRunMessageLoop();
 
 	g_browser = nullptr;
 
 	// Drop the process-wide shared Client ref so it doesn't outlive teardown.
 	Client::SetShared(nullptr);
+
+	// Tear down every detached window's surfaces + browser BEFORE g_preview->DestroyAll()
+	// and ObsBootstrap::Stop() free the canvas mixes those surfaces render (UAF discipline).
+	if (g_windows) {
+		WindowManager::SetInstance(nullptr);
+		g_windows->DestroyAll();
+		g_windows.reset();
+	}
 
 	// Destroy every preview surface's obs_display + overlay HWND while libobs is
 	// still up. This must precede ObsBootstrap::Stop(): an additional canvas's
