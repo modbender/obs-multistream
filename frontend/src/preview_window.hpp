@@ -37,7 +37,9 @@ public:
 	// the canvas mix this surface renders+edits, or null for the Default surface
 	// (global mix + output channel 0). The canvas pointer is borrowed (owned by
 	// CanvasRuntime); the surface's display must be destroyed before that mix.
-	PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas);
+	// windowId: the owning window id (0 = main), carried in preview.contextMenu so
+	// JS filters the broadcast to the originating window.
+	PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas, int windowId);
 	~PreviewSurface();
 
 	PreviewSurface(const PreviewSurface &) = delete;
@@ -85,6 +87,10 @@ public:
 	void OnLeftUp();
 	void CancelDrag();
 
+	// Right-button-up: hit-test + select the item under the cursor (or clear), then
+	// emit preview.contextMenu so JS can open a DOM context menu. UI thread.
+	void OnRightUp(int mx, int my);
+
 	// Per-surface impl state (selection + letterbox transform shared with the
 	// render thread, drag state, box buffer). Defined in the .cpp so this header
 	// stays free of libobs + graphics types; declared here only so the .cpp's
@@ -99,6 +105,7 @@ private:
 	HWND host_;
 	HINSTANCE instance_;
 	obs_canvas_t *targetCanvas_; // null = Default surface (global mix, output 0)
+	int windowId_ = 0;           // owning window id (0 = main); carried in preview.contextMenu
 	HWND hwnd_ = nullptr;        // overlay child HWND; null until first SetRect
 	void *display_ = nullptr;    // obs_display_t* (opaque here)
 };

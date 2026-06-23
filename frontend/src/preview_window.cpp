@@ -662,6 +662,61 @@ void EmitSelection(obs_canvas_t *targetCanvas, int64_t id)
 	Bridge::EmitEvent("sceneItem.selected", payload);
 }
 
+// Emit preview.contextMenu for a right-click at device-px (mx,my) in the overlay
+// client. Carries the hit item's id/source/visible/locked (null id => empty area)
+// plus the surface's scene name, addressed canvas uuid (null for Default), and the
+// originating windowId, so JS filters to the right window+canvas and builds the
+// menu without a round-trip. Posts via EmitEvent (broadcast to all browsers).
+void EmitContextMenu(obs_canvas_t *targetCanvas, int windowId, obs_scene_t *scene, int64_t id, int mx, int my)
+{
+	using Bridge::json;
+	json canvasField = json(nullptr);
+	if (targetCanvas) {
+		const char *uuid = obs_canvas_get_uuid(targetCanvas);
+		if (uuid) {
+			canvasField = json(std::string(uuid));
+		}
+	}
+
+	std::string sceneName;
+	if (scene) {
+		obs_source_t *ss = obs_scene_get_source(scene); // borrowed
+		const char *n = ss ? obs_source_get_name(ss) : nullptr;
+		if (n) {
+			sceneName = n;
+		}
+	}
+
+	json sourceField = json(nullptr);
+	bool visible = false;
+	bool locked = false;
+	if (id >= 0 && scene) {
+		obs_sceneitem_t *item = FindItemById(scene, id); // borrowed
+		if (item) {
+			obs_source_t *src = obs_sceneitem_get_source(item); // borrowed
+			const char *sn = src ? obs_source_get_name(src) : nullptr;
+			if (sn) {
+				sourceField = json(std::string(sn));
+			}
+			visible = obs_sceneitem_visible(item);
+			locked = obs_sceneitem_locked(item);
+		}
+	}
+
+	json payload = json{
+		{"canvas", canvasField},
+		{"window", windowId},
+		{"x", mx},
+		{"y", my},
+		{"id", id >= 0 ? json(id) : json(nullptr)},
+		{"scene", sceneName.empty() ? json(nullptr) : json(sceneName)},
+		{"source", sourceField},
+		{"visible", visible},
+		{"locked", locked},
+	};
+	Bridge::EmitEvent("preview.contextMenu", payload);
+}
+
 // Draw callback: fired by libobs once per frame on the render thread. cx/cy are
 // the display (HWND) pixel size. Fit the surface's base canvas into it with
 // letterboxing so the composited scene keeps its aspect ratio, then overlay the
@@ -735,8 +790,8 @@ void RenderPreview(void *data, uint32_t cx, uint32_t cy)
 
 } // namespace
 
-PreviewSurface::PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas)
-	: state_(new State()), host_(host), instance_(instance), targetCanvas_(targetCanvas)
+PreviewSurface::PreviewSurface(HWND host, HINSTANCE instance, obs_canvas_t *targetCanvas, int windowId)
+	: state_(new State()), host_(host), instance_(instance), targetCanvas_(targetCanvas), windowId_(windowId)
 {
 	state_->targetCanvas = targetCanvas;
 }
@@ -881,6 +936,33 @@ void PreviewSurface::OnLeftUp()
 	}
 	state_->drag.mode = DragMode::None;
 	state_->drag.handle = ItemHandle::None;
+}
+
+void PreviewSurface::OnRightUp(int mx, int my)
+{
+	vec2 canvasPos;
+	if (!ClientToCanvas(state_, mx, my, canvasPos)) {
+		return;
+	}
+	obs_source_t *sceneSource = AcquireSurfaceSceneSource(targetCanvas_); // addref'd
+	if (!sceneSource) {
+		return;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	const int64_t hitId = HitTestItemId(scene, canvasPos);
+
+	// Right-click selects (or clears) the item under the cursor before the menu
+	// opens, matching OBS and keeping the selection box + dock lists in sync.
+	SelectOnly(scene, hitId);
+	{
+		std::lock_guard<std::mutex> lock(state_->stateMutex);
+		state_->selectedId = hitId;
+	}
+	state_->drag.mode = DragMode::None;
+	EmitSelection(targetCanvas_, hitId);
+	EmitContextMenu(targetCanvas_, windowId_, scene, hitId, mx, my);
+
+	obs_source_release(sceneSource);
 }
 
 void PreviewSurface::CancelDrag()
@@ -1074,6 +1156,9 @@ LRESULT CALLBACK PreviewWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 	case WM_LBUTTONUP:
 		surface->OnLeftUp();
 		return 0;
+	case WM_RBUTTONUP:
+		surface->OnRightUp(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+		return 0;
 	case WM_CAPTURECHANGED:
 		surface->CancelDrag();
 		return 0;
@@ -1165,7 +1250,7 @@ PreviewSurface *PreviewManager::SurfaceFor(int windowId, const std::string &canv
 	}
 
 	impl_->surfaces.push_back(
-		ManagedSurface{windowId, key, std::make_unique<PreviewSurface>(host, instance_, targetCanvas)});
+		ManagedSurface{windowId, key, std::make_unique<PreviewSurface>(host, instance_, targetCanvas, windowId)});
 	HostLog("[preview] surface created window=" + std::to_string(windowId) +
 		(key.empty() ? " canvas=Default" : " canvas=" + key));
 	return impl_->surfaces.back().surface.get();
