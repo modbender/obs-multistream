@@ -287,9 +287,9 @@ main program canvas in several places.
 
 The new Svelte/CEF frontend is the default build (`USE_LEGACY_FRONTEND=OFF` at
 cutover); it boots, previews, edits, and multistreams. Core parity + the UI
-redesign + theme editor + global audio are done. The big remaining gaps are
-**scene/source persistence**, **source filters**, and **transitions / studio
-mode / stats** — see "Remaining work" at the end of this phase.
+redesign + theme editor + global audio + scene/source persistence + source
+filters + scene transitions are done. The big remaining gaps are **studio mode**
+and **the stats dock** — see "Remaining work" at the end of this phase.
 
 Replace the Qt Widgets desktop frontend with a web UI (**Svelte**) hosted in
 **CEF as the whole application shell**. libobs and the fork's native-multistream
@@ -442,11 +442,23 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   automatically with their parent source via the scene collection. Dup default names
   auto-suffix. **Follow-up:** in-dialog live preview (the dialog suspends the overlay
   while open, so effects show in the main preview after closing, not live in-dialog).
-- 🔭 **Scene transitions.** The Transitions dock is a placeholder ("Fade"); no
-  transition bridge; scene switches are hard cuts. Add transition list/select/duration
-  + apply on scene switch. (was 3b precursor)
+- ✅ **Scene transitions — DONE 2026-06-24.** Channel 0 now holds an active
+  transition source (Fade by default, 300 ms) wrapping the current scene; a
+  `Transitions::GetProgramScene()`/`SetProgramScene()` seam unwraps it at every
+  channel-0 read/write (scenes.list current flag, preview surface, scene-save,
+  setCurrent → `obs_transition_start`, remove-fallback). Type + duration persist to
+  `transitions.json` (excluded from the scene collection, like global audio);
+  re-sized on `obs_reset_video`; duration clamped to 20 s. Bridge `transitionTypes.list`
+  + `transitions.getCurrent/setCurrent/setDuration`; real TransitionsDock (type
+  dropdown + duration ms). Default/global program path only; additional-canvas
+  switches stay direct (→ 3b). Holistic review = SHIP; build clean, smoke green
+  (unwrap returns the scene name not "Fade", leaks 2). **GUI-owed:** the visual fade
+  animation (headless-undriveable). **Follow-up:** transition-source properties
+  (Fade-to-Color / Luma Wipe / Stinger) use defaults — no properties UI yet;
+  per-canvas transitions (→ 3b).
 - 🔭 **Studio Mode (3b).** Preview/program staging + transitions, per canvas. Menu
-  item disabled. Depends on transitions. The hardest item.
+  item disabled. Transitions now exist for the global path; 3b extends them per
+  canvas + adds the preview/program split. The hardest item.
 - 🔭 **Stats dock (3e).** Multistream per-output monitoring (bitrate / dropped frames
   / reconnects / CPU-GPU, grouped by canvas) reading `MultistreamEngine`'s per-output
   handles. Menu item disabled. Needs a design pass.
