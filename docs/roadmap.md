@@ -481,12 +481,13 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   fit/stretch/flip; per-canvas base res; round-trip + center math runtime-verified in
   the boot self-test). Numeric Transform dialog reachable from the Sources/Canvas/
   Preview source context menus + the Edit→Transform menu item.
-- 🔭 **Undo / Redo** — still open; menu items disabled. **Not "medium": no undo
-  infrastructure exists** — it's a from-scratch cross-cutting subsystem (every mutation
-  needs paired undo/redo actions). Needs a dedicated effort, not a quick parity fix.
-- 🔭 **Recording / Replay buffer** — dormant by design since Phase 1 (RECORD button
-  + no bridge). **Decision owed (product, not code): do we want recording in the
-  multistream app at all?** Gates whether to build the bridge + UI.
+- ⏸ **Undo / Redo — DEFERRED (decided 2026-06-24).** No undo infrastructure exists;
+  it's a from-scratch cross-cutting subsystem (every mutation needs paired undo/redo
+  actions + an action stack), not a quick parity fix. Tackle as its own planned effort
+  later (after Studio Mode / Stats). Edit→Undo/Redo stay disabled until then.
+- ⏸ **Recording / Replay buffer — KEPT DORMANT (decided 2026-06-24).** The app stays
+  streaming-only; recording remains hidden/inert (no bridge). Revisit only if the need
+  arises.
 
 **Low / likely out of scope (confirm):**
 
