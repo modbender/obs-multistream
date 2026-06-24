@@ -12,6 +12,9 @@ import ListControl from "./ListControl.svelte";
 import ColorControl from "./ColorControl.svelte";
 import ButtonControl from "./ButtonControl.svelte";
 import GroupControl from "./GroupControl.svelte";
+import FontControl from "./FontControl.svelte";
+import EditableListControl from "./EditableListControl.svelte";
+import FrameRateControl from "./FrameRateControl.svelte";
 import UnsupportedControl from "./UnsupportedControl.svelte";
 
 // Props every control receives. `value` is the current value; `onChange` reports
@@ -41,6 +44,9 @@ export const controlRegistry: Record<string, AnyControl> = {
   color_alpha: ColorControl as AnyControl,
   button: ButtonControl as AnyControl,
   group: GroupControl as AnyControl,
+  font: FontControl as AnyControl,
+  editable_list: EditableListControl as AnyControl,
+  frame_rate: FrameRateControl as AnyControl,
 };
 
 export function controlFor(type: string): AnyControl {

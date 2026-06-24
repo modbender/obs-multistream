@@ -1,12 +1,21 @@
 <script lang="ts">
+  import { obs } from "../bridge";
   import type { ControlProps } from "./controls";
   import type { PathProperty } from "../bridge";
   let { prop, value, onChange }: ControlProps = $props();
 
   const p = $derived(prop as PathProperty);
   const str = $derived(value == null ? "" : String(value));
-  // OS file dialog is a later bridge method (4.3.x). For now this is an editable
-  // text input; the Browse affordance is a no-op placeholder until then.
+
+  async function browse() {
+    const mode = p.path_type === "directory" ? "directory" : p.path_type === "file_save" ? "save" : "open";
+    const { path } = await obs.call("dialog.openFile", {
+      mode,
+      filter: p.filter ?? undefined,
+      defaultPath: str || (p.default_path ?? undefined),
+    });
+    if (path != null) onChange(prop.name, path);
+  }
 </script>
 
 <div class="path" title={prop.long_description ?? ""}>
@@ -17,7 +26,7 @@
     placeholder={p.path_type === "directory" ? "directory path" : "file path"}
     oninput={(e) => onChange(prop.name, (e.currentTarget as HTMLInputElement).value)}
   />
-  <button type="button" class="browse" disabled title="OS file dialog: TODO (later bridge method)">
+  <button type="button" class="browse" disabled={!prop.enabled} onclick={() => void browse()}>
     Browse…
   </button>
 </div>

@@ -134,9 +134,46 @@ export interface GroupProperty extends PropertyBase {
   props: PropertyDescriptor[];
   value?: boolean;
 }
+/** A font value. `flags` is a bitmask: BOLD=1, ITALIC=2, UNDERLINE=4, STRIKEOUT=8. */
+export interface FontValue {
+  face: string;
+  style?: string;
+  size: number;
+  flags: number;
+}
+export interface FontProperty extends PropertyBase {
+  type: "font";
+  value: FontValue | null;
+}
+/** One entry in an editable_list value. `value` is the string the list stores;
+ * `uuid`/`selected`/`hidden` are preserved on round-trip when present. */
+export interface EditableListItem {
+  value: string;
+  selected?: boolean;
+  hidden?: boolean;
+  uuid?: string;
+}
+export interface EditableListProperty extends PropertyBase {
+  type: "editable_list";
+  editable_list_type: "strings" | "files" | "files_and_urls";
+  filter?: string;
+  default_path?: string;
+  value: EditableListItem[];
+}
+/** A frame rate as a rational (numerator/denominator); null = unset. */
+export interface FrameRateValue {
+  numerator: number;
+  denominator: number;
+}
+export interface FrameRateProperty extends PropertyBase {
+  type: "frame_rate";
+  fps_options: { name: string; description: string }[];
+  fps_ranges: { min: FrameRateValue; max: FrameRateValue }[];
+  value: FrameRateValue | null;
+}
 /** Composite types serialized best-effort; rendered as "unsupported (TODO)". */
 export interface UnsupportedProperty extends PropertyBase {
-  type: "font" | "editable_list" | "frame_rate" | "invalid";
+  type: "invalid";
 }
 
 export type PropertyDescriptor =
@@ -149,6 +186,9 @@ export type PropertyDescriptor =
   | ColorProperty
   | ButtonProperty
   | GroupProperty
+  | FontProperty
+  | EditableListProperty
+  | FrameRateProperty
   | UnsupportedProperty;
 
 /** Result of properties.get / properties.set / properties.button. */
@@ -436,6 +476,10 @@ export interface ObsMethods {
   "properties.get": PropertiesResult;
   "properties.set": PropertiesResult;
   "properties.button": PropertiesResult;
+  // Native OS file dialog (path / editable_list Browse). `mode` picks an open,
+  // save, or directory chooser; `filter` is an OBS-style filter string. Returns
+  // { path: null } when the user cancels.
+  "dialog.openFile": { path: string | null };
   // Core video/audio settings (4.3.5). set* return the applied (post-reset) values.
   "settings.getVideo": VideoSettings;
   "settings.setVideo": VideoSettings;
