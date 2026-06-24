@@ -512,6 +512,48 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
 
 ---
 
+## Phase 5 — OBS MCP: AI control surface 🔭 PLANNED (design first)
+
+Expose the app's OBS control to AI agents over the **Model Context Protocol (MCP)**,
+so an assistant can drive the production — switch scenes, add/configure sources, edit
+transforms, manage canvases / stream profiles / output bindings, start/stop the
+multistream, and read live state — through a typed, discoverable tool surface.
+
+**Why this is cheap to build here:** the CEF bridge is already a **data-driven method
+registry** (~77 operations in `g_methods`: `scenes.*`, `sources.*`, `properties.*`,
+`filters.*`, `transitions.*`, `sceneItems.*` incl. transform, `audio.*`, `canvas.*`,
+`streams.*`, `outputBindings.*`, `multistream.*`, `dialog.*`, `window.*`). MCP tools map
+almost 1:1 onto these. The work is a transport + schema-generation layer over the
+existing registry, **not** a reimplementation of OBS control — the same envelope
+(`{method, params} -> result`) that `window.obs.call` uses is what an MCP tool would
+invoke. Events (`EmitEvent`) can surface as MCP notifications/resources for live state.
+
+**Open design questions (resolve before building):**
+
+- **Topology** — (a) MCP server *embedded in the app process* exposing `g_methods`
+  directly over stdio/HTTP, vs (b) a *sidecar* process that relays to the app. (a)
+  reuses the in-process registry with zero IPC and is the natural fit; (b) decouples
+  lifecycle but needs a wire protocol (and `obs-websocket` is excluded here, Qt-coupled).
+  Lean (a).
+- **Schema generation** — derive each MCP tool's input schema from the bridge method's
+  params. Either hand-author a manifest, or (better, DRY) annotate `g_methods` entries
+  with a param schema and generate the MCP tool list from the same registry that drives
+  `window.obs.call` — one source of truth.
+- **Tool granularity** — one MCP tool per bridge method (discoverable, large list) vs a
+  few coarse tools (`obs.call` passthrough + a `list_methods`). Probably a curated set of
+  high-value tools (scene/source/stream control) plus a generic escape hatch.
+- **State exposure** — scenes/sources/canvas/stream status as MCP *resources* (pull) and
+  the existing push events as *notifications*, so an agent can observe, not just act.
+- **Safety / gating** — local-only by default; if remote, auth + a capability split
+  (read-only vs mutating vs streaming-control); confirmations for irreversible/outward
+  actions (go-live). Mirror the app's own "outward actions need confirmation" posture.
+
+**Scope note:** new sub-spec/plan cycle when Phase 4 is wrapped. Build on the *existing*
+bridge registry; do not fork a second control path. This is additive (a new interface to
+the same engine), independent of the remaining Phase-4 UI items.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
