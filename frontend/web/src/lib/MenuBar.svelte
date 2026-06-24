@@ -4,6 +4,7 @@
   import { openSettings } from "./settingsOpener.svelte";
   import { openThemeEditor } from "./themeEditorOpener.svelte";
   import { defaultSelection, openTransform } from "./transformOpener.svelte";
+  import { openAbout } from "./aboutOpener.svelte";
 
   // App passes the dock-visibility map + the toggle / reset / lock actions so the
   // Docks menu drives the live layout. visibleDocks[id] === false => hidden.
@@ -62,7 +63,7 @@
     null,
     { label: "Theme Editor…", action: () => openThemeEditor() },
   ]);
-  const helpItems: (MenuItem | null)[] = [{ label: "About OBS MultiStreamer", disabled: true }];
+  const helpItems: (MenuItem | null)[] = [{ label: "About OBS MultiStreamer", action: () => openAbout() }];
 </script>
 
 <div class="menubar">

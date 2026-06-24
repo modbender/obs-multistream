@@ -15,6 +15,8 @@
   import { filterDialogOpener, closeFilters } from "./lib/filterDialogOpener.svelte";
   import TransformDialog from "./lib/TransformDialog.svelte";
   import { transformOpener, closeTransform, startDefaultSelectionTracking } from "./lib/transformOpener.svelte";
+  import AboutDialog from "./lib/AboutDialog.svelte";
+  import { aboutOpen, closeAbout } from "./lib/aboutOpener.svelte";
   import type { DockviewApi } from "dockview-core";
 
   let version = $state("…");
@@ -186,6 +188,10 @@
 
 {#if transformOpener.target}
   <TransformDialog target={transformOpener.target} label={transformOpener.label} onClose={closeTransform} />
+{/if}
+
+{#if aboutOpen.open}
+  <AboutDialog onClose={closeAbout} />
 {/if}
 
 <style>
