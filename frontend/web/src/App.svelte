@@ -13,6 +13,8 @@
   import { themeEditorOpener, closeThemeEditor } from "./lib/themeEditorOpener.svelte";
   import FilterDialog from "./lib/FilterDialog.svelte";
   import { filterDialogOpener, closeFilters } from "./lib/filterDialogOpener.svelte";
+  import TransformDialog from "./lib/TransformDialog.svelte";
+  import { transformOpener, closeTransform, startDefaultSelectionTracking } from "./lib/transformOpener.svelte";
   import type { DockviewApi } from "dockview-core";
 
   let version = $state("…");
@@ -25,6 +27,9 @@
 
   // Apply the saved (or default Industrial) theme before first paint settles.
   void themeStore.hydrate();
+
+  // Track the default-canvas selection so the Edit > Transform menu item enables.
+  startDefaultSelectionTracking();
 
   $effect(() => {
     obs
@@ -177,6 +182,10 @@
 
 {#if filterDialogOpener.open && filterDialogOpener.source}
   <FilterDialog source={filterDialogOpener.source} onClose={closeFilters} />
+{/if}
+
+{#if transformOpener.target}
+  <TransformDialog target={transformOpener.target} label={transformOpener.label} onClose={closeTransform} />
 {/if}
 
 <style>

@@ -7,6 +7,7 @@
   import { suspendPreview } from "../previewGate.svelte";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
   import { openFilters } from "../filterDialogOpener.svelte";
+  import { openTransform } from "../transformOpener.svelte";
 
   let {}: Record<string, unknown> = $props();
 
@@ -170,6 +171,10 @@
       items: [
         { label: "Properties", action: () => openProperties(item) },
         { label: "Filters", disabled: !item.source, action: () => item.source && openFilters(item.source) },
+        {
+          label: "Edit Transform",
+          action: () => openTransform({ scene: currentScene ?? undefined, id: item.id }, item.source ?? "(unnamed)"),
+        },
         { label: "Rename", action: () => beginRename(item) },
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },

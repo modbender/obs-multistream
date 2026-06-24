@@ -6,6 +6,7 @@
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
   import PropertyForm from "../properties/PropertyForm.svelte";
   import { openFilters } from "../filterDialogOpener.svelte";
+  import { openTransform } from "../transformOpener.svelte";
 
   let {}: Record<string, unknown> = $props();
 
@@ -33,6 +34,12 @@
         },
       },
       { label: "Filters", disabled: !p.source, action: () => p.source && openFilters(p.source) },
+      {
+        label: "Edit Transform",
+        action: () =>
+          p.id != null && openTransform({ scene: p.scene ?? undefined, id: p.id }, p.source ?? "(unnamed)"),
+      },
+      null,
       { label: p.visible ? "Hide" : "Show", action: () => void call("sceneItems.setVisible", { scene: p.scene, id: p.id, visible: !p.visible }) },
       { label: p.locked ? "Unlock" : "Lock", action: () => void call("sceneItems.setLocked", { scene: p.scene, id: p.id, locked: !p.locked }) },
       null,

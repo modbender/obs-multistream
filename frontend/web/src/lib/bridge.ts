@@ -414,6 +414,43 @@ export interface GlobalAudioSlot {
 
 // --- transitions (scene transition type + duration) -------------------------
 
+// --- scene-item transform (numeric Edit Transform dialog) -------------------
+
+/** Addresses one scene item: omit `canvas` (or pass the Default uuid) for the
+ * global channel-0 path; pass an additional canvas's uuid + that canvas's scene
+ * for a per-canvas item. Mirrors the shape used by sceneItems.setVisible/setLocked. */
+export interface TransformTarget {
+  canvas?: string;
+  scene?: string;
+  id: number;
+}
+
+/**
+ * A scene item's full geometry as reported by sceneItems.getTransform / returned
+ * by setTransform + transformAction. `alignment` / `boundsAlignment` are OBS
+ * bitfields (TL=5,TC=4,TR=6,CL=1,C=0,CR=2,BL=9,BC=8,BR=10); `boundsType` is the
+ * OBS_BOUNDS_* enum (0=none,1=stretch,2=inner,3=outer,4=width,5=height,6=max).
+ * source*=unscaled source pixels; base*=the canvas the item lives on.
+ */
+export interface Transform {
+  pos: { x: number; y: number };
+  rot: number;
+  scale: { x: number; y: number };
+  alignment: number;
+  boundsType: number;
+  boundsAlignment: number;
+  bounds: { x: number; y: number };
+  cropToBounds: boolean;
+  crop: { left: number; top: number; right: number; bottom: number };
+  sourceWidth: number;
+  sourceHeight: number;
+  baseWidth: number;
+  baseHeight: number;
+}
+
+/** Quick-action verbs accepted by sceneItems.transformAction. */
+export type TransformAction = "reset" | "center" | "fitToScreen" | "stretchToScreen" | "flipH" | "flipV";
+
 /** A registered transition type as reported by transitionTypes.list. */
 export interface TransitionType {
   id: string;
@@ -464,6 +501,13 @@ export interface ObsMethods {
   "sceneItems.setLocked": { id: number; locked: boolean };
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
+  // Numeric transform read/edit (Edit Transform dialog). getTransform loads the
+  // full geometry; setTransform applies a partial (send only changed fields) and
+  // echoes the full updated transform; transformAction runs a quick action and
+  // echoes the result. All three emit sceneItems.changed after mutating.
+  "sceneItems.getTransform": Transform;
+  "sceneItems.setTransform": Transform;
+  "sceneItems.transformAction": Transform;
   // Source types + creation (4.3.3). Omit `scene` to target the current scene; pass
   // an optional `canvas` uuid to add into an additional canvas's current scene.
   "sourceTypes.list": SourceType[];

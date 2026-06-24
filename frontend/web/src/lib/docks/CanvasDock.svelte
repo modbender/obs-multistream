@@ -6,6 +6,7 @@
   import { WINDOW_ID } from "../windowContext";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
   import { openFilters } from "../filterDialogOpener.svelte";
+  import { openTransform } from "../transformOpener.svelte";
 
   // A composite, inseparable dock for one NON-DEFAULT canvas (hierarchy-model.html
   // §1 right column): an inline preview + this canvas's own scenes + its own
@@ -227,6 +228,14 @@
       y: e.clientY,
       items: [
         { label: "Filters", disabled: !item.source, action: () => item.source && openFilters(item.source) },
+        {
+          label: "Edit Transform",
+          action: () =>
+            openTransform(
+              { canvas: canvasUuid, scene: currentScene ?? undefined, id: item.id },
+              item.source ?? "(unnamed)",
+            ),
+        },
         { label: "Rename", action: () => beginRenameSource(item) },
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
@@ -248,12 +257,20 @@
   function buildPreviewItems(p: {
     scene: string | null;
     id: number | null;
+    source: string | null;
     visible: boolean;
     locked: boolean;
   }): (ContextMenuItem | null)[] {
     const call = (method: string, params: Record<string, unknown>) =>
       obs.call(method, { canvas: canvasUuid, scene: p.scene, id: p.id, ...params }).catch(report);
     return [
+      {
+        label: "Edit Transform",
+        action: () =>
+          p.id != null &&
+          openTransform({ canvas: canvasUuid, scene: p.scene ?? undefined, id: p.id }, p.source ?? "(unnamed)"),
+      },
+      null,
       { label: p.visible ? "Hide" : "Show", action: () => void call("sceneItems.setVisible", { visible: !p.visible }) },
       { label: p.locked ? "Unlock" : "Lock", action: () => void call("sceneItems.setLocked", { locked: !p.locked }) },
       null,

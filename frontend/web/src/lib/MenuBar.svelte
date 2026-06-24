@@ -3,6 +3,7 @@
   import { DOCKS } from "./dock/dockRegistry";
   import { openSettings } from "./settingsOpener.svelte";
   import { openThemeEditor } from "./themeEditorOpener.svelte";
+  import { defaultSelection, openTransform } from "./transformOpener.svelte";
 
   // App passes the dock-visibility map + the toggle / reset / lock actions so the
   // Docks menu drives the live layout. visibleDocks[id] === false => hidden.
@@ -28,12 +29,20 @@
     null,
     { label: "Exit", action: () => window.close() },
   ]);
-  const editItems: (MenuItem | null)[] = [
+  // Transform enables for the current default-canvas (channel-0) selection, tracked
+  // by transformOpener via the global sceneItem.selected push.
+  const editItems: (MenuItem | null)[] = $derived([
     { label: "Undo", disabled: true },
     { label: "Redo", disabled: true },
     null,
-    { label: "Transform", disabled: true },
-  ];
+    {
+      label: "Transform",
+      disabled: defaultSelection.id == null,
+      action: () =>
+        defaultSelection.id != null &&
+        openTransform({ scene: defaultSelection.scene ?? undefined, id: defaultSelection.id }, "Selected Source"),
+    },
+  ]);
   const viewItems: (MenuItem | null)[] = [
     { label: "Studio Mode", disabled: true },
     { label: "Stats", disabled: true },
