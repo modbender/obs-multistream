@@ -288,8 +288,11 @@ main program canvas in several places.
 The new Svelte/CEF frontend is the default build (`USE_LEGACY_FRONTEND=OFF` at
 cutover); it boots, previews, edits, and multistreams. Core parity + the UI
 redesign + theme editor + global audio + scene/source persistence + source
-filters + scene transitions are done. The big remaining gaps are **studio mode**
-and **the stats dock** — see "Remaining work" at the end of this phase.
+filters + scene transitions + the medium parity gaps + low-priority items
+(About, projectors, hotkeys) + the Stats dock are done. The frontend is
+feature-complete for streaming/multistream; the remaining items are
+deferred-by-choice (Studio Mode, undo/redo, recording, multiview, obs-websocket)
+or verification owed (GUI acceptance + a live broadcast) — see "Remaining work".
 
 Replace the Qt Widgets desktop frontend with a web UI (**Svelte**) hosted in
 **CEF as the whole application shell**. libobs and the fork's native-multistream
@@ -461,9 +464,13 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   fork's use case (it's a live-switching-production workflow); revisit if that need
   arises. Transitions already cover the global program path; Studio Mode would add an
   off-air preview scene + a program surface + the preview→program transition action.
-- 🔭 **Stats dock (3e).** Multistream per-output monitoring (bitrate / dropped frames
-  / reconnects / CPU-GPU, grouped by canvas) reading `MultistreamEngine`'s per-output
-  handles. Menu item disabled. Needs a design pass.
+- ✅ **Stats dock (3e) — DONE 2026-06-25.** `stats.get` bridge + `MultistreamEngine::
+  StatsSnapshot()` (per-live-output counters under `liveMutex`). A Stats dock (opened on
+  demand via the Docks/View menu) polls ~1×/s: general perf grid (CPU/memory/FPS/avg
+  frame time/render-lag/encoder-skip, warn-colored over threshold) + per-output rows
+  (state dot, profile→canvas, bitrate via byte-delta cache, dropped+%, congestion,
+  duration). Build-clean /W4 /WX, selftest verifies the shape, `leaks: 2`. Per-output
+  live numbers (bitrate/drops) need a real broadcast to verify (GUI/live-owed).
 
 **Medium — parity gaps:**
 
