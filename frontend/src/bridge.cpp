@@ -20,6 +20,7 @@
 
 #include "audio/AudioMonitor.hpp"
 #include "log.hpp"
+#include "mcp/McpServer.hpp"
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "projector_window.hpp"
@@ -4145,6 +4146,98 @@ bool MethodProjectorList(const json & /*params*/, json &result, std::string & /*
 	return true;
 }
 
+// --- embedded MCP server config (Settings UI bridge, Phase 5 stage 2) ---------
+
+// Serialize the MCP server's config view to the McpConfig shape the Settings UI
+// expects. When the server is absent (should not happen post-bootstrap), report a
+// disabled, not-listening default so the UI degrades gracefully.
+json McpConfigToJson(const McpServer *server)
+{
+	if (!server) {
+		return json{{"enabled", false}, {"port", 47800},      {"token", ""},
+			    {"allowMutations", true}, {"allowGoLive", false}, {"listening", false},
+			    {"lastError", ""},        {"endpoint", "http://127.0.0.1:47800/mcp"}};
+	}
+	const McpServer::ConfigView v = server->GetConfigView();
+	return json{{"enabled", v.enabled},
+		    {"port", v.port},
+		    {"token", v.token},
+		    {"allowMutations", v.allowMutations},
+		    {"allowGoLive", v.allowGoLive},
+		    {"listening", v.listening},
+		    {"lastError", v.lastError},
+		    {"endpoint", v.endpoint}};
+}
+
+bool MethodMcpGetConfig(const json &, json &result, std::string &error)
+{
+	McpServer *server = Mcp::Instance();
+	if (!server) {
+		error = "mcp server not available";
+		return false;
+	}
+	result = McpConfigToJson(server);
+	return true;
+}
+
+bool MethodMcpSetConfig(const json &params, json &result, std::string &error)
+{
+	McpServer *server = Mcp::Instance();
+	if (!server) {
+		error = "mcp server not available";
+		return false;
+	}
+
+	McpServer::ConfigPatch patch;
+	if (params.is_object()) {
+		auto en = params.find("enabled");
+		if (en != params.end() && en->is_boolean()) {
+			patch.hasEnabled = true;
+			patch.enabled = en->get<bool>();
+		}
+		auto pt = params.find("port");
+		if (pt != params.end() && pt->is_number_integer()) {
+			patch.hasPort = true;
+			patch.port = pt->get<int>();
+		}
+		auto am = params.find("allowMutations");
+		if (am != params.end() && am->is_boolean()) {
+			patch.hasAllowMutations = true;
+			patch.allowMutations = am->get<bool>();
+		}
+		auto ag = params.find("allowGoLive");
+		if (ag != params.end() && ag->is_boolean()) {
+			patch.hasAllowGoLive = true;
+			patch.allowGoLive = ag->get<bool>();
+		}
+	}
+
+	const McpServer::ConfigView v = server->ApplyConfigPatch(patch);
+	result = json{{"enabled", v.enabled},
+		      {"port", v.port},
+		      {"token", v.token},
+		      {"allowMutations", v.allowMutations},
+		      {"allowGoLive", v.allowGoLive},
+		      {"listening", v.listening},
+		      {"lastError", v.lastError},
+		      {"endpoint", v.endpoint}};
+	EmitEvent("mcp.changed", json::object());
+	return true;
+}
+
+bool MethodMcpRegenerateToken(const json &, json &result, std::string &error)
+{
+	McpServer *server = Mcp::Instance();
+	if (!server) {
+		error = "mcp server not available";
+		return false;
+	}
+	const std::string token = server->RegenerateToken();
+	result = json{{"token", token}};
+	EmitEvent("mcp.changed", json::object());
+	return true;
+}
+
 } // namespace
 
 bool WriteJsonString(const char *file, const char *key, const std::string &value)
@@ -4266,6 +4359,9 @@ void Init()
 		{"hotkeys.list", Hotkeys::MethodList},
 		{"hotkeys.set", Hotkeys::MethodSet},
 		{"hotkeys.clear", Hotkeys::MethodClear},
+		{"mcp.getConfig", MethodMcpGetConfig},
+		{"mcp.setConfig", MethodMcpSetConfig},
+		{"mcp.regenerateToken", MethodMcpRegenerateToken},
 	};
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);

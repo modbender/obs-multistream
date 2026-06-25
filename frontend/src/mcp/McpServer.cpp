@@ -117,25 +117,168 @@ Capability Classify(const std::string &method)
 	return Capability::Mutate;
 }
 
-// The tools/list registry: a data list so curated tools slot in later. Stage 1 is
-// just obs_call.
+// JSON Schema helpers so each curated tool row stays one readable expression.
+McpServer::json SchemaObject(const McpServer::json &properties, const McpServer::json &required)
+{
+	using json = McpServer::json;
+	json schema{{"type", "object"}, {"properties", properties}};
+	if (!required.empty()) {
+		schema["required"] = required;
+	}
+	return schema;
+}
+
+McpServer::json Prop(const char *type, const char *description)
+{
+	return McpServer::json{{"type", type}, {"description", description}};
+}
+
+// The tools/list registry: a data list so adding a tool is one row. `obs_call` is
+// the generic escape hatch; the rest are curated, high-value wrappers that each map
+// to a single bridge method (`bridgeMethod`). tools/call resolves a curated tool to
+// its bridge method and passes `arguments` straight through as the bridge params,
+// running the SAME UI-thread marshal + capability gate (via Classify(bridgeMethod))
+// as obs_call. An empty bridgeMethod marks the obs_call escape hatch (handled
+// specially: the method comes from arguments.method, not the row).
 struct ToolDescriptor {
 	const char *name;
+	const char *bridgeMethod; // "" for obs_call
 	McpServer::json descriptor;
 };
+
+// Build the descriptor JSON the MCP client sees in tools/list.
+McpServer::json MakeDescriptor(const char *name, const char *description, const McpServer::json &inputSchema)
+{
+	return McpServer::json{{"name", name}, {"description", description}, {"inputSchema", inputSchema}};
+}
 
 const std::vector<ToolDescriptor> &ToolRegistry()
 {
 	using json = McpServer::json;
 	static const std::vector<ToolDescriptor> kTools = {
-		{"obs_call",
-		 json{{"name", "obs_call"},
-		      {"description", "Call any OBS bridge method by name with params."},
-		      {"inputSchema",
-		       json{{"type", "object"},
-			    {"properties",
-			     json{{"method", json{{"type", "string"}}}, {"params", json{{"type", "object"}}}}},
-			    {"required", json::array({"method"})}}}}},
+		{"obs_call", "",
+		 MakeDescriptor("obs_call", "Escape hatch: call any OBS bridge method by name with params.",
+				SchemaObject(json{{"method", Prop("string", "The bridge method name, e.g. 'scenes.list'.")},
+						  {"params", json{{"type", "object"},
+								  {"description", "Method-specific params object."}}}},
+					     json::array({"method"})))},
+
+		{"list_scenes", "scenes.list",
+		 MakeDescriptor("list_scenes",
+				"List the scenes of a canvas. Omit 'canvas' for the Default canvas.",
+				SchemaObject(json{{"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array()))},
+
+		{"switch_scene", "scenes.setCurrent",
+		 MakeDescriptor("switch_scene",
+				"Switch the active (program) scene by name. Optional 'canvas' uuid targets an additional canvas.",
+				SchemaObject(json{{"name", Prop("string", "Scene name to make current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"name"})))},
+
+		{"create_scene", "scenes.create",
+		 MakeDescriptor("create_scene",
+				"Create a new empty scene. Optional 'canvas' uuid targets an additional canvas.",
+				SchemaObject(json{{"name", Prop("string", "Name for the new scene.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"name"})))},
+
+		{"list_scene_items", "sceneItems.list",
+		 MakeDescriptor("list_scene_items",
+				"List the items (sources) of a scene, topmost first. Defaults to the current scene.",
+				SchemaObject(json{{"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array()))},
+
+		{"set_item_visible", "sceneItems.setVisible",
+		 MakeDescriptor("set_item_visible", "Show or hide a scene item by its numeric id.",
+				SchemaObject(json{{"id", Prop("integer", "Scene-item id (from list_scene_items).")},
+						  {"visible", Prop("boolean", "True to show, false to hide.")},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"id", "visible"})))},
+
+		{"get_item_transform", "sceneItems.getTransform",
+		 MakeDescriptor("get_item_transform", "Read a scene item's full geometry (position, scale, rotation, crop).",
+				SchemaObject(json{{"id", Prop("integer", "Scene-item id (from list_scene_items).")},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"id"})))},
+
+		{"set_item_transform", "sceneItems.setTransform",
+		 MakeDescriptor("set_item_transform",
+				"Apply a partial transform to a scene item (send only the fields that change).",
+				SchemaObject(json{{"id", Prop("integer", "Scene-item id (from list_scene_items).")},
+						  {"transform", json{{"type", "object"},
+								     {"description",
+								      "Partial geometry: pos {x,y}, scale {x,y}, "
+								      "rotation, crop {left,top,right,bottom}, etc."}}},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"id", "transform"})))},
+
+		{"create_source", "sources.create",
+		 MakeDescriptor("create_source",
+				"Create a new source of the given type and add it to a scene.",
+				SchemaObject(json{{"type", Prop("string", "Source kind id, e.g. 'color_source' or 'browser_source'.")},
+						  {"name", Prop("string", "Optional source name; defaults to the type's display name.")},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"type"})))},
+
+		{"rename_source", "sources.rename",
+		 MakeDescriptor("rename_source", "Rename the source backing a scene item.",
+				SchemaObject(json{{"id", Prop("integer", "Scene-item id (from list_scene_items).")},
+						  {"name", Prop("string", "New source name.")},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"id", "name"})))},
+
+		{"remove_source", "sceneItems.remove",
+		 MakeDescriptor("remove_source", "Remove a scene item (the source) from its scene by numeric id.",
+				SchemaObject(json{{"id", Prop("integer", "Scene-item id (from list_scene_items).")},
+						  {"scene", Prop("string", "Optional scene name; defaults to current.")},
+						  {"canvas", Prop("string", "Optional canvas uuid; omit for Default.")}},
+					     json::array({"id"})))},
+
+		{"get_current_transition", "transitions.getCurrent",
+		 MakeDescriptor("get_current_transition", "Get the active scene transition type, name, and duration.",
+				SchemaObject(json::object(), json::array()))},
+
+		{"set_transition", "transitions.setCurrent",
+		 MakeDescriptor("set_transition", "Set the active scene transition by its type id.",
+				SchemaObject(json{{"id", Prop("string", "Transition type id (from transitionTypes.list).")}},
+					     json::array({"id"})))},
+
+		{"list_canvases", "canvas.list",
+		 MakeDescriptor("list_canvases", "List all canvases (encode targets) with their resolution and FPS.",
+				SchemaObject(json::object(), json::array()))},
+
+		{"list_stream_profiles", "streamProfile.list",
+		 MakeDescriptor("list_stream_profiles", "List the saved stream destination profiles (platform + credential).",
+				SchemaObject(json::object(), json::array()))},
+
+		{"list_outputs", "outputBinding.list",
+		 MakeDescriptor("list_outputs", "List the output bindings (stream-profile x canvas pairings) and their enabled state.",
+				SchemaObject(json::object(), json::array()))},
+
+		{"multistream_status", "multistream.status",
+		 MakeDescriptor("multistream_status", "Get live status of every enabled output binding (idle/connecting/live/error).",
+				SchemaObject(json::object(), json::array()))},
+
+		{"start_output", "multistream.startOutput",
+		 MakeDescriptor("start_output", "Start streaming one output binding by its uuid (go-live).",
+				SchemaObject(json{{"uuid", Prop("string", "Output binding uuid (from list_outputs).")}},
+					     json::array({"uuid"})))},
+
+		{"stop_output", "multistream.stopOutput",
+		 MakeDescriptor("stop_output", "Stop streaming one output binding by its uuid.",
+				SchemaObject(json{{"uuid", Prop("string", "Output binding uuid (from list_outputs).")}},
+					     json::array({"uuid"})))},
+
+		{"get_stats", "stats.get",
+		 MakeDescriptor("get_stats", "Get a performance + per-output streaming stats snapshot (fps, cpu, bitrate, dropped frames).",
+				SchemaObject(json::object(), json::array()))},
 	};
 	return kTools;
 }
@@ -298,22 +441,94 @@ bool McpServer::StartForTest(int port, const std::string &token, bool allowMutat
 	return httpServer_.IsListening();
 }
 
-void McpServer::SetEnabled(bool v)
+McpServer::ConfigView McpServer::ViewLocked() const
 {
-	config_.enabled = v;
-	Save();
+	ConfigView v;
+	v.enabled = config_.enabled;
+	v.port = config_.port;
+	v.token = config_.token;
+	v.allowMutations = config_.allowMutations;
+	v.allowGoLive = config_.allowGoLive;
+	v.listening = httpServer_.IsListening();
+	v.lastError = httpServer_.LastError();
+	v.endpoint = "http://127.0.0.1:" + std::to_string(config_.port) + "/mcp";
+	return v;
 }
 
-void McpServer::SetPort(int v)
+McpServer::ConfigView McpServer::GetConfigView() const
 {
-	config_.port = v;
-	Save();
+	std::lock_guard<std::mutex> lock(configMutex_);
+	return ViewLocked();
 }
 
-void McpServer::RegenerateToken()
+void McpServer::RestartListener()
 {
+	// Stop joins the accept thread (we must NOT hold configMutex_ here; HandleRequest
+	// takes it on that thread). After stopping, re-read enabled/port under the lock.
+	httpServer_.Stop();
+
+	bool enabled = false;
+	int port = 0;
+	{
+		std::lock_guard<std::mutex> lock(configMutex_);
+		enabled = config_.enabled;
+		port = config_.port;
+	}
+	if (!enabled) {
+		HostLog("[mcp] server disabled; listener stopped");
+		return;
+	}
+	shutdown_.store(false);
+	const bool ok = httpServer_.Start(port, [this](const Mcp::HttpRequest &req) { return HandleRequest(req); });
+	if (ok) {
+		HostLog("[mcp] server listening on http://127.0.0.1:" + std::to_string(port) + "/mcp (token required)");
+	} else {
+		HostLog("[mcp] server failed to listen: " + httpServer_.LastError());
+	}
+}
+
+McpServer::ConfigView McpServer::ApplyConfigPatch(const ConfigPatch &patch)
+{
+	bool restart = false;
+	{
+		std::lock_guard<std::mutex> lock(configMutex_);
+		if (patch.hasEnabled && patch.enabled != config_.enabled) {
+			config_.enabled = patch.enabled;
+			restart = true;
+		}
+		if (patch.hasPort) {
+			// Validate the range; ignore an out-of-range port (keeps the old one).
+			if (patch.port >= 1024 && patch.port <= 65535) {
+				if (patch.port != config_.port) {
+					config_.port = patch.port;
+					restart = true;
+				}
+			} else {
+				HostLog("[mcp] setConfig: ignoring out-of-range port " + std::to_string(patch.port));
+			}
+		}
+		if (patch.hasAllowMutations) {
+			config_.allowMutations = patch.allowMutations;
+		}
+		if (patch.hasAllowGoLive) {
+			config_.allowGoLive = patch.allowGoLive;
+		}
+		Save();
+	}
+
+	if (restart) {
+		RestartListener();
+	}
+
+	return GetConfigView();
+}
+
+std::string McpServer::RegenerateToken()
+{
+	std::lock_guard<std::mutex> lock(configMutex_);
 	config_.token = GenerateToken();
 	Save();
+	return config_.token;
 }
 
 bool McpServer::RunBridge(const std::string &method, const json &params, json &result, std::string &error) const
@@ -369,6 +584,32 @@ McpServer::json McpServer::BuildToolsList() const
 	return json{{"tools", tools}};
 }
 
+McpServer::json McpServer::GateAndRun(const std::string &method, const json &callParams) const
+{
+	// Classify + enforce capability before executing. Read the flags under the lock
+	// (the Settings UI may flip them on the UI thread while we run on the HTTP thread).
+	const Capability cap = Classify(method);
+	bool allowed = true;
+	{
+		std::lock_guard<std::mutex> lock(configMutex_);
+		if (cap == Capability::Mutate) {
+			allowed = config_.allowMutations;
+		} else if (cap == Capability::GoLive) {
+			allowed = config_.allowGoLive;
+		}
+	}
+	if (!allowed) {
+		return ToolText(std::string("capability '") + CapabilityName(cap) + "' disabled", true);
+	}
+
+	json result;
+	std::string error;
+	if (RunBridge(method, callParams, result, error)) {
+		return ToolText(result.dump(), false);
+	}
+	return ToolText(error, true);
+}
+
 McpServer::json McpServer::HandleToolsCall(const json &params) const
 {
 	const std::string name = params.value("name", std::string());
@@ -389,7 +630,8 @@ McpServer::json McpServer::HandleToolsCall(const json &params) const
 	const json arguments = params.contains("arguments") && params["arguments"].is_object() ? params["arguments"]
 											     : json::object();
 
-	if (name == "obs_call") {
+	// obs_call (empty bridgeMethod): the method + params come from the arguments.
+	if (found->bridgeMethod[0] == '\0') {
 		if (!arguments.contains("method") || !arguments["method"].is_string()) {
 			return json{
 				{"__rpcError", json{{"code", -32602}, {"message", "obs_call requires arguments.method"}}}};
@@ -398,39 +640,29 @@ McpServer::json McpServer::HandleToolsCall(const json &params) const
 		const json callParams = arguments.contains("params") && arguments["params"].is_object()
 						? arguments["params"]
 						: json::object();
-
-		// Classify + enforce capability before executing.
-		const Capability cap = Classify(method);
-		bool allowed = true;
-		if (cap == Capability::Mutate) {
-			allowed = config_.allowMutations;
-		} else if (cap == Capability::GoLive) {
-			allowed = config_.allowGoLive;
-		}
-		if (!allowed) {
-			return ToolText(std::string("capability '") + CapabilityName(cap) + "' disabled", true);
-		}
-
-		json result;
-		std::string error;
-		if (RunBridge(method, callParams, result, error)) {
-			return ToolText(result.dump(), false);
-		}
-		return ToolText(error, true);
+		return GateAndRun(method, callParams);
 	}
 
-	return json{{"__rpcError", json{{"code", -32602}, {"message", "unhandled tool: " + name}}}};
+	// Curated tool: map to its bridge method, pass arguments straight through as the
+	// bridge params, and run through the same gate + UI-thread marshal as obs_call.
+	return GateAndRun(found->bridgeMethod, arguments);
 }
 
 Mcp::HttpResponse McpServer::HandleRequest(const Mcp::HttpRequest &req)
 {
-	// Auth first: require "Authorization: Bearer <token>" matching config_.token.
+	// Auth first: require "Authorization: Bearer <token>" matching the current token.
+	// Snapshot the token under the lock (the Settings UI may regenerate it live).
 	const std::string prefix = "Bearer ";
 	std::string presented;
 	if (req.authorization.size() >= prefix.size() && req.authorization.compare(0, prefix.size(), prefix) == 0) {
 		presented = req.authorization.substr(prefix.size());
 	}
-	if (config_.token.empty() || !TokensEqual(presented, config_.token)) {
+	std::string expectedToken;
+	{
+		std::lock_guard<std::mutex> lock(configMutex_);
+		expectedToken = config_.token;
+	}
+	if (expectedToken.empty() || !TokensEqual(presented, expectedToken)) {
 		return JsonResponse(401, json{{"error", "unauthorized"}});
 	}
 

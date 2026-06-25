@@ -2,6 +2,7 @@
 #define OBS_MULTISTREAM_FRONTEND_MCP_MCPSERVER_HPP_
 
 #include <atomic>
+#include <mutex>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -50,14 +51,46 @@ public:
 	// (avoids socket timing flakiness). The HttpServer lambda forwards to this.
 	Mcp::HttpResponse HandleRequest(const Mcp::HttpRequest &req);
 
-	// Minimal accessors/mutators for the later Settings UI. The mutators persist to
-	// mcp.json. They do not restart the server live (kept simple).
-	bool Enabled() const { return config_.enabled; }
-	int Port() const { return config_.port; }
-	const std::string &Token() const { return config_.token; }
-	void SetEnabled(bool v);
-	void SetPort(int v);
-	void RegenerateToken();
+	// Config snapshot handed to the Settings UI (bridge `mcp.getConfig`). Mirrors the
+	// frontend's McpConfig type. `listening`/`lastError`/`endpoint` are runtime, the
+	// rest are the persisted config.
+	struct ConfigView {
+		bool enabled = false;
+		int port = 47800;
+		std::string token;
+		bool allowMutations = true;
+		bool allowGoLive = false;
+		bool listening = false;
+		std::string lastError;
+		std::string endpoint;
+	};
+
+	// Fields the Settings UI may change via `mcp.setConfig`. A nullopt-style "unset"
+	// is encoded by the has* flags so partial updates (only changed fields) work.
+	struct ConfigPatch {
+		bool hasEnabled = false;
+		bool enabled = false;
+		bool hasPort = false;
+		int port = 0;
+		bool hasAllowMutations = false;
+		bool allowMutations = false;
+		bool hasAllowGoLive = false;
+		bool allowGoLive = false;
+	};
+
+	// Snapshot the current config + runtime state for the Settings UI. Thread-safe.
+	ConfigView GetConfigView() const;
+
+	// Apply a partial config change (Settings UI). Persists mcp.json and, if
+	// enabled/port changed, restarts the listener (Stop then Start when enabled,
+	// Stop when disabled). Validates the port range; on a bind failure leaves
+	// listening=false + lastError set. Returns the resulting view. UI-thread only
+	// (it may join the accept thread); thread-safe wrt the running HTTP thread.
+	ConfigView ApplyConfigPatch(const ConfigPatch &patch);
+
+	// Generate + persist a new token; the new token applies to subsequent requests.
+	// Returns it. Thread-safe (swaps the in-memory token under the config mutex).
+	std::string RegenerateToken();
 
 	std::string LastHttpError() const { return httpServer_.LastError(); }
 	bool IsListening() const { return httpServer_.IsListening(); }
@@ -78,14 +111,27 @@ private:
 	void Load();
 	void Save() const;
 
+	// Build the runtime view from the current config (caller holds configMutex_).
+	ConfigView ViewLocked() const;
+	// Restart the HTTP listener to match config_.enabled/port (caller holds NO lock;
+	// joins the accept thread). Used by ApplyConfigPatch.
+	void RestartListener();
+
 	// JSON-RPC dispatch helpers (all run wherever HandleRequest runs).
 	json BuildToolsList() const;
 	json HandleToolsCall(const json &params) const;
+
+	// Capability-gate then run a bridge method (shared by obs_call + curated tools).
+	json GateAndRun(const std::string &method, const json &callParams) const;
 
 	// Run a bridge method, marshalling to TID_UI when needed (see threading note).
 	// Fills ok/result/error; returns false on timeout/shutdown (error set).
 	bool RunBridge(const std::string &method, const json &params, json &result, std::string &error) const;
 
+	// Guards config_ (token/flags/port/enabled). Read on the HTTP accept thread per
+	// request (snapshotted at the top of HandleRequest), written on the UI thread by
+	// the Settings setters. mutable so const read paths can lock it.
+	mutable std::mutex configMutex_;
 	Config config_;
 	Mcp::HttpServer httpServer_;
 	std::atomic<bool> shutdown_{false};

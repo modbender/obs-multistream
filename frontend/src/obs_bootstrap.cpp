@@ -1904,17 +1904,30 @@ void ObsBootstrap::RunMcpSelfTest()
 					 "' version=" + init["result"]["serverInfo"].value("version", std::string("?")) + ")"
 			       : ""));
 
-	// 2) tools/list -> contains obs_call.
+	// 2) tools/list -> contains obs_call AND the curated tools (e.g. switch_scene,
+	// get_stats).
 	json toolsList = call(json{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}});
 	bool hasObsCall = false;
+	bool hasSwitchScene = false;
+	bool hasGetStats = false;
+	int toolCount = 0;
 	if (toolsList.is_object() && toolsList.contains("result") && toolsList["result"]["tools"].is_array()) {
 		for (const auto &t : toolsList["result"]["tools"]) {
-			if (t.value("name", std::string()) == "obs_call") {
+			const std::string tn = t.value("name", std::string());
+			++toolCount;
+			if (tn == "obs_call") {
 				hasObsCall = true;
+			} else if (tn == "switch_scene") {
+				hasSwitchScene = true;
+			} else if (tn == "get_stats") {
+				hasGetStats = true;
 			}
 		}
 	}
-	HostLog(std::string("[selftest] mcp tools/list -> obs_call ") + (hasObsCall ? "present" : "MISSING"));
+	const bool curatedOk = hasObsCall && hasSwitchScene && hasGetStats;
+	HostLog(std::string("[selftest] mcp tools/list -> ") + std::to_string(toolCount) + " tools; obs_call " +
+		(hasObsCall ? "present" : "MISSING") + ", switch_scene " + (hasSwitchScene ? "present" : "MISSING") +
+		", get_stats " + (hasGetStats ? "present" : "MISSING") + " (" + (curatedOk ? "OK" : "MISMATCH") + ")");
 
 	// 3) tools/call obs_call scenes.list -> isError false + parsed text is an array.
 	json scenesCall = call(json{{"jsonrpc", "2.0"},
@@ -1962,8 +1975,60 @@ void ObsBootstrap::RunMcpSelfTest()
 	HostLog(std::string("[selftest] mcp go-live gating -> isError=") + (gateBlocked ? "true" : "false") +
 		" text='" + gateText + "' (" + (gateOk ? "OK, did not execute" : "MISMATCH") + ")");
 
-	if (hasServerInfo && hasObsCall && scenesOk && scenesArray && gateOk) {
-		HostLog("[selftest] mcp -> initialize/tools.list/obs_call scenes.list OK; go-live gated OK");
+	// 5) Curated tool round-trip: tools/call get_stats -> isError false + parsed text
+	// is an object (the Stats snapshot). Exercises the data-driven curated dispatch.
+	json statsCall = call(json{{"jsonrpc", "2.0"},
+				   {"id", 5},
+				   {"method", "tools/call"},
+				   {"params", json{{"name", "get_stats"}, {"arguments", json::object()}}}});
+	bool statsOk = false;
+	bool statsObject = false;
+	if (statsCall.is_object() && statsCall.contains("result")) {
+		const json &r = statsCall["result"];
+		statsOk = r.is_object() && r.value("isError", true) == false;
+		if (statsOk && r["content"].is_array() && !r["content"].empty()) {
+			try {
+				const json parsed = json::parse(r["content"][0].value("text", std::string()));
+				statsObject = parsed.is_object();
+			} catch (...) {
+				statsObject = false;
+			}
+		}
+	}
+	HostLog(std::string("[selftest] mcp tools/call get_stats -> isError=") + (statsOk ? "false" : "true") +
+		" content[0] is object=" + (statsObject ? "true" : "false") +
+		((statsOk && statsObject) ? " (OK)" : " (MISMATCH)"));
+
+	// 6) Config bridge: mcp.getConfig (via obs_call, classified Read) returns the
+	// expected McpConfig shape. Reads the live g_mcp via Mcp::Instance().
+	json cfgCall = call(json{{"jsonrpc", "2.0"},
+				 {"id", 6},
+				 {"method", "tools/call"},
+				 {"params", json{{"name", "obs_call"},
+						 {"arguments", json{{"method", "mcp.getConfig"}, {"params", json::object()}}}}}});
+	bool cfgOk = false;
+	bool cfgShape = false;
+	if (cfgCall.is_object() && cfgCall.contains("result")) {
+		const json &r = cfgCall["result"];
+		cfgOk = r.is_object() && r.value("isError", true) == false;
+		if (cfgOk && r["content"].is_array() && !r["content"].empty()) {
+			try {
+				const json cfg = json::parse(r["content"][0].value("text", std::string()));
+				cfgShape = cfg.is_object() && cfg.contains("enabled") && cfg.contains("port") &&
+					   cfg.contains("token") && cfg.contains("allowMutations") &&
+					   cfg.contains("allowGoLive") && cfg.contains("listening") &&
+					   cfg.contains("lastError") && cfg.contains("endpoint");
+			} catch (...) {
+				cfgShape = false;
+			}
+		}
+	}
+	HostLog(std::string("[selftest] mcp mcp.getConfig -> isError=") + (cfgOk ? "false" : "true") + " shape=" +
+		(cfgShape ? "complete" : "INCOMPLETE") + ((cfgOk && cfgShape) ? " (OK)" : " (MISMATCH)"));
+
+	if (hasServerInfo && hasObsCall && curatedOk && scenesOk && scenesArray && gateOk && statsOk && statsObject &&
+	    cfgOk && cfgShape) {
+		HostLog("[selftest] mcp -> initialize/tools.list/obs_call/curated/getConfig OK; go-live gated OK");
 	} else {
 		HostLog("[selftest] mcp -> FAILED (see step lines above)");
 	}
