@@ -1,3 +1,8 @@
+.. image:: .github/obs-multistream-logo.png
+   :alt: OBS MultiStream
+   :width: 160
+   :align: center
+
 OBS MultiStream
 ===============
 
