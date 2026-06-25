@@ -516,6 +516,43 @@ export interface Hotkey {
   bindings: HotkeyBinding[];
 }
 
+// --- stats (perf monitoring, general + per-output) --------------------------
+
+/** General app/engine stats as reported in stats.get's `general`. */
+export interface GeneralStats {
+  cpu: number;
+  memoryMB: number;
+  fps: number;
+  avgFrameMs: number;
+  renderLagged: number;
+  renderTotal: number;
+  renderLagPct: number;
+  encodeSkipped: number;
+  encodeTotal: number;
+  encodeSkipPct: number;
+}
+
+/** Per-output live stats row reported in stats.get's `outputs`. `state` mirrors
+ * the multistream live state but is reported title-cased by the stats bridge. */
+export interface OutputStat {
+  bindingUuid: string;
+  profileLabel: string;
+  canvasName: string;
+  state: "Idle" | "Connecting" | "Live" | "Error";
+  bitrateKbps: number;
+  droppedFrames: number;
+  totalFrames: number;
+  dropPct: number;
+  congestionPct: number;
+  durationMs: number;
+}
+
+/** Snapshot returned by stats.get (polled by the Stats dock). */
+export interface Stats {
+  general: GeneralStats;
+  outputs: OutputStat[];
+}
+
 /** A registered transition type as reported by transitionTypes.list. */
 export interface TransitionType {
   id: string;
@@ -654,6 +691,9 @@ export interface ObsMethods {
   "hotkeys.list": { hotkeys: Hotkey[] };
   "hotkeys.set": { bindings: HotkeyBinding[] };
   "hotkeys.clear": { bindings: HotkeyBinding[] };
+  // Stats snapshot (general perf + per-output live stats). Polled by the Stats
+  // dock on a ~1s interval; there is no push, so the dock owns the cadence.
+  "stats.get": Stats;
   // Native projectors (standalone windows rendering a target on a monitor, P3).
   // listMonitors enumerates the displays a fullscreen projector can target.
   // open spawns a projector (fullscreen needs `monitor`); the window closes

@@ -70,7 +70,9 @@
   ]);
   const viewItems: (MenuItem | null)[] = $derived([
     { label: "Studio Mode", disabled: true },
-    { label: "Stats", disabled: true },
+    // Toggles the on-demand Stats dock through the same add/remove path the Docks
+    // menu uses (checked = currently present in the layout).
+    { label: "Stats", checked: visibleDocks["stats"] !== false, action: () => toggleDock("stats") },
     { label: "Fullscreen Preview", disabled: true },
     null,
     { label: "Windowed Projector (Program)", action: openProgramWindowed },

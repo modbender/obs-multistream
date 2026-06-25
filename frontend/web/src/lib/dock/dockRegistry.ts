@@ -7,6 +7,7 @@ import SourcesDock from "../docks/SourcesDock.svelte";
 import MultistreamDock from "../docks/MultistreamDock.svelte";
 import AudioMixerDock from "../docks/AudioMixerDock.svelte";
 import TransitionsDock from "../docks/TransitionsDock.svelte";
+import StatsDock from "../docks/StatsDock.svelte";
 
 // One entry per dock in the §3.5 inventory. `id` is the stable Dockview panel id
 // (also the dock id the future window.detach uses). `accent` marks Controls /
@@ -28,6 +29,7 @@ export const DOCKS: DockDef[] = [
   { id: "transitions", title: "Transitions", component: TransitionsDock, params: {} },
   { id: "controls", title: "Controls", component: ControlsDock, params: {}, accent: true },
   { id: "multistream", title: "Multistream", component: MultistreamDock, params: {}, accent: true },
+  { id: "stats", title: "Stats", component: StatsDock, params: {} },
 ];
 
 export function dockById(id: string): DockDef | undefined {
