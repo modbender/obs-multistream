@@ -107,6 +107,16 @@ target_sources(
     src/mcp/McpServer.hpp
 )
 
+# Windows resource: embed the app icon + version/product metadata so the exe and
+# its taskbar/Explorer entry show the OBS MultiStream mark instead of the default
+# blank icon. configure_file substitutes the icon path (forward slashes, which the
+# resource compiler accepts) and the shared OBS_VERSION_*/OBS_LEGAL_COPYRIGHT.
+if(OS_WINDOWS)
+  set(OBS_FRONTEND_ICON "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows/obs-multistream.ico")
+  configure_file(cmake/windows/obs.rc.in obs.rc)
+  target_sources(${_target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/obs.rc")
+endif()
+
 # CEF's required compiler/linker flags, defines, and include paths.
 set_executable_target_properties(${_target})
 
