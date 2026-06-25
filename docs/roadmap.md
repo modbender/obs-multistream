@@ -605,6 +605,80 @@ the same engine), independent of the remaining Phase-4 UI items.
 
 ---
 
+## Phase 6 — Data importer: import config from OBS Studio 🔭 PLANNED (not started)
+
+One-click migration for users coming from official OBS Studio: detect an existing
+OBS install and import their production — scenes, sources, filters, transforms,
+transitions, stream credentials, and the video/audio settings — into this fork,
+**without touching the original OBS data** (read-only of `%APPDATA%/obs-studio`,
+consistent with the config-separation rebrand, which deliberately *kept* reading
+the `obs-studio/basic/scenes/` path for exactly this).
+
+**Feasibility: largely YES — and the heaviest piece is the cheapest.** OBS scene
+collections are **libobs-native serialization** — the *same* `obs_save_sources` /
+`obs_load_sources` format this fork already writes and reads in
+`frontend/src/scene_persistence.cpp`. So scenes, sources, filters, scene-item
+transforms/crops/visibility, groups, and transitions can be loaded by the same
+libobs API we already call; no bespoke parser. The surrounding metadata (stream
+service, video/audio/output settings) is plain INI/JSON and maps with small,
+well-understood translation logic.
+
+**What maps, and how (confidence noted):**
+- **Scene collection → Default canvas** *(strong — libobs-native)*: read
+  `basic/scenes/<collection>.json`, feed its sources array through
+  `obs_load_sources` (same path as our own collection load), persist to our
+  `scene_collection.json`. Items/filters/transforms come along for free.
+- **`service.json` → Stream profile** *(strong)*: platform + server + stream key is
+  exactly our reusable credential model (`streams.json`). Near 1:1.
+- **`basic.ini` video → Canvas** *(strong)*: base/output resolution + FPS define a
+  `CanvasDefinition`; encoder/bitrate populate its encoder settings.
+- **`basic.ini` audio → global audio** *(medium)*: sample rate/channels +
+  desktop/mic device ids map onto our `audio_devices.json` (channels 1–6) seeded at
+  boot — needs device-id reconciliation against the local machine.
+- **Hotkeys** *(medium — needs format verification)*: source hotkeys travel inside
+  the scene-collection JSON (load for free via libobs); global/frontend hotkeys
+  live in the profile and would map to our `hotkeys.json`. Exact storage layout to
+  confirm before relying on it.
+
+**Model translation — the one real design task:** OBS has a *single* output; this
+fork has **N canvases × stream profiles × output bindings**. The clean default
+import = one Canvas (from the profile's video settings) + one Stream profile (from
+`service.json`) + one Output binding linking them → the imported production streams
+exactly as it did in OBS, and the user fans out to more destinations afterward.
+
+**Known caveats / pre-work:**
+- **Single scene collection** — the new frontend currently persists *one* collection
+  (multi-named-collection is a tracked follow-up). Either land multi-collection
+  first, or v1 imports only the user-selected/active collection.
+- **Plugin availability** — a source only loads if its plugin is present. This fork
+  bundles the same plugin set, so common sources resolve; sources owned by the
+  **excluded** plugins (`frontend-tools`, `decklink-*`, `aja-output-ui`,
+  `obs-websocket`) won't import. Report skips, don't fail silently.
+- **Recording / replay-buffer settings won't map** — this fork is streaming-only
+  (recording dormant). Import streaming + scene data; drop record-only fields.
+- **libobs version** — scene JSON is libobs-version-tied but backward-compatible;
+  this fork tracks upstream (32.x), so same-or-older OBS collections should load.
+  Flag a warning on a *newer* source-OBS than our libobs.
+- **`global.ini`** (theme/language/UI defaults) — low value; we have our own token
+  theming. Skip beyond maybe language.
+- **Reference, don't lift:** the retired Qt frontend (`frontend_old`, in git
+  history) had an OBS-Studio importer — its *scanning/UI* was Qt-coupled and is gone,
+  but the libobs-load approach is the reusable core.
+
+**Sketch of the flow (for the future spec, not committing to it):** detect install →
+enumerate profiles + scene collections → user picks what to import (and a target:
+new vs merge) → load scenes via libobs → derive Canvas from video settings → create
+Stream profile from `service.json` → create the linking Output binding → import
+audio devices + hotkeys → report what was imported vs skipped. **Always additive and
+non-destructive**; the original OBS install is never modified.
+
+**Scope note:** PLANNED only — its own brainstorm → spec → plan cycle before any
+build. Independent of the remaining Phase-4 verification items and Phase 5. Reuses
+the existing libobs load path and the three-layer canvas/profile/binding model; do
+not invent a parallel persistence format.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
