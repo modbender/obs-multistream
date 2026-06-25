@@ -95,7 +95,7 @@
     null,
     { label: "Theme Editor…", action: () => openThemeEditor() },
   ]);
-  const helpItems: (MenuItem | null)[] = [{ label: "About OBS MultiStreamer", action: () => openAbout() }];
+  const helpItems: (MenuItem | null)[] = [{ label: "About OBS MultiStream", action: () => openAbout() }];
 </script>
 
 <div class="menubar">

@@ -77,7 +77,7 @@ int WindowManager::Detach(const std::string &dockId)
 	RECT rc = {0, 0, 960, 540};
 	const DWORD style = WS_OVERLAPPEDWINDOW;
 	AdjustWindowRect(&rc, style, FALSE);
-	HWND hwnd = CreateWindowExW(0, kDetachedClassName, L"OBS MultiStreamer — Detached", style, CW_USEDEFAULT,
+	HWND hwnd = CreateWindowExW(0, kDetachedClassName, L"OBS MultiStream — Detached", style, CW_USEDEFAULT,
 				   CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, instance_,
 				   nullptr);
 	if (!hwnd) {

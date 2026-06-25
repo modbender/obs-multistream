@@ -37,14 +37,14 @@
     if (e.target === e.currentTarget) onClose();
   }}
 >
-  <div class="modal" role="dialog" aria-modal="true" aria-label="About OBS MultiStreamer">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="About OBS MultiStream">
     <header class="modal-head">
       <h3>About</h3>
       <button class="icon close" title="Close" onclick={onClose}>✕</button>
     </header>
 
     <div class="modal-body">
-      <div class="wordmark">OBS MultiStreamer</div>
+      <div class="wordmark">OBS MultiStream</div>
       <p class="tagline">Native multi-destination streaming, built on OBS Studio.</p>
 
       <dl class="facts">

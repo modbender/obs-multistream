@@ -1,4 +1,4 @@
-# OBS MultiStreamer — Roadmap
+# OBS MultiStream — Roadmap
 
 Native multistreaming built into this OBS Studio fork via **canvas / output
 multiplexing**: canvases (resolution + fps + encoder settings) become the unit
@@ -7,7 +7,7 @@ of streaming, each wired to one or more destinations. Built on OBS's existing
 and plugin ecosystem.
 
 This is a **private fork**, not submitted upstream. The app is rebranded
-"OBS MultiStreamer."
+"OBS MultiStream."
 
 Status legend: ✅ done · 🔧 in progress · 🐛 open bug · 🔭 planned · 💭 in design
 · ⏸ deferred

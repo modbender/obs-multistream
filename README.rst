@@ -1,77 +1,66 @@
-OBS Studio <https://obsproject.com>
-===================================
+OBS MultiStream
+===============
 
-.. image:: https://github.com/obsproject/obs-studio/actions/workflows/push.yaml/badge.svg?branch=master
-   :alt: OBS Studio Build Status - GitHub Actions
-   :target: https://github.com/obsproject/obs-studio/actions/workflows/push.yaml?query=branch%3Amaster
+OBS MultiStream — native multi-destination streaming, a fork of `OBS Studio
+<https://obsproject.com>`_.
 
-.. image:: https://badges.crowdin.net/obs-studio/localized.svg
-   :alt: OBS Studio Translation Project Progress
-   :target: https://crowdin.com/project/obs-studio
+What is OBS MultiStream?
+------------------------
 
-.. image:: https://img.shields.io/discord/348973006581923840.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2
-   :alt: OBS Studio Discord Server
-   :target: https://obsproject.com/discord
+OBS MultiStream is an OBS Studio fork that streams one composited production
+to many destinations at once. Instead of a single output, it builds on
+multiple canvases (each with its own resolution, FPS, and encoder settings)
+and multiplexes the encoded output to every enabled destination bound to a
+canvas — encode once per canvas, fan out to many. The desktop UI is a
+CEF-hosted Svelte frontend.
 
-What is OBS Studio?
--------------------
-
-OBS Studio is software designed for capturing, compositing, encoding,
-recording, and streaming video content, efficiently.
+It is built on `OBS Studio <https://obsproject.com>`_ as its upstream base,
+inheriting its capture, compositing, encoding, and plugin ecosystem.
 
 It's distributed under the GNU General Public License v2 (or any later
 version) - see the accompanying COPYING file for more details.
 
-Quick Links
------------
+Upstream OBS Studio resources
+-----------------------------
 
-- Website: https://obsproject.com
+The following are genuine OBS Studio (upstream) resources. They cover the
+underlying engine and contribution process, not fork-specific workflows:
 
-- Help/Documentation/Guides: https://github.com/obsproject/obs-studio/wiki
+- OBS Studio website: https://obsproject.com
 
-- Forums: https://obsproject.com/forum/
+- OBS Studio Help/Documentation/Guides: https://github.com/obsproject/obs-studio/wiki
 
-- Build Instructions: https://github.com/obsproject/obs-studio/wiki/Install-Instructions
+- OBS Studio Forums: https://obsproject.com/forum/
 
-- Developer/API Documentation: https://obsproject.com/docs
+- OBS Studio Build Instructions: https://github.com/obsproject/obs-studio/wiki/Install-Instructions
 
-- Donating/backing/sponsoring: https://obsproject.com/contribute
+- OBS Studio Developer/API Documentation: https://obsproject.com/docs
 
-- Bug Tracker: https://github.com/obsproject/obs-studio/issues
+- OBS Studio Bug Tracker: https://github.com/obsproject/obs-studio/issues
 
 Contributing
 ------------
 
-- If you would like to help fund or sponsor the project, you can do so
-  via `Patreon <https://www.patreon.com/obsproject>`_, `OpenCollective
-  <https://opencollective.com/obsproject>`_, or `PayPal
-  <https://www.paypal.me/obsproject>`_.  See our `contribute page
-  <https://obsproject.com/contribute>`_ for more information.
+- OBS MultiStream is a fork. Coding and commit guidelines, code style, and
+  the code of conduct are inherited from OBS Studio (upstream):
 
-- If you wish to contribute code to the project, please make sure to
-  read the coding and commit guidelines:
-  https://github.com/obsproject/obs-studio/blob/master/CONTRIBUTING.md
-  
-- Code for the project follows the code style guidelines, located
-  here: https://github.com/obsproject/obs-studio/blob/master/CODESTYLE.md
+  - Coding and commit guidelines:
+    https://github.com/obsproject/obs-studio/blob/master/CONTRIBUTING.md
 
-- Developer/API documentation can be found here:
+  - Code style guidelines:
+    https://github.com/obsproject/obs-studio/blob/master/CODESTYLE.md
+
+  - Code of Conduct:
+    https://github.com/obsproject/obs-studio/blob/master/COC.rst
+
+- Developer/API documentation for the underlying engine can be found here:
   https://obsproject.com/docs
 
-- If you wish to contribute translations, do not submit pull requests.
-  Instead, please use Crowdin.  For more information read this page:
-  https://obsproject.com/wiki/How-To-Contribute-Translations-For-OBS
-
-- Contributors to OBS Studio and related repositories are expected to
-  follow our Code of Conduct, which can be read here:
-  https://github.com/obsproject/obs-studio/blob/master/COC.rst
-
-- Other ways to contribute are by helping people out with support on
-  our forums or in our community chat.  Please limit support to topics
-  you fully understand -- bad advice is worse than no advice.  When it
-  comes to something that you don't fully know or understand, please
-  defer to the official help or official channels.
-
+- If you would like to help fund or sponsor upstream OBS Studio, you can do
+  so via `Patreon <https://www.patreon.com/obsproject>`_, `OpenCollective
+  <https://opencollective.com/obsproject>`_, or `PayPal
+  <https://www.paypal.me/obsproject>`_.  See the OBS Studio `contribute page
+  <https://obsproject.com/contribute>`_ for more information.
 
 SAST Tools
 ----------

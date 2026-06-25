@@ -134,9 +134,9 @@ package() {
 
     local volume_name
     if (( commit_distance > 0 )) {
-      volume_name="OBS Studio ${commit_version}-${commit_hash} (${arch_names[${target##*-}]})"
+      volume_name="OBS MultiStream ${commit_version}-${commit_hash} (${arch_names[${target##*-}]})"
     } else {
-      volume_name="OBS Studio ${commit_version} (${arch_names[${target##*-}]})"
+      volume_name="OBS MultiStream ${commit_version} (${arch_names[${target##*-}]})"
     }
 
     if (( package )) {
