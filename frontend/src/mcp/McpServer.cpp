@@ -586,6 +586,17 @@ McpServer::json McpServer::BuildToolsList() const
 
 McpServer::json McpServer::GateAndRun(const std::string &method, const json &callParams) const
 {
+	// The mcp.* bridge namespace configures THIS server (enable, port, token,
+	// allowMutations/allowGoLive). Reaching it from the network endpoint the server
+	// itself authorizes would let a client escalate its own capabilities (e.g.
+	// obs_call mcp.setConfig {allowGoLive:true}), rotate the token, or stop the
+	// server. Those methods are reachable only from the in-process Settings UI; deny
+	// them here at the single chokepoint every tool (obs_call + curated) passes
+	// through.
+	if (method.rfind("mcp.", 0) == 0) {
+		return ToolText("method 'mcp.*' is not callable from MCP", true);
+	}
+
 	// Classify + enforce capability before executing. Read the flags under the lock
 	// (the Settings UI may flip them on the UI thread while we run on the HTTP thread).
 	const Capability cap = Classify(method);

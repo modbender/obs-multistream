@@ -1999,36 +1999,38 @@ void ObsBootstrap::RunMcpSelfTest()
 		" content[0] is object=" + (statsObject ? "true" : "false") +
 		((statsOk && statsObject) ? " (OK)" : " (MISMATCH)"));
 
-	// 6) Config bridge: mcp.getConfig (via obs_call, classified Read) returns the
-	// expected McpConfig shape. Reads the live g_mcp via Mcp::Instance().
-	json cfgCall = call(json{{"jsonrpc", "2.0"},
-				 {"id", 6},
-				 {"method", "tools/call"},
-				 {"params", json{{"name", "obs_call"},
-						 {"arguments", json{{"method", "mcp.getConfig"}, {"params", json::object()}}}}}});
-	bool cfgOk = false;
-	bool cfgShape = false;
-	if (cfgCall.is_object() && cfgCall.contains("result")) {
-		const json &r = cfgCall["result"];
-		cfgOk = r.is_object() && r.value("isError", true) == false;
-		if (cfgOk && r["content"].is_array() && !r["content"].empty()) {
-			try {
-				const json cfg = json::parse(r["content"][0].value("text", std::string()));
-				cfgShape = cfg.is_object() && cfg.contains("enabled") && cfg.contains("port") &&
-					   cfg.contains("token") && cfg.contains("allowMutations") &&
-					   cfg.contains("allowGoLive") && cfg.contains("listening") &&
-					   cfg.contains("lastError") && cfg.contains("endpoint");
-			} catch (...) {
-				cfgShape = false;
-			}
+	// 6) Security: the mcp.* namespace configures THIS server, so it must NOT be
+	// reachable via the network endpoint it authorizes -- else a client could
+	// obs_call mcp.setConfig {allowGoLive:true} to escalate its own capabilities.
+	// Both the escalation attempt (setConfig) and a config read (getConfig) must be
+	// refused at the GateAndRun chokepoint, BEFORE dispatch, so nothing executes.
+	auto deniedFromMcp = [&](const std::string &method, const json &p) -> bool {
+		json r = call(json{{"jsonrpc", "2.0"},
+				   {"id", 6},
+				   {"method", "tools/call"},
+				   {"params", json{{"name", "obs_call"},
+						   {"arguments", json{{"method", method}, {"params", p}}}}}});
+		if (!r.is_object() || !r.contains("result")) {
+			return false;
 		}
-	}
-	HostLog(std::string("[selftest] mcp mcp.getConfig -> isError=") + (cfgOk ? "false" : "true") + " shape=" +
-		(cfgShape ? "complete" : "INCOMPLETE") + ((cfgOk && cfgShape) ? " (OK)" : " (MISMATCH)"));
+		const json &res = r["result"];
+		const bool isErr = res.is_object() && res.value("isError", false) == true;
+		std::string text;
+		if (res["content"].is_array() && !res["content"].empty()) {
+			text = res["content"][0].value("text", std::string());
+		}
+		return isErr && text.find("not callable") != std::string::npos;
+	};
+	const bool escalationBlocked = deniedFromMcp("mcp.setConfig", json{{"allowGoLive", true}});
+	const bool configReadBlocked = deniedFromMcp("mcp.getConfig", json::object());
+	const bool mcpNsGuarded = escalationBlocked && configReadBlocked;
+	HostLog(std::string("[selftest] mcp namespace guard -> setConfig blocked=") +
+		(escalationBlocked ? "true" : "false") + " getConfig blocked=" + (configReadBlocked ? "true" : "false") +
+		(mcpNsGuarded ? " (OK, no self-config via MCP)" : " (MISMATCH -- privilege escalation!)"));
 
 	if (hasServerInfo && hasObsCall && curatedOk && scenesOk && scenesArray && gateOk && statsOk && statsObject &&
-	    cfgOk && cfgShape) {
-		HostLog("[selftest] mcp -> initialize/tools.list/obs_call/curated/getConfig OK; go-live gated OK");
+	    mcpNsGuarded) {
+		HostLog("[selftest] mcp -> initialize/tools.list/obs_call/curated OK; go-live + mcp.* gated OK");
 	} else {
 		HostLog("[selftest] mcp -> FAILED (see step lines above)");
 	}
