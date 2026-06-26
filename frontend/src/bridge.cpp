@@ -2820,6 +2820,16 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 		return false;
 	}
 
+	// The Default canvas has no runtime mix -- a resolution/fps change drives the
+	// global/main video pipeline instead. Apply it BEFORE committing any def fields
+	// so a failed reset (rolled back inside ApplyGlobalVideo) leaves the def -- and
+	// thus canvases.json -- untouched and consistent with the live pipeline.
+	if (resChanged && def->isDefault) {
+		if (!ApplyGlobalVideo(newW, newH, newW, newH, newFpsN, newFpsD, error)) {
+			return false;
+		}
+	}
+
 	def->width = newW;
 	def->height = newH;
 	def->fpsNum = newFpsN;
@@ -2842,17 +2852,11 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 	}
 	// Resolution/fps changes resize the live mix; the guard above already refused
 	// while the canvas is live, so this only runs on an idle canvas. (Encoder-id
-	// changes don't touch the mix.) The Default canvas has no runtime mix -- it
-	// drives the global/main video pipeline instead, so reset that. On a failed
-	// reset bail before Save() so the broken resolution isn't persisted.
-	if (resChanged) {
-		if (def->isDefault) {
-			if (!ApplyGlobalVideo(newW, newH, newW, newH, newFpsN, newFpsD, error)) {
-				return false;
-			}
-		} else {
-			ObsBootstrap::CanvasRuntime().ResetVideo(*def);
-		}
+	// changes don't touch the mix.) The Default canvas was already handled above
+	// (it drives global video, not a runtime mix); ResetVideo reads *def so it must
+	// run after the commit.
+	if (resChanged && !def->isDefault) {
+		ObsBootstrap::CanvasRuntime().ResetVideo(*def);
 	}
 
 	store.Save();
