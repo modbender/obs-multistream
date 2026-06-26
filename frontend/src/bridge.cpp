@@ -4477,6 +4477,7 @@ bool MethodSettingsRestore(const json &params, json &result, std::string &error)
 	}
 
 	EmitEvent("canvas.changed", json::object());
+	EmitEvent("streamProfile.changed", json::object());
 	EmitEvent("outputBinding.changed", json::object());
 	EmitEvent("multistream.changed", json::object());
 	EmitEvent("mcp.changed", json::object());
