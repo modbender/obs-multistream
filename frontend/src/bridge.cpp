@@ -372,6 +372,16 @@ static bool ApplyGlobalVideo(uint32_t baseW, uint32_t baseH, uint32_t outW, uint
 	ovi.fps_num = fpsNum;
 	ovi.fps_den = fpsDen;
 
+	// All non-resolution fields are copied from the current config, so if these six
+	// already match there is genuinely nothing to reset. Skip the full pipeline
+	// reset (and its preview flicker) -- this also makes the redundant double-apply
+	// on a Settings Cancel a no-op.
+	if (ovi.base_width == previous.base_width && ovi.base_height == previous.base_height &&
+	    ovi.output_width == previous.output_width && ovi.output_height == previous.output_height &&
+	    ovi.fps_num == previous.fps_num && ovi.fps_den == previous.fps_den) {
+		return true;
+	}
+
 	const int rv = obs_reset_video(&ovi);
 	if (rv != OBS_VIDEO_SUCCESS) {
 		// Restore the prior config so we never leave video in a broken state.
