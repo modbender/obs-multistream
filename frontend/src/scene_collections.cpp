@@ -3,6 +3,7 @@
 #include "bridge.hpp"
 #include "log.hpp"
 #include "multistream/MultistreamEngine.hpp"
+#include "multistream/OutputBindingStore.hpp"
 #include "multistream/StorePaths.hpp"
 #include "obs_bootstrap.hpp"
 #include "scene_persistence.hpp"
@@ -52,6 +53,20 @@ std::string Slugify(const std::string &name)
 	return slug.empty() ? std::string("collection") : slug;
 }
 
+// The output-bindings file is a sibling of the scene file: strip a trailing
+// ".json" and append ".output_bindings.json" (scenes/<slug>.json ->
+// scenes/<slug>.output_bindings.json). Derived from sceneFile so no index
+// migration is needed when bindings became per-collection.
+std::string BindingsRelFor(const std::string &sceneRel)
+{
+	const std::string suffix = ".json";
+	std::string base = sceneRel;
+	if (base.size() >= suffix.size() && base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
+		base.erase(base.size() - suffix.size());
+	}
+	return base + ".output_bindings.json";
+}
+
 } // namespace
 
 std::string SceneCollections::IndexPath()
@@ -73,6 +88,13 @@ std::string SceneCollections::ActiveScenePath() const
 {
 	const SceneCollectionRecord *active = Active();
 	return MultistreamBasicPath(active ? active->sceneFile.c_str() : "scene_collection.json");
+}
+
+std::string SceneCollections::ActiveBindingsPath() const
+{
+	const SceneCollectionRecord *active = Active();
+	const std::string sceneRel = active ? active->sceneFile : std::string("scene_collection.json");
+	return MultistreamBasicPath(BindingsRelFor(sceneRel).c_str());
 }
 
 std::string SceneCollections::UniqueSceneFileForName(const std::string &name) const
@@ -225,8 +247,11 @@ bool SceneCollections::Switch(const std::string &id, std::string &error)
 		return false;
 	}
 
-	// Persist the outgoing collection's scenes before tearing them down.
+	// Persist the outgoing collection's scenes + its output bindings (per-collection)
+	// before tearing them down. Done while activeId_ still points at the outgoing
+	// collection so both paths resolve to its files.
 	SceneCollection::Save(ActiveScenePath());
+	ObsBootstrap::OutputBindings().Save(ActiveBindingsPath());
 
 	// Tear the outgoing scene world down leak-safely: unbind + destroy the channel-0
 	// transition (releasing its wrapped scene), release the boot placeholder scene if
@@ -251,11 +276,20 @@ bool SceneCollections::Switch(const std::string &id, std::string &error)
 	// as boot does after the initial Load.
 	Transitions::Init();
 
+	// Load the incoming collection's output bindings (per-collection). A missing file
+	// (a never-saved or freshly-created collection has none) loads as empty -- no
+	// crash; the preview-gating + Multistream dock simply see zero bindings. Done
+	// after activeId_ flipped above so ActiveBindingsPath() resolves the target.
+	ObsBootstrap::OutputBindings().Load(ActiveBindingsPath());
+
 	// Resync every window: the active collection, its scene list, and the transition
-	// (re-created above) all changed.
+	// (re-created above) all changed; the bindings swap re-decides preview-gating
+	// (outputBinding.changed) and refreshes the Multistream dock (multistream.changed).
 	Bridge::EmitEvent("collections.changed", nlohmann::json::object());
 	Bridge::EmitEvent("scenes.changed", nlohmann::json{{"canvas", nullptr}});
 	Bridge::EmitEvent("transitions.changed", nlohmann::json::object());
+	Bridge::EmitEvent("outputBinding.changed", nlohmann::json::object());
+	Bridge::EmitMultistreamChanged();
 
 	HostLog("[scene] switched to collection '" + it->name + "' file=" + ActiveScenePath());
 	return true;

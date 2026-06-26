@@ -42,6 +42,13 @@ public:
 	// collection is active, so scene persistence keeps working pre-migration.
 	std::string ActiveScenePath() const;
 
+	// Absolute path of the active collection's per-collection output-bindings file,
+	// a sibling of its scene file (scenes/<slug>.json -> scenes/<slug>.output_bindings.json).
+	// Output bindings travel with the collection (each show routes to its own
+	// destinations); canvases + stream profiles stay global. Falls back to the legacy
+	// single-file scene path's sibling when no collection is active.
+	std::string ActiveBindingsPath() const;
+
 	// Seed a migration record that REUSES an existing scene file in place (no
 	// copy). Used once on first run to adopt the legacy scene_collection.json.
 	// Makes it active and saves the index.

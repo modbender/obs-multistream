@@ -2,6 +2,9 @@
 
 #include "StorePaths.hpp"
 
+#include "../obs_bootstrap.hpp"
+#include "../scene_collections.hpp"
+
 #include <util/platform.h>
 #include <util/util.hpp>
 
@@ -37,17 +40,27 @@ void OutputBindingStore::FromJson(const nlohmann::json &j)
 
 void OutputBindingStore::Load()
 {
-	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
+	Load(ObsBootstrap::SceneCollections().ActiveBindingsPath());
+}
+
+void OutputBindingStore::Load(const std::string &path)
+{
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
 	const char *js = root ? obs_data_get_json(root) : nullptr;
 	FromJson(js ? nlohmann::json::parse(js) : nlohmann::json::object());
 }
 
 void OutputBindingStore::Save() const
 {
+	Save(ObsBootstrap::SceneCollections().ActiveBindingsPath());
+}
+
+void OutputBindingStore::Save(const std::string &path) const
+{
 	OBSDataAutoRelease root = obs_data_create_from_json(ToJson().dump().c_str());
 
-	std::filesystem::path dir = std::filesystem::u8path(FilePath()).parent_path();
+	std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
 	os_mkdirs(dir.u8string().c_str());
 
-	obs_data_save_json_pretty_safe(root, FilePath().c_str(), "tmp", "bak");
+	obs_data_save_json_pretty_safe(root, path.c_str(), "tmp", "bak");
 }

@@ -3,6 +3,7 @@
 #include <obs.h>
 #include <obs-frontend-internal.hpp>
 #include <util/base.h>
+#include <util/platform.h>
 
 #include <graphics/matrix4.h>
 #include <graphics/vec2.h>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
@@ -334,7 +336,7 @@ void LoadMultistreamModel()
 		" stream profile(s); primary=" + (primary ? primary->DisplayName() : "(none)"));
 
 	HostLog("[obs] multistream: " + std::to_string(g_outputBindings.Bindings().bindings.size()) +
-		" output binding(s); file=" + OutputBindingStore::FilePath());
+		" output binding(s); file=" + g_sceneCollections.ActiveBindingsPath());
 	HostLog("[obs] multistream: canvases.json=" + CanvasStore::FilePath());
 	HostLog("[obs] multistream: streams.json=" + StreamProfileStore::FilePath());
 }
@@ -469,6 +471,25 @@ bool ObsBootstrap::Start()
 	if (g_sceneCollections.List().empty() && !g_sceneCollections.IndexWasCorrupt()) {
 		g_sceneCollections.SeedExisting("Untitled", "scene_collection.json");
 		HostLog("[scene] migrated single-file scenes into collection 'Untitled'");
+
+		// Output bindings were a single global output_bindings.json (pre-6a); they
+		// are now per scene-collection. Move the legacy file to the migrated
+		// collection's bindings path in place (rename; zero data loss). An absent
+		// legacy file just means the collection starts with no bindings.
+		const std::string legacyBindings = OutputBindingStore::FilePath();
+		const std::string targetBindings = g_sceneCollections.ActiveBindingsPath();
+		if (os_file_exists(legacyBindings.c_str()) && !os_file_exists(targetBindings.c_str())) {
+			std::error_code ec;
+			std::filesystem::rename(std::filesystem::u8path(legacyBindings),
+						std::filesystem::u8path(targetBindings), ec);
+			if (ec) {
+				std::filesystem::copy_file(std::filesystem::u8path(legacyBindings),
+							   std::filesystem::u8path(targetBindings),
+							   std::filesystem::copy_options::overwrite_existing, ec);
+			}
+			HostLog("[scene] migrated global output bindings -> " + targetBindings +
+				(ec ? " (FAILED: " + ec.message() + ")" : ""));
+		}
 	}
 	const SceneCollectionRecord *activeCollection = g_sceneCollections.Active();
 	HostLog("[scene] " + std::to_string(g_sceneCollections.List().size()) + " scene collection(s); active='" +
