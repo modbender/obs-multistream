@@ -22,7 +22,16 @@ export interface DockDef {
 }
 
 export const DOCKS: DockDef[] = [
-  { id: "preview", title: "Preview · Default Canvas", component: PreviewDock, params: {} },
+  // Default canvas preview. The tab carries a status dot + a `GLOBAL S/S` badge
+  // (mock dockHead): the Default canvas renders the global scenes/sources, so its
+  // header is labelled distinctly from the additional canvases' `OWN S/S` docks.
+  // __-prefixed keys feed the custom tab and are stripped before the Svelte body.
+  {
+    id: "preview",
+    title: "Preview · Default Canvas",
+    component: PreviewDock,
+    params: { __dot: "var(--color-muted)", __badge: "GLOBAL S/S" },
+  },
   { id: "scenes", title: "Scenes", component: ScenesDock, params: {} },
   { id: "sources", title: "Sources", component: SourcesDock, params: {} },
   { id: "mixer", title: "Audio Mixer", component: AudioMixerDock, params: {} },

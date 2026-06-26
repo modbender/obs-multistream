@@ -143,30 +143,41 @@
     }
   }
 
-  // Build the dock-model.html default arrangement:
-  //   center column = Preview (top) over a bottom row of
-  //     Scenes · Sources · Audio Mixer · Transitions · Controls (Controls rightmost)
-  //   right rail   = Multistream, right of the center. Non-default canvas docks are
-  //     added at runtime by the reconciler (tab-stacked into the center preview).
+  // Build the mock's studio body (the `isStudio` block): a two-row grid.
+  //   top    = canvas-previews row — `preview` (Default canvas) leftmost; the
+  //            reconciler adds additional-canvas docks to its RIGHT, side-by-side.
+  //   bottom = docks row — Scenes · Sources · Stats · Mixer, left-to-right.
+  // The previews row is sized ~1.7x the bottom row (mock `flex:1.7` vs `flex:1`).
+  // Multistream/Controls/Transitions are intentionally NOT in the default set
+  // (Multistream -> Stream page, Controls -> the GO-LIVE bar, Transitions has no
+  // studio home in the mock); they stay registered in DOCKS so the CANVASES-bar
+  // restore chips can still reopen them.
   function buildDefaultLayout(dv: DockviewApi): void {
     dv.clear();
     dv.addPanel(panelOptions("preview", detachDock));
-    // Bottom row, left-to-right, anchored below the preview.
+    // Bottom docks row, anchored below the previews row, then left-to-right.
     dv.addPanel(panelOptions("scenes", detachDock, { position: { referencePanel: "preview", direction: "below" } }));
     dv.addPanel(panelOptions("sources", detachDock, { position: { referencePanel: "scenes", direction: "right" } }));
-    dv.addPanel(panelOptions("mixer", detachDock, { position: { referencePanel: "sources", direction: "right" } }));
-    dv.addPanel(
-      panelOptions("transitions", detachDock, { position: { referencePanel: "mixer", direction: "right" } }),
-    );
-    dv.addPanel(
-      panelOptions("controls", detachDock, { position: { referencePanel: "transitions", direction: "right" } }),
-    );
-    // Right rail spanning the height, right of the preview/center column.
-    dv.addPanel(
-      panelOptions("multistream", detachDock, { position: { referencePanel: "preview", direction: "right" } }),
-    );
+    dv.addPanel(panelOptions("stats", detachDock, { position: { referencePanel: "sources", direction: "right" } }));
+    dv.addPanel(panelOptions("mixer", detachDock, { position: { referencePanel: "stats", direction: "right" } }));
+    sizeStudioRows(dv);
     logDocks(dv);
     refreshVisible();
+  }
+
+  // Approximate the mock's 1.7:1 previews-to-docks height split by sizing the
+  // top (preview) group; the bottom row's groups share the remaining height. The
+  // top-level vertical division persists when the reconciler later adds canvas
+  // docks into the previews row. Skipped (default even split) if the host has not
+  // been measured yet at build time; retried next frame in that case.
+  function sizeStudioRows(dv: DockviewApi): void {
+    const apply = (): void => {
+      const total = dv.height;
+      if (total <= 0) return;
+      dv.getPanel("preview")?.api.setSize({ height: Math.round((total * 1.7) / 2.7) });
+    };
+    apply();
+    if (dv.height <= 0) requestAnimationFrame(apply);
   }
 
   // One log line per dock added, so a headless smoke run can confirm the full
