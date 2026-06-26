@@ -4,13 +4,17 @@
   import DockHost from "../dock/DockHost.svelte";
   import { DOCKS, panelOptions } from "../dock/dockRegistry";
   import { layoutStore } from "../dock/layoutStore.svelte";
-  import { startCanvasDockReconciler, reconcileCanvasDocks } from "../dock/canvasReconciler";
+  import {
+    startCanvasDockReconciler,
+    reconcileCanvasDocks,
+    setCanvasUserHidden,
+    clearCanvasUserHidden,
+  } from "../dock/canvasReconciler";
   import { obs, type CanvasInfo, type MultistreamStatus, type MultistreamState, type Stats } from "../bridge";
   import { pageStore } from "../pageStore.svelte";
-  import { openSettings } from "../settingsOpener.svelte";
   import { suspendPreview } from "../previewGate.svelte";
+  import CollectionDialog, { type DialogSpec } from "../CollectionDialog.svelte";
 
-  let version = $state("…");
   let api = $state<DockviewApi | undefined>(undefined);
   let visibleDocks = $state<Record<string, boolean>>({});
   let canvasDocksPresent = $state<Set<string>>(new Set());
@@ -22,8 +26,10 @@
   let stats = $state<Stats | null>(null);
   let focusedCanvasUuid = $state<string | null>(null);
   let busy = $state(false);
+  let dialog = $state<DialogSpec | null>(null);
 
-  // State -> color, same token mapping the Multistream/Stats docks use.
+  // State -> color, same token mapping the Multistream/Stats docks use. Used for
+  // the per-canvas dock header dots (idle = muted).
   const STATE_COLOR: Record<MultistreamState, string> = {
     idle: "var(--color-muted)",
     connecting: "var(--meter-yellow)",
@@ -31,21 +37,62 @@
     error: "var(--color-live)",
   };
 
-  // Overall live state across every enabled output: live wins, then connecting,
-  // then error, else idle. Drives the focused dot, the live badge, and the button.
+  // The focused canvas drives the bottom bar: default to the active CANVASES chip,
+  // else the Default canvas, else the first canvas. `null` only before the list
+  // loads. Live state below is scoped to THIS canvas's outputs, not all outputs.
+  let activeCanvasUuid = $derived(
+    focusedCanvasUuid ?? canvases.find((c) => c.isDefault)?.uuid ?? canvases[0]?.uuid ?? null,
+  );
+  let focusedOutputs = $derived(outputs.filter((o) => o.canvasUuid === activeCanvasUuid));
+
+  // Live state across the FOCUSED canvas's enabled outputs: live wins, then
+  // connecting, then error, else idle. Drives the focus dot, live badge, button.
   let liveState = $derived.by<MultistreamState>(() => {
-    if (outputs.some((o) => o.state === "live")) return "live";
-    if (outputs.some((o) => o.state === "connecting")) return "connecting";
-    if (outputs.some((o) => o.state === "error")) return "error";
+    if (focusedOutputs.some((o) => o.state === "live")) return "live";
+    if (focusedOutputs.some((o) => o.state === "connecting")) return "connecting";
+    if (focusedOutputs.some((o) => o.state === "error")) return "error";
     return "idle";
   });
-  let anyRunning = $derived(outputs.some((o) => o.state === "live" || o.state === "connecting"));
+  let anyRunning = $derived(focusedOutputs.some((o) => o.state === "live" || o.state === "connecting"));
 
-  let focusedName = $derived(
-    canvases.find((c) => c.uuid === focusedCanvasUuid)?.name ??
-      canvases.find((c) => c.isDefault)?.name ??
-      "Default Canvas",
+  // Mock focusedDot: green when live, accent otherwise (connecting/error keep the
+  // meter colors so the dot still reads transient states).
+  let focusDotColor = $derived(
+    liveState === "live"
+      ? "var(--meter-green)"
+      : liveState === "connecting"
+        ? "var(--meter-yellow)"
+        : liveState === "error"
+          ? "var(--color-live)"
+          : "var(--color-accent)",
   );
+
+  let focusedCanvas = $derived(canvases.find((c) => c.uuid === activeCanvasUuid) ?? null);
+  // Mock focusedLabel: "Name · WxH".
+  let focusedLabel = $derived(
+    focusedCanvas
+      ? focusedCanvas.name + " · " + focusedCanvas.outputWidth + "×" + focusedCanvas.outputHeight
+      : "Default Canvas",
+  );
+
+  // Real elapsed for the live badge: the longest-running live output bound to the
+  // focused canvas (stats.outputs carry durationMs, joined by bindingUuid). Updates
+  // with the 1s stats poll.
+  let liveDurationMs = $derived.by<number>(() => {
+    if (!stats) return 0;
+    const ids = new Set(focusedOutputs.filter((o) => o.state === "live").map((o) => o.bindingUuid));
+    let max = 0;
+    for (const o of stats.outputs) {
+      if (ids.has(o.bindingUuid) && o.durationMs > max) max = o.durationMs;
+    }
+    return max;
+  });
+
+  function fmtDuration(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor((s % 3600) / 60)) + ":" + pad(s % 60);
+  }
 
   // Perf summary for the bottom bar, derived from the polled stats snapshot. NET is
   // the summed output bitrate; em-dash when stats are absent or no outputs exist.
@@ -78,19 +125,48 @@
 
   onDestroy(() => stopReconciler?.());
 
-  $effect(() => {
-    obs
-      .call("getVersion")
-      .then((v) => (version = v || "unknown"))
-      .catch((e) => (version = "error: " + (e as Error).message));
-  });
-
   // Explicitly suspend every native preview overlay (Default + each CanvasDock,
   // which all hide off the ref-counted previewGate) while Studio is off-page,
   // instead of relying on the ResizeObserver -> 0x0 rect path. Restored on return.
   $effect(() => {
     if (pageStore.page !== "studio") {
       return suspendPreview();
+    }
+  });
+
+  // Gate the 1s stats poll on the Studio page. StudioPage never unmounts (it just
+  // hides), so an onMount interval would poll app-wide; this starts the poll only
+  // while Studio is shown and clears it on leave / destroy.
+  function loadStats(): void {
+    obs
+      .call("stats.get")
+      .then((s) => (stats = s))
+      .catch(() => {});
+  }
+  $effect(() => {
+    if (pageStore.page !== "studio") return;
+    loadStats();
+    const timer = setInterval(loadStats, 1000);
+    return () => clearInterval(timer);
+  });
+
+  // Drive each per-canvas dock header dot off that canvas's own live state, so the
+  // dot tracks the output state instead of the reconciler's static placeholder.
+  $effect(() => {
+    if (!api) return;
+    for (const c of canvases) {
+      if (c.isDefault) continue;
+      const panel = api.getPanel("canvas:" + c.uuid);
+      if (!panel) continue;
+      const co = outputs.filter((o) => o.canvasUuid === c.uuid);
+      const state: MultistreamState = co.some((o) => o.state === "live")
+        ? "live"
+        : co.some((o) => o.state === "connecting")
+          ? "connecting"
+          : co.some((o) => o.state === "error")
+            ? "error"
+            : "idle";
+      panel.api.updateParameters({ __dot: STATE_COLOR[state] });
     }
   });
 
@@ -108,21 +184,12 @@
         .then((res) => (outputs = res.outputs))
         .catch(() => {});
     };
-    const loadStats = () => {
-      obs
-        .call("stats.get")
-        .then((s) => (stats = s))
-        .catch(() => {});
-    };
     loadCanvases();
     loadStatus();
-    loadStats();
-    const statsTimer = setInterval(loadStats, 1000);
     const offCanvas = obs.on("canvas.changed", loadCanvases);
     const offMulti = obs.on("multistream.changed", (p) => (outputs = p.outputs));
     const offBindings = obs.on("outputBinding.changed", loadStatus);
     return () => {
-      clearInterval(statsTimer);
       offCanvas();
       offMulti();
       offBindings();
@@ -257,6 +324,9 @@
 
   function resetLayout(): void {
     if (!api) return;
+    // A fresh default shows every output-gated canvas: drop the user-hidden set
+    // before rebuilding so eye-hidden canvases reappear.
+    clearCanvasUserHidden();
     buildDefaultLayout(api);
     // buildDefaultLayout clears the dynamic canvas docks; re-assert them (the
     // reconciler's event subscriptions stay live but only fire on canvas changes).
@@ -264,43 +334,66 @@
   }
 
   // The Default canvas maps to the static "preview" dock; a non-default canvas to a
-  // reconciler-managed "canvas:<uuid>" panel. Removing the latter is transient --
-  // the reconciler re-adds it on the next canvas/outputBinding change (7.1 owns a
-  // persistent per-canvas hide).
+  // reconciler-managed "canvas:<uuid>" panel. Eye-hiding a non-default canvas adds
+  // it to the persistent user-hidden set (so the reconciler keeps it removed across
+  // re-runs); eye-showing clears it and re-runs the reconciler (which re-adds it
+  // only if still output-gated-enabled).
   function toggleCanvasPreview(c: CanvasInfo): void {
     if (!api) return;
     if (c.isDefault) {
       toggleDock("preview");
       return;
     }
-    const id = "canvas:" + c.uuid;
-    const existing = api.getPanel(id);
-    if (existing) {
-      api.removePanel(existing);
-      refreshVisible();
-    } else {
-      void reconcileCanvasDocks(api, detachDock).then(() => refreshVisible());
-    }
+    setCanvasUserHidden(c.uuid, canvasShown(c));
+    void reconcileCanvasDocks(api, detachDock).then(() => refreshVisible());
   }
 
   function canvasShown(c: CanvasInfo): boolean {
     return c.isDefault ? !!visibleDocks["preview"] : canvasDocksPresent.has("canvas:" + c.uuid);
   }
 
+  // Inline add-canvas: a name prompt -> canvas.create with the Default canvas's
+  // resolution/FPS as defaults (1920x1080@60 if no Default is loaded yet). The new
+  // canvas appears in the chip list via the canvas.changed subscription; its dock
+  // only materializes once an enabled output binds it (output-gating).
+  function addCanvas(): void {
+    dialog = {
+      kind: "prompt",
+      title: "New Canvas",
+      confirmLabel: "Create",
+      onCommit: (name) => {
+        if (!name) return;
+        const def = canvases.find((c) => c.isDefault);
+        obs
+          .call("canvas.create", {
+            name,
+            baseWidth: def?.baseWidth ?? 1920,
+            baseHeight: def?.baseHeight ?? 1080,
+            outputWidth: def?.outputWidth,
+            outputHeight: def?.outputHeight,
+            fpsNum: def?.fpsNum ?? 60,
+            fpsDen: def?.fpsDen ?? 1,
+          })
+          .catch(() => {});
+      },
+    };
+  }
+
   async function toggleLive(): Promise<void> {
-    if (busy || outputs.length === 0) return;
+    if (busy || focusedOutputs.length === 0) return;
     busy = true;
     try {
-      // No startAll bridge method -- drive each enabled output. Per-call errors are
-      // ignored; the authoritative state arrives via multistream.changed.
+      // No startAll bridge method -- drive each enabled output bound to the focused
+      // canvas (the bottom bar is per-focused-canvas). Per-call errors are ignored;
+      // the authoritative state arrives via multistream.changed.
       if (anyRunning) {
-        for (const o of outputs) {
+        for (const o of focusedOutputs) {
           if (o.state === "live" || o.state === "connecting") {
             await obs.call("multistream.stopOutput", { uuid: o.bindingUuid }).catch(() => {});
           }
         }
       } else {
-        for (const o of outputs) {
+        for (const o of focusedOutputs) {
           await obs.call("multistream.startOutput", { uuid: o.bindingUuid }).catch(() => {});
         }
       }
@@ -315,14 +408,13 @@
     <span class="bar-label">CANVASES</span>
 
     {#each canvases as c (c.uuid)}
-      <div class="chip">
+      <div class="chip" class:active={c.uuid === activeCanvasUuid}>
         <button class="chip-main" onclick={() => (focusedCanvasUuid = c.uuid)}>
           <span class="chip-name">{c.name}</span>
           <span class="chip-sub">{c.outputWidth}×{c.outputHeight}</span>
         </button>
         <button
           class="eye"
-          class:off={!canvasShown(c)}
           title={canvasShown(c) ? "Hide preview" : "Show preview"}
           onclick={() => toggleCanvasPreview(c)}
         >
@@ -334,14 +426,16 @@
           {:else}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M4 4 L20 20" />
-              <path d="M9.5 5.7A10 10 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-2.7 3.4M6.2 7.6A17 17 0 0 0 2 12s3.6 6.5 10 6.5a10 10 0 0 0 3-.45" />
+              <path
+                d="M9.5 5.7A10 10 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-2.7 3.4M6.2 7.6A17 17 0 0 0 2 12s3.6 6.5 10 6.5a10 10 0 0 0 3-.45"
+              />
             </svg>
           {/if}
         </button>
       </div>
     {/each}
 
-    <button class="add" title="Add canvas (Settings)" onclick={() => openSettings("canvases")}>+</button>
+    <button class="add" title="Add canvas" onclick={addCanvas}>+</button>
 
     <div class="spacer"></div>
 
@@ -363,16 +457,11 @@
 
   <div class="golive-bar">
     <div class="cluster left">
-      <span class="focus-dot" style:background={STATE_COLOR[liveState]}></span>
-      <span class="focus-name">{focusedName}</span>
+      <span class="focus-dot" style:background={focusDotColor}></span>
+      <span class="focus-name">{focusedLabel}</span>
       {#if liveState === "live"}
-        <span class="badge live">● LIVE</span>
-      {:else if liveState === "connecting"}
-        <span class="badge connecting">CONNECTING</span>
-      {:else}
-        <span class="badge offline">OFFLINE</span>
+        <span class="badge live">● LIVE&nbsp;&nbsp;{fmtDuration(liveDurationMs)}</span>
       {/if}
-      <span class="libobs">libobs {version}</span>
     </div>
 
     <div class="cluster right">
@@ -384,14 +473,18 @@
       <button
         class="golive"
         class:running={anyRunning}
-        disabled={busy || outputs.length === 0}
+        disabled={busy || focusedOutputs.length === 0}
         onclick={() => void toggleLive()}
       >
-        {anyRunning ? "■ END STREAM" : "● GO LIVE"}
+        {anyRunning ? "■  END STREAM" : "●  GO LIVE"}
       </button>
     </div>
   </div>
 </div>
+
+{#if dialog}
+  <CollectionDialog {...dialog} onClose={() => (dialog = null)} />
+{/if}
 
 <style>
   .studio {
@@ -415,7 +508,7 @@
     gap: 8px;
     padding: 7px 16px;
     border-bottom: var(--border-weight) solid var(--color-border);
-    background: var(--color-surface);
+    background: var(--color-surface-2);
     overflow: hidden;
   }
   .bar-label {
@@ -428,11 +521,17 @@
   .chip {
     flex: 0 0 auto;
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 8px;
+    align-items: stretch;
+    gap: 8px;
+    padding: 5px 0 5px 10px;
     border: var(--border-weight) solid var(--color-border);
-    background: var(--color-base);
+    background: transparent;
+    color: var(--color-dim);
+  }
+  .chip.active {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    color: var(--color-accent);
   }
   .chip-main {
     display: flex;
@@ -443,30 +542,34 @@
     border: 0;
     padding: 0;
     cursor: pointer;
+    color: inherit;
+    font-family: var(--font-ui);
     text-align: left;
   }
   .chip-name {
     font-size: 11px;
     font-weight: 600;
-    color: var(--color-text);
+    line-height: 1.1;
   }
   .chip-sub {
     font-family: var(--font-mono);
     font-size: 8px;
     color: var(--color-muted);
+    line-height: 1;
   }
   .eye {
+    flex: 0 0 auto;
+    width: 18px;
+    align-self: stretch;
     display: flex;
     align-items: center;
     justify-content: center;
     background: none;
     border: 0;
-    padding: 0;
-    cursor: pointer;
+    border-left: var(--border-weight) solid var(--color-border);
     color: var(--color-muted);
-  }
-  .eye.off {
-    color: var(--color-dim);
+    cursor: pointer;
+    font-size: 11px;
   }
   .add {
     flex: 0 0 auto;
@@ -480,6 +583,7 @@
     color: var(--color-dim);
     cursor: pointer;
     font-size: 15px;
+    font-family: var(--font-ui);
   }
   .spacer {
     flex: 1;
@@ -495,6 +599,7 @@
     color: var(--color-dim);
     cursor: pointer;
     font-size: 10px;
+    font-family: var(--font-ui);
   }
   .restore-plus {
     color: var(--color-accent);
@@ -531,30 +636,20 @@
   .focus-name {
     font-size: 14px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--color-text);
   }
-  .badge {
-    font-size: 10px;
-    padding: 2px 8px;
-    letter-spacing: var(--letter-spacing);
-  }
   .badge.live {
-    background: var(--color-live);
-    color: #fff;
-  }
-  .badge.connecting {
-    background: var(--meter-yellow);
-    color: var(--color-base);
-  }
-  .badge.offline {
-    background: none;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-muted);
-  }
-  .libobs {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-live);
+    padding: 3px 9px;
+    border: var(--border-weight) solid var(--color-live);
+    background: color-mix(in srgb, var(--color-live) 10%, transparent);
   }
   .perf {
     display: flex;
@@ -568,20 +663,21 @@
     color: var(--color-muted);
   }
   .golive {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     background: var(--color-accent);
     color: var(--color-accent-ink);
-    border: var(--border-weight) solid var(--color-accent);
+    border: 0;
     font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: var(--letter-spacing);
-    text-transform: var(--label-case);
-    padding: 9px 18px;
+    letter-spacing: 0.02em;
+    padding: 9px 22px;
     cursor: pointer;
   }
   .golive.running {
     background: var(--color-live);
-    border-color: var(--color-live);
     color: #fff;
   }
   .golive:disabled {

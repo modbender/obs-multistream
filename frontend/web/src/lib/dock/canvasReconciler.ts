@@ -15,6 +15,26 @@ function panelId(uuid: string): string {
   return PANEL_PREFIX + uuid;
 }
 
+// User "hidden" set: a per-canvas suppression layered ON TOP of output-gating.
+// A canvas dock shows only when it is output-gated-enabled AND not user-hidden.
+// Output-gating still removes a dock when its outputs are disabled; user-hide is
+// an additional, persistent suppression that survives reconciler re-runs (the
+// eye-toggle in the CANVASES bar flips membership) until the user re-shows it or
+// the layout is reset. Module state so every reconcile pass reads the same set.
+const userHidden = new Set<string>();
+
+export function setCanvasUserHidden(uuid: string, hidden: boolean): void {
+  if (hidden) {
+    userHidden.add(uuid);
+  } else {
+    userHidden.delete(uuid);
+  }
+}
+
+export function clearCanvasUserHidden(): void {
+  userHidden.clear();
+}
+
 // Reassert the wanted canvas-dock set against the live panels. Safe to call any
 // time (idempotent): on boot, on canvas.changed/outputBinding.changed, and after a
 // layout reset/restore that may have cleared the dynamic docks.
@@ -25,7 +45,7 @@ export async function reconcileCanvasDocks(api: DockviewApi, detachDock: (panelI
   } catch {
     return; // transient; the next event re-runs it
   }
-  const wanted = canvases.filter((c) => !c.isDefault && c.enabled);
+  const wanted = canvases.filter((c) => !c.isDefault && c.enabled && !userHidden.has(c.uuid));
   const wantedIds = new Set(wanted.map((c) => panelId(c.uuid)));
 
   // Remove canvas docks that are no longer wanted (disabled or deleted).
