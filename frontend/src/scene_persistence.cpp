@@ -137,4 +137,38 @@ bool Load(const std::string &path)
 	return true;
 }
 
+void ClearCurrent()
+{
+	// Build the same exclude context Save uses, so the remove boundary stays in
+	// lockstep with the keep boundary (SaveFilter): the channel 1-6 audio sources and
+	// any additional-canvas sources are preserved; main-canvas scenes + plain inputs
+	// are removed.
+	SaveContext ctx;
+	OBSSourceAutoRelease audioRefs[6];
+	for (uint32_t ch = 1; ch <= 6; ch++) {
+		audioRefs[ch - 1] = obs_get_output_source(ch); // addref'd; may be null
+		ctx.audio[ch - 1] = audioRefs[ch - 1];
+	}
+	OBSCanvasAutoRelease mainCanvas = obs_get_main_canvas(); // addref'd; the Default canvas
+	ctx.mainCanvas = mainCanvas;
+
+	// SaveFilter returns true for sources this collection owns; remove exactly those.
+	// libobs hands the same source to obs_enum_scenes (scenes) and obs_enum_sources
+	// (inputs); a transition would be skipped by SaveFilter, but the caller already
+	// destroyed it.
+	auto removeIfOwned = [](void *data, obs_source_t *source) -> bool {
+		if (SaveFilter(data, source)) {
+			obs_source_remove(source);
+		}
+		return true;
+	};
+	obs_enum_scenes(removeIfOwned, &ctx);
+	obs_enum_sources(removeIfOwned, &ctx);
+
+	// Deferred source destruction can cascade across the destruction-task thread;
+	// drain in a loop until no more work is spawned, mirroring shutdown's teardown.
+	while (obs_wait_for_destroy_queue()) {
+	}
+}
+
 } // namespace SceneCollection

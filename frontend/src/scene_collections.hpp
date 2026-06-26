@@ -55,13 +55,30 @@ public:
 	// Rename by id. Saves the index. Returns false when the id is unknown.
 	bool Rename(const std::string &id, const std::string &name);
 
-	// Remove by id, deleting its scene file on disk. Refuses to remove the last
-	// remaining collection or the active one (switching is a later task). Saves
-	// the index on success. Returns false (with `error`) when refused/unknown.
+	// Switch the active collection to `id`: persist the outgoing collection's scenes,
+	// tear its scene world down leak-safely (mirroring shutdown's drain), make `id`
+	// active + persist the index, load the target's scenes (a never-saved collection
+	// comes up with a fresh placeholder Default scene), re-establish the channel-0
+	// program transition, and emit collections.changed / scenes.changed /
+	// transitions.changed so every window resyncs. No-op success when `id` is already
+	// active. Returns false (with `error`) when `id` is unknown or while any output is
+	// live (the scene world backs the live encoders, so it can't be swapped).
+	bool Switch(const std::string &id, std::string &error);
+
+	// Remove by id, deleting its scene file on disk. Removing the ACTIVE collection
+	// first switches to another one (propagating the switch's while-live refusal).
+	// Refuses to remove the last remaining collection. Saves the index on success.
+	// Returns false (with `error`) when refused/unknown.
 	bool Remove(const std::string &id, std::string &error);
 
 	// Drop the in-memory list without touching disk. For teardown symmetry.
 	void Clear() { collections_.clear(); activeId_.clear(); }
+
+	// True when the last Load() found the index file present but unparseable (its
+	// .bak also failed). The caller must then NOT first-run-seed -- a fresh seed
+	// would drop the index's references to existing scenes/*.json. False after a
+	// clean or genuinely-absent load.
+	bool IndexWasCorrupt() const { return indexCorrupt_; }
 
 	// <config>/obs-multistream/basic/scene_collections.json.
 	static std::string IndexPath();
@@ -73,6 +90,7 @@ private:
 
 	std::vector<SceneCollectionRecord> collections_;
 	std::string activeId_;
+	bool indexCorrupt_ = false;
 };
 
 #endif // OBS_MULTISTREAM_FRONTEND_SCENE_COLLECTIONS_HPP_

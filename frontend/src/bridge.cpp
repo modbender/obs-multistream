@@ -4549,6 +4549,21 @@ bool MethodCollectionsRename(const json &params, json &result, std::string &erro
 	return true;
 }
 
+bool MethodCollectionsSwitch(const json &params, json &result, std::string &error)
+{
+	const std::string id = OptString(params, "id");
+	if (id.empty()) {
+		error = "collections.switch requires a non-empty 'id'";
+		return false;
+	}
+	if (!ObsBootstrap::SceneCollections().Switch(id, error)) {
+		return false;
+	}
+	result = json{{"active", id}};
+	// Switch already emitted collections.changed / scenes.changed / transitions.changed.
+	return true;
+}
+
 bool MethodCollectionsRemove(const json &params, json &result, std::string &error)
 {
 	const std::string id = OptString(params, "id");
@@ -4616,6 +4631,7 @@ void Init()
 		{"collections.list", MethodCollectionsList},
 		{"collections.create", MethodCollectionsCreate},
 		{"collections.rename", MethodCollectionsRename},
+		{"collections.switch", MethodCollectionsSwitch},
 		{"collections.remove", MethodCollectionsRemove},
 		{"sceneItems.list", MethodSceneItemsList},
 		{"sceneItems.setVisible", MethodSceneItemsSetVisible},

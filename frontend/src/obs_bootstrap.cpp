@@ -192,7 +192,7 @@ void RunProbes()
 // bound to output channel 0 so the preview visibly renders a non-empty canvas.
 // A placeholder until the real scene/source UI (4.3+) drives content; no network,
 // no CEF dependency, ticks immediately.
-void CreateDefaultScene()
+obs_scene_t *BuildDefaultScene()
 {
 	obs_video_info ovi = {};
 	const uint32_t cx = obs_get_video_info(&ovi) ? ovi.base_width : 1920;
@@ -207,22 +207,30 @@ void CreateDefaultScene()
 	obs_data_release(settings);
 	if (!source) {
 		HostLog("[obs] obs_source_create(color_source) failed");
-		return;
+		return nullptr;
 	}
 	HostLog("[obs] default color source created (Placeholder Background)");
 
-	g_scene = obs_scene_create("Default Scene");
-	if (!g_scene) {
+	obs_scene_t *scene = obs_scene_create("Default Scene");
+	if (!scene) {
 		HostLog("[obs] obs_scene_create failed");
 		obs_source_release(source);
-		return;
+		return nullptr;
 	}
 
-	obs_scene_add(g_scene, source);
+	obs_scene_add(scene, source);
 	obs_source_release(source); // scene owns the create-ref now
 
-	obs_set_output_source(0, obs_scene_get_source(g_scene));
+	obs_set_output_source(0, obs_scene_get_source(scene));
 	HostLog("[obs] default scene bound to output channel 0");
+	return scene; // caller owns the create-ref
+}
+
+void CreateDefaultScene()
+{
+	// Boot placeholder path (no scene file yet): retain the create-ref as g_scene so
+	// TeardownScene can release it on a clean exit.
+	g_scene = BuildDefaultScene();
 }
 
 // The native-multistream data model (Phase 4.4.0). Global so 4.4.1+ can expose it
@@ -458,7 +466,7 @@ bool ObsBootstrap::Start()
 	// user's existing scenes carry over with zero data loss -- as the sole
 	// "Untitled" collection.
 	g_sceneCollections.Load();
-	if (g_sceneCollections.List().empty()) {
+	if (g_sceneCollections.List().empty() && !g_sceneCollections.IndexWasCorrupt()) {
 		g_sceneCollections.SeedExisting("Untitled", "scene_collection.json");
 		HostLog("[scene] migrated single-file scenes into collection 'Untitled'");
 	}
@@ -555,6 +563,20 @@ bool ObsBootstrap::Start()
 	g_mcp->Start();
 
 	return true;
+}
+
+void ObsBootstrap::CreateDefaultSceneDetached()
+{
+	// Switching to a never-saved collection has nothing to load: stand up a fresh
+	// placeholder scene like boot, but hand the create-ref to libobs (channel 0 + the
+	// global source list keep it alive). Unlike boot it is deliberately NOT tracked by
+	// g_scene -- the scene-collection switch tears the world down by enumeration, and
+	// a retained g_scene ref would keep the removed scene alive (leak) across the next
+	// switch.
+	obs_scene_t *scene = BuildDefaultScene();
+	if (scene) {
+		obs_scene_release(scene);
+	}
 }
 
 void ObsBootstrap::TeardownScene()

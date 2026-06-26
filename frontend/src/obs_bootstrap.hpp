@@ -68,6 +68,11 @@ AudioMonitor &AudioMonitor();
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).
 void FireSceneChanged();
 void TeardownScene();
+// Stand up a fresh placeholder Default scene bound to channel 0, owned by libobs's
+// source list (NOT tracked by the boot g_scene). Used by the scene-collection
+// switch when the target collection has no saved scene file yet, so it comes up
+// with a usable scene instead of an empty world.
+void CreateDefaultSceneDetached();
 // Headless proof for 4.3.2: drive properties.get/properties.set on the default
 // color source through the bridge and log the round-trip. Gated by the caller to
 // the smoke path; no-op effect on normal runs (it only reads/restores).

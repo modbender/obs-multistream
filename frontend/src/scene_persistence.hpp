@@ -31,6 +31,14 @@ bool Load();
 // Restore from an explicit file path.
 bool Load(const std::string &path);
 
+// Remove the active collection's scene world from libobs -- main-canvas scenes +
+// plain inputs (exactly the set Save persists) -- preserving the channel 1-6 global
+// audio sources and any additional-canvas sources, then drain the deferred-destroy
+// queue. The caller must unbind/destroy the channel-0 transition first
+// (Transitions::Shutdown). Used by the scene-collection switch to tear the outgoing
+// collection down leak-safely (mirrors shutdown's ClearSceneData drain).
+void ClearCurrent();
+
 } // namespace SceneCollection
 
 #endif // OBS_MULTISTREAM_FRONTEND_SCENE_PERSISTENCE_HPP_

@@ -1,12 +1,19 @@
 #include "scene_collections.hpp"
 
+#include "bridge.hpp"
 #include "log.hpp"
+#include "multistream/MultistreamEngine.hpp"
 #include "multistream/StorePaths.hpp"
+#include "obs_bootstrap.hpp"
+#include "scene_persistence.hpp"
+#include "transitions.hpp"
 
 #include <obs.h>
 #include <obs.hpp>
 #include <util/platform.h>
 #include <util/util.hpp>
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -94,9 +101,20 @@ void SceneCollections::Load()
 {
 	collections_.clear();
 	activeId_.clear();
+	indexCorrupt_ = false;
 
-	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(IndexPath().c_str(), "bak");
+	const std::string path = IndexPath();
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
 	if (!root) {
+		// A genuinely-absent index is first run -> the caller seeds. A present-but-
+		// unparseable one (its .bak also failed) must NOT be re-seeded: a fresh seed
+		// would drop the index's references to existing scenes/*.json. Flag it so the
+		// caller skips the seed and the on-disk collections are preserved for repair.
+		if (os_file_exists(path.c_str()) || os_file_exists((path + ".bak").c_str())) {
+			indexCorrupt_ = true;
+			HostLog("[scene] scene_collections.json present but unreadable; refusing to "
+				"re-seed (existing scene files preserved on disk)");
+		}
 		return;
 	}
 
@@ -187,6 +205,62 @@ bool SceneCollections::Rename(const std::string &id, const std::string &name)
 	return false;
 }
 
+bool SceneCollections::Switch(const std::string &id, std::string &error)
+{
+	if (id == activeId_) {
+		return true; // already active; nothing to swap
+	}
+
+	auto it = std::find_if(collections_.begin(), collections_.end(),
+			       [&](const SceneCollectionRecord &c) { return c.id == id; });
+	if (it == collections_.end()) {
+		error = "no scene collection with id '" + id + "'";
+		return false;
+	}
+
+	// The scene world backs every canvas's live encoder; swapping it under a running
+	// output would free sources out from under the encoder (UAF). Refuse while live.
+	if (ObsBootstrap::Multistream().AnyLive()) {
+		error = "cannot switch scene collection while live";
+		return false;
+	}
+
+	// Persist the outgoing collection's scenes before tearing them down.
+	SceneCollection::Save(ActiveScenePath());
+
+	// Tear the outgoing scene world down leak-safely: unbind + destroy the channel-0
+	// transition (releasing its wrapped scene), release the boot placeholder scene if
+	// one is tracked (g_scene; no-op on the Load path), then remove the collection's
+	// scenes + inputs and drain the destroy queue.
+	Transitions::Shutdown();
+	ObsBootstrap::TeardownScene();
+	SceneCollection::ClearCurrent();
+
+	// Commit the new active pointer + persist the index before loading, so
+	// ActiveScenePath() resolves the target file.
+	activeId_ = id;
+	Save();
+
+	// Load the target collection's scenes; a never-saved collection (no file yet)
+	// comes up with a fresh placeholder Default scene instead of an empty world.
+	if (!SceneCollection::Load(ActiveScenePath())) {
+		ObsBootstrap::CreateDefaultSceneDetached();
+	}
+
+	// Re-wrap the now-current scene on channel 0 with the program transition, exactly
+	// as boot does after the initial Load.
+	Transitions::Init();
+
+	// Resync every window: the active collection, its scene list, and the transition
+	// (re-created above) all changed.
+	Bridge::EmitEvent("collections.changed", nlohmann::json::object());
+	Bridge::EmitEvent("scenes.changed", nlohmann::json{{"canvas", nullptr}});
+	Bridge::EmitEvent("transitions.changed", nlohmann::json::object());
+
+	HostLog("[scene] switched to collection '" + it->name + "' file=" + ActiveScenePath());
+	return true;
+}
+
 bool SceneCollections::Remove(const std::string &id, std::string &error)
 {
 	auto it = std::find_if(collections_.begin(), collections_.end(),
@@ -199,9 +273,28 @@ bool SceneCollections::Remove(const std::string &id, std::string &error)
 		error = "cannot remove the last remaining scene collection";
 		return false;
 	}
+
+	// The active collection's scene world is live on channel 0; switch away before
+	// deleting it. Switch propagates the while-live refusal, so a live output blocks
+	// the removal too.
 	if (id == activeId_) {
-		error = "cannot remove the active scene collection";
-		return false;
+		std::string target;
+		for (const SceneCollectionRecord &c : collections_) {
+			if (c.id != id) {
+				target = c.id;
+				break;
+			}
+		}
+		if (!Switch(target, error)) {
+			return false;
+		}
+		// Switch persisted the index but left collections_ intact; re-find by id.
+		it = std::find_if(collections_.begin(), collections_.end(),
+				  [&](const SceneCollectionRecord &c) { return c.id == id; });
+		if (it == collections_.end()) {
+			error = "no scene collection with id '" + id + "'";
+			return false;
+		}
 	}
 
 	// Delete the per-collection scene file (best-effort; an absent file is fine).
