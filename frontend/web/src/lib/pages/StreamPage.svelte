@@ -160,9 +160,17 @@
     idle: "var(--color-muted)",
   };
   const TONE_TAG_BG: Record<"error" | "live" | "idle", string> = {
-    error: "rgba(240, 68, 68, 0.14)",
-    live: "rgba(70, 184, 94, 0.14)",
-    idle: "rgba(255, 255, 255, 0.05)",
+    error: "color-mix(in srgb, var(--color-live) 14%, transparent)",
+    live: "color-mix(in srgb, var(--meter-green) 14%, transparent)",
+    idle: "color-mix(in srgb, var(--color-muted) 12%, transparent)",
+  };
+  // Per-row status pill background, tinted off the same per-state colors as
+  // STATE_COLOR so the chip follows the active theme.
+  const STATE_TAG_BG: Record<MultistreamState, string> = {
+    idle: "color-mix(in srgb, var(--color-muted) 12%, transparent)",
+    connecting: "color-mix(in srgb, var(--meter-yellow) 14%, transparent)",
+    live: "color-mix(in srgb, var(--meter-green) 14%, transparent)",
+    error: "color-mix(in srgb, var(--color-live) 14%, transparent)",
   };
 
   async function toggleRow(o: MultistreamStatus): Promise<void> {
@@ -256,7 +264,9 @@
             <div class="dest-col">
               <div class="dest-line1">
                 <span class="dest-name">{o.profileLabel}</span>
-                <span class="dest-state" style:color={STATE_COLOR[o.state]}>{titleState(o.state).toUpperCase()}</span>
+                <span class="dest-state" style:color={STATE_COLOR[o.state]} style:background={STATE_TAG_BG[o.state]}
+                  >{titleState(o.state).toUpperCase()}</span
+                >
               </div>
               <div class="dest-sub">{secondary(o, stat)}</div>
             </div>
@@ -491,6 +501,7 @@
     font-family: var(--font-mono);
     font-size: 8px;
     letter-spacing: 0.06em;
+    padding: 2px 6px;
   }
   .dest-sub {
     margin-top: 3px;

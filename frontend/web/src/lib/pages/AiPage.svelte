@@ -159,7 +159,7 @@
                 <span class="cap-name">Read state</span>
                 <span class="cap-desc">list scenes, sources, canvases, stats — always available</span>
               </div>
-              <button class="sw on locked" aria-label="Read state (always on)">
+              <button class="sw on locked" disabled aria-label="Read state (always on)">
                 <span class="knob"></span>
               </button>
             </div>

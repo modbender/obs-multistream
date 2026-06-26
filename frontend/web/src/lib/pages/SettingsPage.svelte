@@ -33,7 +33,7 @@
         <button
           class="nav-item"
           class:active={settingsNav.tab === t.id}
-          aria-current={settingsNav.tab === t.id}
+          aria-current={settingsNav.tab === t.id ? "page" : undefined}
           onclick={() => setSettingsTab(t.id)}>{t.label}</button
         >
       {/each}

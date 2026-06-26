@@ -10,10 +10,18 @@
     setCanvasUserHidden,
     clearCanvasUserHidden,
   } from "../dock/canvasReconciler";
-  import { obs, type CanvasInfo, type MultistreamStatus, type MultistreamState, type Stats } from "../bridge";
+  import {
+    obs,
+    type CanvasInfo,
+    type Monitor,
+    type MultistreamStatus,
+    type MultistreamState,
+    type Stats,
+  } from "../bridge";
   import { pageStore } from "../pageStore.svelte";
   import { suspendPreview } from "../previewGate.svelte";
   import CollectionDialog, { type DialogSpec } from "../CollectionDialog.svelte";
+  import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
 
   let api = $state<DockviewApi | undefined>(undefined);
   let visibleDocks = $state<Record<string, boolean>>({});
@@ -27,6 +35,13 @@
   let focusedCanvasUuid = $state<string | null>(null);
   let busy = $state(false);
   let dialog = $state<DialogSpec | null>(null);
+
+  // CANVASES-bar "⋯" overflow: anchor position (viewport coords) when open, the
+  // runtime monitor list for the per-monitor projector entries, and the dock-lock
+  // flag. Monitors load once on mount; the set rarely changes.
+  let overflowPos = $state<{ x: number; y: number } | null>(null);
+  let monitors = $state<Monitor[]>([]);
+  let docksLocked = $state(false);
 
   // State -> color, same token mapping the Multistream/Stats docks use. Used for
   // the per-canvas dock header dots (idle = muted).
@@ -202,6 +217,10 @@
     };
     loadCanvases();
     loadStatus();
+    obs
+      .call("display.listMonitors")
+      .then((res) => (monitors = res?.monitors ?? []))
+      .catch((e) => console.log("display.listMonitors failed: " + (e as Error).message));
     const offCanvas = obs.on("canvas.changed", loadCanvases);
     const offMulti = obs.on("multistream.changed", (p) => (outputs = p.outputs));
     const offBindings = obs.on("outputBinding.changed", loadStatus);
@@ -349,6 +368,44 @@
     void reconcileCanvasDocks(api, detachDock);
   }
 
+  // Dockview 6.6.1 has no `locked` api setter; disabling drag-and-drop via
+  // updateOptions is the lock mechanism — panels can't be re-tiled or torn while on.
+  function toggleLock(): void {
+    docksLocked = !docksLocked;
+    api?.updateOptions({ disableDnd: docksLocked });
+  }
+
+  // Program projectors (the orphaned View-menu actions): open a standalone native
+  // window rendering the program output, windowed or fullscreen on a given monitor.
+  function openProgramWindowed(): void {
+    obs
+      .call("projector.open", { target: { kind: "program" }, mode: "windowed" })
+      .catch((e) => console.log("projector.open failed: " + (e as Error).message));
+  }
+  function openProgramFullscreen(monitor: number): void {
+    obs
+      .call("projector.open", { target: { kind: "program" }, mode: "fullscreen", monitor })
+      .catch((e) => console.log("projector.open failed: " + (e as Error).message));
+  }
+
+  // CANVASES-bar overflow contents: a windowed program projector, one fullscreen
+  // entry per monitor, then the dock-lock toggle (a leading ✓ marks it on, since
+  // ContextMenu items have no native checked state).
+  let overflowItems = $derived<(ContextMenuItem | null)[]>([
+    { label: "Windowed Projector (Program)", action: openProgramWindowed },
+    ...monitors.map((m) => ({
+      label: `Fullscreen Projector (Program) — ${m.name} (${m.width}×${m.height})`,
+      action: () => openProgramFullscreen(m.index),
+    })),
+    null,
+    { label: (docksLocked ? "✓ " : "") + "Lock Docks", action: toggleLock },
+  ]);
+
+  function openOverflow(e: MouseEvent): void {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    overflowPos = { x: r.left, y: r.bottom + 2 };
+  }
+
   // The Default canvas maps to the static "preview" dock; a non-default canvas to a
   // reconciler-managed "canvas:<uuid>" panel. Eye-hiding a non-default canvas adds
   // it to the persistent user-hidden set (so the reconciler keeps it removed across
@@ -465,6 +522,7 @@
     {/each}
 
     <button class="restore reset" onclick={resetLayout}>Reset Layout</button>
+    <button class="restore overflow" title="More" aria-label="More studio actions" onclick={openOverflow}>⋯</button>
   </div>
 
   <div class="host-area">
@@ -500,6 +558,10 @@
 
 {#if dialog}
   <CollectionDialog {...dialog} onClose={() => (dialog = null)} />
+{/if}
+
+{#if overflowPos}
+  <ContextMenu x={overflowPos.x} y={overflowPos.y} items={overflowItems} onClose={() => (overflowPos = null)} />
 {/if}
 
 <style>
@@ -622,6 +684,11 @@
   }
   .reset {
     padding: 6px 12px;
+  }
+  .overflow {
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
   }
 
   .golive-bar {
