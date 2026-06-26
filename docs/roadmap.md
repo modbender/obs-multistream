@@ -715,6 +715,66 @@ invent a parallel persistence format.
 
 ---
 
+## Phase 7 — Full UI redesign: nav-rail multi-page app 🔧 7.0 SHIPPED
+
+A ground-up reconception of the frontend IA, driven by a Claude Design mock the user
+authored ("OBS fork multistream redesign"). Rationale: the prior UI (incl. the Phase-4
+rewrite + settings redesign) was an *enhancement of OBS's original layout*; the fork's
+real goal is **more control + multistream**, so the UI is rebuilt around that. The mock
+is the acceptance criterion ("mock IS the spec"); it's an intentionally incomplete
+reference — menu-bar items are rehomed by us. Reference + analysis (gitignored):
+`docs/superpowers/design-redesign/{OBS-MultiStream.dc.html.json,ANALYSIS.md}`. Branch
+`ui-redesign`.
+
+**The shift:** from a top **menu bar + single Dockview workspace + modal Settings** →
+a **70px left icon nav rail** switching **six full-page views**: Studio · Stream
+(Destinations) · Schedule · Monitor (Stats) · AI · Settings.
+
+**Tokens:** Geist + Geist Mono, the mock's dark palette (bg `#0a0a0b`, accent amber
+`#e7a338`), zero border-radius; axes theme dark|light, accent (amber/blue/violet/
+emerald/rose), density (comfortable|compact).
+
+**Decisions locked (2026-06-26):** (A) **Schedule = UI shell only** this rewrite
+(calendar + New-Stream modal on local state; persistence + auto-go-live later). (B)
+**Orphan menu items → nav-rail footer** (Scene Collection switcher + About) **+ Studio
+"⋯" overflow** (projector launchers); transforms/filters/projectors stay in context
+menus. (C) **Appearance = keep the full per-token theme editor AND add presets**
+(accent swatches + light/dark + density). (D) **Docking = keep Dockview, restyle** (not
+the mock's bespoke float/dock system); Studio is a re-skin + re-IA.
+
+**Phasing (plan `docs/superpowers/plans/2026-06-26-phase7-shell.md`):**
+
+- ✅ **7.0 — Tokens + nav-rail shell + view router — SHIPPED** (commits `a312a0c` tokens,
+  `5bddaa061` nav-rail+router, `c71a2e39d` studio page; holistic review = SHIP, pushed to
+  `origin/ui-redesign`, not merged). Studio Dark default palette + Geist offline +
+  accent/mode axes (theme editor kept); 70px NavRail (6 views + footer scene-collection
+  switcher + About) replacing the menu bar (MenuBar kept, unrendered); page router;
+  `StudioPage` (DockHost lifecycle a verbatim move, kept mounted + `display:none`, not
+  `{#if}`); CANVASES chip bar (eye-toggle ↔ Dockview show/hide, restore chips, Reset
+  Layout) + bottom GO-LIVE bar (live state + per-binding start/stop + stats perfRow, all
+  real bridge data); explicit `suspendPreview()` overlay gate hiding the native preview +
+  CanvasDock off-Studio. `bun run check` 0/0, build green, smoke `leaks: 2`. **All visual
+  fidelity GUI-owed.** Subagent-driven; caught + fixed a Critical `--accent` CSS-var
+  collision in review.
+- 🔧 **7.1 — Studio reorg.** Preview-row over bottom-docks-row layout, Dockview restyle to
+  the mock's dock chrome (headers w/ float/close, tokens, zero-radius), embedded
+  scenes/sources in additional-canvas docks, full CANVASES-bar + GO-LIVE-bar fidelity.
+  Carry-ins from 7.0: gate the stats poll on `page==='studio'`; focused-canvas (not
+  all-outputs) live state; persistent per-canvas hide; a real add-canvas flow (`+`
+  currently routes to Settings).
+- 🔭 **7.2 — Stream + Monitor + AI pages.** Re-IA the MultistreamDock / StatsDock /
+  McpTab content into full pages.
+- 🔭 **7.3 — Settings page + Appearance.** Full page w/ 196px left sub-nav (Canvases /
+  Stream Profiles / Outputs / Audio / Hotkeys / Appearance); Appearance hosts the accent/
+  mode/density presets + the existing per-token theme editor (re-exposes the Theme Editor,
+  which is unreachable in the 7.0–7.2 interim — theme still applies).
+- 🔭 **7.4 — Schedule (UI shell).** Calendar grid + Upcoming + New-Stream modal on local
+  state (no backend per Decision A).
+- 🔭 **7.5 — Orphan homes + polish + holistic review.** Studio "⋯" overflow (projectors),
+  remaining Edit/View/Docks menu actions, final fidelity pass, then merge to `master`.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
