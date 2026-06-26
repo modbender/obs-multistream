@@ -56,7 +56,7 @@ public:
 
 	// Register a new collection with its own (initially nonexistent) scene file
 	// at scenes/<slug>.json. Does NOT switch the active collection or touch any
-	// scene file (switching is a later task). Saves the index. Returns the record.
+	// scene file. Saves the index. Returns the record.
 	const SceneCollectionRecord &Create(const std::string &name);
 
 	// Rename by id. Saves the index. Returns false when the id is unknown.

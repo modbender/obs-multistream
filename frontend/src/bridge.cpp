@@ -4499,9 +4499,9 @@ bool MethodSettingsRestore(const json &params, json &result, std::string &error)
 // --- Scene collections ------------------------------------------------------
 //
 // The registry of per-collection scene sets (Phase 6a). list/create/rename/
-// remove operate on the bootstrap-owned SceneCollections; switching the active
-// collection (and reloading scenes) is a later task. Each mutation re-saves the
-// index and emits collections.changed so every window re-lists.
+// remove operate on the bootstrap-owned SceneCollections; switch reloads the
+// active collection's scenes. Each mutation re-saves the index and emits
+// collections.changed so every window re-lists.
 
 bool MethodCollectionsList(const json & /*params*/, json &result, std::string & /*error*/)
 {
@@ -4517,6 +4517,10 @@ bool MethodCollectionsList(const json & /*params*/, json &result, std::string & 
 
 bool MethodCollectionsCreate(const json &params, json &result, std::string &error)
 {
+	if (ObsBootstrap::SceneCollections().IndexWasCorrupt()) {
+		error = "scene collection index is corrupt; cannot modify collections";
+		return false;
+	}
 	const std::string name = OptString(params, "name");
 	if (name.empty()) {
 		error = "collections.create requires a non-empty 'name'";
@@ -4530,6 +4534,10 @@ bool MethodCollectionsCreate(const json &params, json &result, std::string &erro
 
 bool MethodCollectionsRename(const json &params, json &result, std::string &error)
 {
+	if (ObsBootstrap::SceneCollections().IndexWasCorrupt()) {
+		error = "scene collection index is corrupt; cannot modify collections";
+		return false;
+	}
 	const std::string id = OptString(params, "id");
 	const std::string name = OptString(params, "name");
 	if (id.empty()) {
@@ -4551,6 +4559,10 @@ bool MethodCollectionsRename(const json &params, json &result, std::string &erro
 
 bool MethodCollectionsSwitch(const json &params, json &result, std::string &error)
 {
+	if (ObsBootstrap::SceneCollections().IndexWasCorrupt()) {
+		error = "scene collection index is corrupt; cannot modify collections";
+		return false;
+	}
 	const std::string id = OptString(params, "id");
 	if (id.empty()) {
 		error = "collections.switch requires a non-empty 'id'";
@@ -4566,6 +4578,10 @@ bool MethodCollectionsSwitch(const json &params, json &result, std::string &erro
 
 bool MethodCollectionsRemove(const json &params, json &result, std::string &error)
 {
+	if (ObsBootstrap::SceneCollections().IndexWasCorrupt()) {
+		error = "scene collection index is corrupt; cannot modify collections";
+		return false;
+	}
 	const std::string id = OptString(params, "id");
 	if (id.empty()) {
 		error = "collections.remove requires a non-empty 'id'";
