@@ -2,6 +2,7 @@
 
 #include "include/cef_browser.h"
 
+#include "app_icon.hpp"
 #include "bridge.hpp"
 #include "client.hpp"
 #include "log.hpp"
@@ -25,6 +26,7 @@ ATOM RegisterDetachedClass(HINSTANCE instance)
 	wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
 	wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
 	wc.lpszClassName = kDetachedClassName;
+	ApplyAppIcon(wc, instance);
 	atom = RegisterClassExW(&wc);
 	return atom;
 }

@@ -1,6 +1,7 @@
 // bridge.hpp pulls in the CEF headers, whose CefDOMNode declares methods like
 // GetNextSibling that <windows.h> would otherwise macro-clobber. Include it (and
 // thus CEF) before any Windows header so CEF parses clean.
+#include "app_icon.hpp"
 #include "bridge.hpp"
 
 #include "projector_window.hpp"
@@ -106,6 +107,7 @@ ATOM RegisterProjectorClass(HINSTANCE instance)
 	wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
 	wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
 	wc.lpszClassName = kProjectorClassName;
+	ApplyAppIcon(wc, instance);
 	atom = RegisterClassExW(&wc);
 	return atom;
 }

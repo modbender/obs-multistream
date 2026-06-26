@@ -10,6 +10,7 @@
 #include "include/cef_browser.h"
 
 #include "app.hpp"
+#include "app_icon.hpp"
 #include "bridge.hpp"
 #include "client.hpp"
 #include "log.hpp"
@@ -152,6 +153,7 @@ HWND CreateHostWindow(HINSTANCE instance)
 	wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
 	wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
 	wc.lpszClassName = kHostClassName;
+	ApplyAppIcon(wc, instance);
 	RegisterClassExW(&wc);
 
 	RECT rc = {0, 0, kHostWidth, kHostHeight};
