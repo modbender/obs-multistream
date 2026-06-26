@@ -348,11 +348,55 @@ bool ReadDimension(const json &params, const char *key, uint32_t current, uint32
 	return true;
 }
 
+// Reset the global/main video pipeline to the given base/output resolution and
+// FPS, preserving the current graphics_module/colorspace/range/format/adapter/
+// gpu_conversion/scale_type so only resolution+FPS change. outW/outH default to
+// the base size when 0. On a failed reset restores the prior config so video is
+// never left broken, then re-letterboxes the preview + resizes the program
+// transition. Caller owns the live-active/live-canvas guard.
+static bool ApplyGlobalVideo(uint32_t baseW, uint32_t baseH, uint32_t outW, uint32_t outH, uint32_t fpsNum,
+			     uint32_t fpsDen, std::string &error)
+{
+	obs_video_info ovi = {};
+	if (!obs_get_video_info(&ovi)) {
+		error = "video not initialized";
+		return false;
+	}
+	const obs_video_info previous = ovi; // for rollback
+
+	ovi.base_width = baseW;
+	ovi.base_height = baseH;
+	ovi.output_width = outW ? outW : baseW;
+	ovi.output_height = outH ? outH : baseH;
+	ovi.fps_num = fpsNum;
+	ovi.fps_den = fpsDen;
+
+	const int rv = obs_reset_video(&ovi);
+	if (rv != OBS_VIDEO_SUCCESS) {
+		// Restore the prior config so we never leave video in a broken state.
+		obs_video_info restore = previous;
+		const int rb = obs_reset_video(&restore);
+		HostLog("[bridge] ApplyGlobalVideo reset FAILED code=" + std::to_string(rv) +
+			", rollback code=" + std::to_string(rb));
+		error = "obs_reset_video failed (code " + std::to_string(rv) + ")";
+		return false;
+	}
+
+	// The obs_display swapchain survives a video reset; just invalidate the cached
+	// letterbox transform so the next frame re-letterboxes to the new base size.
+	Preview::OnVideoReset();
+
+	// Re-size the program transition on ch0 to the new base canvas so the composited
+	// output isn't clipped at the old dimensions until the next type-swap.
+	Transitions::OnVideoReset();
+	return true;
+}
+
 // Rebuild the current obs_video_info, override only the passed fields, and
-// obs_reset_video. Preserves graphics_module/colorspace/range/format/adapter/
-// gpu_conversion/scale_type so only resolution+FPS change. Refuses while an
-// output is live and on a failed reset restores the prior config so video is
-// never left broken. Emits settings.videoChanged + re-validates the preview.
+// obs_reset_video via ApplyGlobalVideo. Refuses while an output is live and on a
+// failed reset restores the prior config so video is never left broken. Mirrors
+// the applied resolution onto the Default canvas def (canvas.list must reflect
+// reality), emits settings.videoChanged + re-validates the preview.
 bool MethodSettingsSetVideo(const json &params, json &result, std::string &error)
 {
 	if (!params.is_object()) {
@@ -369,7 +413,6 @@ bool MethodSettingsSetVideo(const json &params, json &result, std::string &error
 		error = "video not initialized";
 		return false;
 	}
-	const obs_video_info previous = ovi; // for rollback
 
 	if (!ReadDimension(params, "baseWidth", ovi.base_width, ovi.base_width, error) ||
 	    !ReadDimension(params, "baseHeight", ovi.base_height, ovi.base_height, error) ||
@@ -400,27 +443,30 @@ bool MethodSettingsSetVideo(const json &params, json &result, std::string &error
 		return false;
 	}
 
-	const int rv = obs_reset_video(&ovi);
-	if (rv != OBS_VIDEO_SUCCESS) {
-		// Restore the prior config so we never leave video in a broken state.
-		obs_video_info restore = previous;
-		const int rb = obs_reset_video(&restore);
-		HostLog("[bridge] settings.setVideo reset FAILED code=" + std::to_string(rv) +
-			", rollback code=" + std::to_string(rb));
-		error = "obs_reset_video failed (code " + std::to_string(rv) + ")";
+	if (!ApplyGlobalVideo(ovi.base_width, ovi.base_height, ovi.output_width, ovi.output_height, ovi.fps_num,
+			      ovi.fps_den, error)) {
 		return false;
 	}
 
-	// The obs_display swapchain survives a video reset; just invalidate the cached
-	// letterbox transform so the next frame re-letterboxes to the new base size.
-	Preview::OnVideoReset();
-
-	// Re-size the program transition on ch0 to the new base canvas so the composited
-	// output isn't clipped at the old dimensions until the next type-swap.
-	Transitions::OnVideoReset();
-
 	obs_video_info applied = {};
 	obs_get_video_info(&applied);
+
+	// Mirror the applied global video onto the Default canvas def so canvas.list
+	// (and the Settings UI, which now edits the Default canvas) always reflects the
+	// real pipeline even when setVideo is called directly.
+	CanvasStore &canvases = ObsBootstrap::Canvases();
+	if (CanvasDefinition *def = canvases.Find(canvases.Default().uuid)) {
+		if (def->width != applied.base_width || def->height != applied.base_height ||
+		    def->fpsNum != applied.fps_num || def->fpsDen != applied.fps_den) {
+			def->width = applied.base_width;
+			def->height = applied.base_height;
+			def->fpsNum = applied.fps_num;
+			def->fpsDen = applied.fps_den;
+			canvases.Save();
+			EmitEvent("canvas.changed", json::object());
+		}
+	}
+
 	result = VideoInfoToJson(applied);
 	EmitEvent("settings.videoChanged", result);
 	HostLog("[bridge] settings.setVideo -> " + std::to_string(applied.base_width) + "x" +
@@ -2796,10 +2842,17 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 	}
 	// Resolution/fps changes resize the live mix; the guard above already refused
 	// while the canvas is live, so this only runs on an idle canvas. (Encoder-id
-	// changes don't touch the mix.) No-op for the Default canvas, which has no
-	// runtime mix.
+	// changes don't touch the mix.) The Default canvas has no runtime mix -- it
+	// drives the global/main video pipeline instead, so reset that. On a failed
+	// reset bail before Save() so the broken resolution isn't persisted.
 	if (resChanged) {
-		ObsBootstrap::CanvasRuntime().ResetVideo(*def);
+		if (def->isDefault) {
+			if (!ApplyGlobalVideo(newW, newH, newW, newH, newFpsN, newFpsD, error)) {
+				return false;
+			}
+		} else {
+			ObsBootstrap::CanvasRuntime().ResetVideo(*def);
+		}
 	}
 
 	store.Save();

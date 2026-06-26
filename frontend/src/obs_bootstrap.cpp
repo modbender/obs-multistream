@@ -454,6 +454,35 @@ bool ObsBootstrap::Start()
 
 	LoadMultistreamModel();
 
+	// Boot reconcile: the global video pipeline was initialized to a fixed default
+	// above (before modules could load), but the persisted Default canvas def is the
+	// source of truth for its resolution/FPS -- the Settings UI edits the Default
+	// canvas, which drives global video. Re-apply from the def so a saved resolution
+	// survives restarts. Inert on first run (seeded def == the fixed init).
+	{
+		const CanvasDefinition &def = g_canvases.Default();
+		obs_video_info cur = {};
+		if (obs_get_video_info(&cur) &&
+		    (cur.base_width != def.width || cur.base_height != def.height || cur.fps_num != def.fpsNum ||
+		     cur.fps_den != def.fpsDen)) {
+			obs_video_info want = cur;
+			want.base_width = def.width;
+			want.base_height = def.height;
+			want.output_width = def.width;
+			want.output_height = def.height;
+			want.fps_num = def.fpsNum;
+			want.fps_den = def.fpsDen;
+			if (obs_reset_video(&want) == OBS_VIDEO_SUCCESS) {
+				Transitions::OnVideoReset();
+				HostLog("[obs] video reconciled to Default canvas " + std::to_string(def.width) + "x" +
+					std::to_string(def.height) + "@" + std::to_string(def.fpsNum) + "/" +
+					std::to_string(def.fpsDen));
+			} else {
+				HostLog("[obs] video reconcile to Default canvas FAILED; keeping init resolution");
+			}
+		}
+	}
+
 	// Bring up the live obs_canvas_t mixes for the additional canvases before the
 	// engine, which resolves canvas video through the runtime below.
 	g_canvasRuntime = std::make_unique<::CanvasRuntime>(g_canvases);
