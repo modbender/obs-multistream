@@ -434,8 +434,8 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   `main_canvas`, so the filter keeps `canvas == obs_get_main_canvas()` + null-canvas
   inputs, drops additional-canvas scenes. Round-trip + `leaks: 2` verified. **Follow-ups:**
   per-canvas scene persistence (additional canvases still rebuild empty); audio
-  volume/mute persistence (only the device persists today); multiple named scene
-  collections (single collection for now).
+  volume/mute persistence (only the device persists today). Multiple named scene
+  collections — **done in Phase 6a.**
 - ✅ **Source filters — DONE 2026-06-24.** `filterTypes.list` + `filters.list/add/
   remove/setEnabled/reorder/rename` + a `"filter"` property kind (resolve a filter by
   uuid → reuse the generic `obs_properties` renderer). Filters dialog (list + add
@@ -605,77 +605,113 @@ the same engine), independent of the remaining Phase-4 UI items.
 
 ---
 
-## Phase 6 — Data importer: import config from OBS Studio 🔭 PLANNED (not started)
+## Phase 6 — Multiple scene collections + OBS Studio importer
 
-One-click migration for users coming from official OBS Studio: detect an existing
-OBS install and import their production — scenes, sources, filters, transforms,
-transitions, stream credentials, and the video/audio settings — into this fork,
-**without touching the original OBS data** (read-only of `%APPDATA%/obs-studio`,
-consistent with the config-separation rebrand, which deliberately *kept* reading
-the `obs-studio/basic/scenes/` path for exactly this).
+Two parts: **6a** multiple named scene collections (OBS-parity the Phase-4 rewrite
+dropped — and the prerequisite for the importer), then **6b** a read-only importer
+that pulls a real OBS Studio install's config into this fork.
 
-**Feasibility: largely YES — and the heaviest piece is the cheapest.** OBS scene
-collections are **libobs-native serialization** — the *same* `obs_save_sources` /
-`obs_load_sources` format this fork already writes and reads in
-`frontend/src/scene_persistence.cpp`. So scenes, sources, filters, scene-item
-transforms/crops/visibility, groups, and transitions can be loaded by the same
-libobs API we already call; no bespoke parser. The surrounding metadata (stream
-service, video/audio/output settings) is plain INI/JSON and maps with small,
-well-understood translation logic.
+### Phase 6a — Multiple scene collections ✅ COMPLETE (2026-06-26)
 
-**What maps, and how (confidence noted):**
-- **Scene collection → Default canvas** *(strong — libobs-native)*: read
-  `basic/scenes/<collection>.json`, feed its sources array through
-  `obs_load_sources` (same path as our own collection load), persist to our
-  `scene_collection.json`. Items/filters/transforms come along for free.
-- **`service.json` → Stream profile** *(strong)*: platform + server + stream key is
-  exactly our reusable credential model (`streams.json`). Near 1:1.
-- **`basic.ini` video → Canvas** *(strong)*: base/output resolution + FPS define a
-  `CanvasDefinition`; encoder/bitrate populate its encoder settings.
-- **`basic.ini` audio → global audio** *(medium)*: sample rate/channels +
-  desktop/mic device ids map onto our `audio_devices.json` (channels 1–6) seeded at
-  boot — needs device-id reconciliation against the local machine.
-- **Hotkeys** *(medium — needs format verification)*: source hotkeys travel inside
-  the scene-collection JSON (load for free via libobs); global/frontend hotkeys
-  live in the profile and would map to our `hotkeys.json`. Exact storage layout to
-  confirm before relying on it.
+Add multiple named scene collections (list / create / rename / delete / switch,
+persisted, surviving restart). **Merged to `master` (fast-forward, tip `75a73e8ac`);
+`scene-collections` branch deleted.**
 
-**Model translation — the one real design task:** OBS has a *single* output; this
-fork has **N canvases × stream profiles × output bindings**. The clean default
-import = one Canvas (from the profile's video settings) + one Stream profile (from
-`service.json`) + one Output binding linking them → the imported production streams
-exactly as it did in OBS, and the user fans out to more destinations afterward.
+**Architecture:** scene collections are a **frontend** feature — libobs has *zero*
+scene-collection concept (verified: 0 references in `libobs/`; the engine only offers
+`obs_save_sources`/`obs_load_sources`). OBS's old Qt frontend owned it; the Phase-4
+rewrite simply never reimplemented it. Built in the C++ bridge (`frontend/src/`), NOT
+libobs.
 
-**Known caveats / pre-work:**
-- **Single scene collection** — the new frontend currently persists *one* collection
-  (multi-named-collection is a tracked follow-up). Either land multi-collection
-  first, or v1 imports only the user-selected/active collection.
-- **Plugin availability** — a source only loads if its plugin is present. This fork
-  bundles the same plugin set, so common sources resolve; sources owned by the
-  **excluded** plugins (`frontend-tools`, `decklink-*`, `aja-output-ui`,
-  `obs-websocket`) won't import. Report skips, don't fail silently.
-- **Recording / replay-buffer settings won't map** — this fork is streaming-only
-  (recording dormant). Import streaming + scene data; drop record-only fields.
-- **libobs version** — scene JSON is libobs-version-tied but backward-compatible;
-  this fork tracks upstream (32.x), so same-or-older OBS collections should load.
-  Flag a warning on a *newer* source-OBS than our libobs.
-- **`global.ini`** (theme/language/UI defaults) — low value; we have our own token
-  theming. Skip beyond maybe language.
-- **Reference, don't lift:** the retired Qt frontend (`frontend_old`, in git
-  history) had an OBS-Studio importer — its *scanning/UI* was Qt-coupled and is gone,
-  but the libobs-load approach is the reusable core.
+**Model (locked):** *per-collection* = scenes/sources (main-canvas scenes + plain
+inputs, the set `scene_persistence` already captures) **+ output bindings** (each show
+routes to its own destinations). *Global, shared* = canvases (reusable encode targets)
+and stream profiles (credentials never re-entered per show).
 
-**Sketch of the flow (for the future spec, not committing to it):** detect install →
-enumerate profiles + scene collections → user picks what to import (and a target:
-new vs merge) → load scenes via libobs → derive Canvas from video settings → create
-Stream profile from `service.json` → create the linking Output binding → import
-audio devices + hotkeys → report what was imported vs skipped. **Always additive and
-non-destructive**; the original OBS install is never modified.
+- ✅ **Registry + per-collection persistence + migration** — `scene_collections.
+  {cpp,hpp}` (`{id,name,sceneFile}` index in `basic/scene_collections.json`, slugged
+  `scenes/<slug>.json` per collection); `scene_persistence` generalized to path-based
+  Save/Load + `ClearCurrent` (reuses the *same* `SaveFilter` as Save, so the
+  save/teardown boundary can't drift). First-run migration points the existing
+  `scene_collection.json` + `output_bindings.json` at the first "Untitled" collection
+  (in-place, zero data loss).
+- ✅ **Switch mechanism** — `Switch(id)` = save outgoing scenes+bindings → teardown
+  drain (the proven shutdown drain: unbind ch0 transition → enum+remove → wait for
+  destroy queue) → flip+persist index → load incoming scenes+bindings → re-establish
+  the ch0 transition → emit `collections/scenes/transitions/outputBinding/multistream
+  .changed`. **Refuses while live** (`Multistream().AnyLive()`, before any mutation);
+  `Remove(active)` switches away first. Corrupt-index hardening: mutating bridge ops
+  refuse when both index `.json` + `.bak` are unparseable (won't clobber on-disk
+  scene files); reads still work.
+- ✅ **Per-collection output bindings** — `OutputBindingStore` made path-based;
+  bindings travel with the active collection (sibling `scenes/<slug>.output_bindings
+  .json`); migrated from the legacy global file; zero-binding new collection doesn't
+  crash (Default canvas keeps its central preview placeholder).
+- ✅ **Switcher UI** — a "Scene Collection ▾" menu-bar dropdown (active radio-checked
+  → switch; New… / Rename… / Delete via a reused zero-radius `CollectionDialog`;
+  Delete disabled at the last collection; refresh on `collections.changed`); backend
+  errors (switch-while-live, delete-last, dup-name) surfaced, not swallowed.
 
-**Scope note:** PLANNED only — its own brainstorm → spec → plan cycle before any
-build. Independent of the remaining Phase-4 verification items and Phase 5. Reuses
-the existing libobs load path and the three-layer canvas/profile/binding model; do
-not invent a parallel persistence format.
+Subagent-driven (4 tasks + per-task reviews + a holistic review = SHIP_WITH_MINOR, all
+addressed). Build green /W4 /WX, `bun run check` 0/0, smoke `leaks: 2`. **GUI/runtime
+acceptance owed** (headless-undriveable): the switch round-trip (create B → switch →
+add scenes → back to A intact → B's scenes present), leak-hygiene across
+boot→switch→switch→shutdown, and the while-live / corrupt-index rejection paths.
+
+**Scope boundary (intentional):** only *main-canvas* scenes are per-collection;
+additional-canvas scenes remain global (the pre-existing per-canvas-persistence gap,
+unchanged). Output bindings *are* per-collection.
+
+### Phase 6b — OBS Studio data importer ⏸ DEFERRED (designed 2026-06-26, build deferred)
+
+A read-only importer: detect a real OBS Studio install (`%APPDATA%/obs-studio`) and
+recreate its data inside this fork (`%APPDATA%/obs-multistream`), **never modifying the
+original OBS data**. Built on the 6a multi-collection foundation. **Design decisions
+captured (below); deferred before spec/plan — resume from these.**
+
+**Decisions (locked with the user 2026-06-26):**
+- **Scope: everything** — scene collections, stream destinations (service + keys),
+  video settings, audio settings.
+- **A selective wizard window** — a dedicated CEF dialog that lets the user toggle
+  *what* to import, down to **per-collection and per-scene** granularity (pick a whole
+  collection or a single scene out of it), plus per-profile toggles for
+  Destination / Video / Audio.
+- **Leave destinations unwired** — import collections, canvases, and stream profiles as
+  independent pieces; the user wires destinations→canvases (output bindings) afterward.
+  Honest to OBS's model (OBS has no per-collection binding concept).
+- **Launch from the File menu** — "Import from OBS Studio…" (explicit, re-runnable).
+
+**Mapping (from the 6b research pass — accurate field-level map exists):**
+- **OBS scene collection → fork scene collection** *(strong — libobs-native)*: OBS
+  `basic/scenes/*.json` is the *same* serialization the fork loads; its `sources` array
+  feeds `obs_load_sources` verbatim (filters/transforms/groups for free). OBS has **no
+  index** — scan the dir, read the display name from each file's `"name"` key, exclude
+  `.bak`. **Per-scene import** = parse the `sources` array, take the selected scenes +
+  their **dependency closure** (referenced inputs + nested scenes/groups), write a fork
+  collection with that filtered array (the one genuinely new piece of logic).
+- **`service.json` → stream profile** *(strong, near 1:1)*: OBS `"type"` → fork
+  `serviceId`; `"settings"` blob passed verbatim; profile name → label.
+- **`basic.ini` `[Video]` → canvas** *(strong)*: `BaseCX/CY`/`OutputCX/CY` + the
+  `FPSType/FPSCommon/FPSInt/FPSNum/FPSDen` encoding (NTSC fractions table known) →
+  CanvasDefinition (Default canvas updated; extra profiles → additional canvases).
+  Decision pending: `OutputCX/CY` (encode size) vs `BaseCX/CY` when OBS downscales.
+- **`basic.ini` `[Audio]` → global audio** *(strong)*: `SampleRate` + `ChannelSetup`
+  (lowercase the value) → `settings.setAudio`.
+
+**Caveats (carry into the spec):** global audio *channels* embedded as top-level keys
+in OBS scene JSON are dropped by the fork's loader (separate import step if wanted);
+encoder id is split between `basic.ini [AdvOut]` and `streamEncoder.json` (read both);
+Simple-output mode infers the encoder from `[SimpleOutput]`; the dup-profile guard
+(key/name) means re-import must skip or rename; missing-plugin sources are skipped with
+a warning by `obs_load_sources`; "OBS not found" must fail gracefully (hence the Browse
+fallback). Full research + the field-by-field map live in the session transcript /
+forthcoming 6b spec.
+
+**Next step when resumed:** finalize the wizard mock (the per-profile-vs-global
+Video/Audio toggle shape was the open UI question) → spec → plan → subagent-driven
+build (C++ scan/apply bridge methods via super-languages; the wizard via super-frontend).
+Reuses the libobs load path + the three-layer canvas/profile/binding model; do not
+invent a parallel persistence format.
 
 ---
 
