@@ -12,17 +12,33 @@ std::string StreamProfileStore::FilePath()
 	return MultistreamBasicPath("streams.json");
 }
 
-void StreamProfileStore::Load()
+nlohmann::json StreamProfileStore::ToJson() const
+{
+	OBSDataAutoRelease root = obs_data_create();
+	OBSDataArrayAutoRelease arr = obs_data_array_create();
+	for (const StreamProfile &p : profiles) {
+		OBSDataAutoRelease item = p.ToData();
+		obs_data_array_push_back(arr, item);
+	}
+	obs_data_set_array(root, "profiles", arr);
+
+	const char *js = obs_data_get_json(root);
+	return js ? nlohmann::json::parse(js) : nlohmann::json::object();
+}
+
+void StreamProfileStore::FromJson(const nlohmann::json &j)
 {
 	profiles.clear();
 
-	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
-	if (root) {
-		OBSDataArrayAutoRelease arr = obs_data_get_array(root, "profiles");
-		const size_t count = arr ? obs_data_array_count(arr) : 0;
-		for (size_t i = 0; i < count; i++) {
-			OBSDataAutoRelease item = obs_data_array_item(arr, i);
-			profiles.push_back(StreamProfile::FromData(item));
+	if (j.is_object()) {
+		OBSDataAutoRelease root = obs_data_create_from_json(j.dump().c_str());
+		if (root) {
+			OBSDataArrayAutoRelease arr = obs_data_get_array(root, "profiles");
+			const size_t count = arr ? obs_data_array_count(arr) : 0;
+			for (size_t i = 0; i < count; i++) {
+				OBSDataAutoRelease item = obs_data_array_item(arr, i);
+				profiles.push_back(StreamProfile::FromData(item));
+			}
 		}
 	}
 
@@ -41,15 +57,16 @@ void StreamProfileStore::Load()
 	}
 }
 
+void StreamProfileStore::Load()
+{
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
+	const char *js = root ? obs_data_get_json(root) : nullptr;
+	FromJson(js ? nlohmann::json::parse(js) : nlohmann::json::object());
+}
+
 void StreamProfileStore::Save() const
 {
-	OBSDataAutoRelease root = obs_data_create();
-	OBSDataArrayAutoRelease arr = obs_data_array_create();
-	for (const StreamProfile &p : profiles) {
-		OBSDataAutoRelease item = p.ToData();
-		obs_data_array_push_back(arr, item);
-	}
-	obs_data_set_array(root, "profiles", arr);
+	OBSDataAutoRelease root = obs_data_create_from_json(ToJson().dump().c_str());
 
 	std::filesystem::path dir = std::filesystem::u8path(FilePath()).parent_path();
 	os_mkdirs(dir.u8string().c_str());

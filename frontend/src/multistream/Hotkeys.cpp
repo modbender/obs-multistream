@@ -317,6 +317,65 @@ void Load()
 		&ctx);
 }
 
+json Snapshot()
+{
+	OBSDataAutoRelease root = obs_data_create();
+	struct Ctx {
+		obs_data_t *root;
+	} ctx{root};
+	obs_enum_hotkeys(
+		[](void *param, obs_hotkey_id id, obs_hotkey_t *hotkey) -> bool {
+			auto *c = static_cast<Ctx *>(param);
+			const char *name = obs_hotkey_get_name(hotkey);
+			if (!name) {
+				return true;
+			}
+			OBSDataArrayAutoRelease arr = obs_hotkey_save(id);
+			obs_data_set_array(c->root, name, arr);
+			return true;
+		},
+		&ctx);
+
+	const char *js = obs_data_get_json(root);
+	return js ? json::parse(js) : json::object();
+}
+
+void RestoreFromSnapshot(const json &snap)
+{
+	if (!snap.is_object()) {
+		return;
+	}
+	OBSDataAutoRelease root = obs_data_create_from_json(snap.dump().c_str());
+	if (!root) {
+		return;
+	}
+
+	// For each live hotkey, load its snapshot bindings by NAME. A hotkey with no
+	// snapshot entry is reset to an empty binding set so a binding added after the
+	// snapshot is reverted. obs_hotkey_load replaces (not merges) bindings.
+	struct Ctx {
+		obs_data_t *root;
+	} ctx{root};
+	obs_enum_hotkeys(
+		[](void *param, obs_hotkey_id id, obs_hotkey_t *hotkey) -> bool {
+			auto *c = static_cast<Ctx *>(param);
+			const char *name = obs_hotkey_get_name(hotkey);
+			if (!name) {
+				return true;
+			}
+			OBSDataArrayAutoRelease arr = obs_data_get_array(c->root, name);
+			if (!arr) {
+				arr = obs_data_array_create(); // absent -> clear
+			}
+			obs_hotkey_load(id, arr);
+			return true;
+		},
+		&ctx);
+
+	Save();
+	Bridge::EmitEvent("hotkeys.changed", json::object());
+}
+
 bool MethodList(const json & /*params*/, json &result, std::string & /*error*/)
 {
 	struct Ctx {

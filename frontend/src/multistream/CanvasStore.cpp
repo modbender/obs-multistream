@@ -12,24 +12,7 @@ std::string CanvasStore::FilePath()
 	return MultistreamBasicPath("canvases.json");
 }
 
-void CanvasStore::Load()
-{
-	definitions.clear();
-
-	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
-	if (root) {
-		OBSDataArrayAutoRelease arr = obs_data_get_array(root, "canvases");
-		const size_t count = arr ? obs_data_array_count(arr) : 0;
-		for (size_t i = 0; i < count; i++) {
-			OBSDataAutoRelease item = obs_data_array_item(arr, i);
-			definitions.push_back(CanvasDefinition::FromData(item));
-		}
-	}
-
-	EnsureDefault();
-}
-
-void CanvasStore::Save() const
+nlohmann::json CanvasStore::ToJson() const
 {
 	OBSDataAutoRelease root = obs_data_create();
 	OBSDataArrayAutoRelease arr = obs_data_array_create();
@@ -38,6 +21,40 @@ void CanvasStore::Save() const
 		obs_data_array_push_back(arr, item);
 	}
 	obs_data_set_array(root, "canvases", arr);
+
+	const char *js = obs_data_get_json(root);
+	return js ? nlohmann::json::parse(js) : nlohmann::json::object();
+}
+
+void CanvasStore::FromJson(const nlohmann::json &j)
+{
+	definitions.clear();
+
+	if (j.is_object()) {
+		OBSDataAutoRelease root = obs_data_create_from_json(j.dump().c_str());
+		if (root) {
+			OBSDataArrayAutoRelease arr = obs_data_get_array(root, "canvases");
+			const size_t count = arr ? obs_data_array_count(arr) : 0;
+			for (size_t i = 0; i < count; i++) {
+				OBSDataAutoRelease item = obs_data_array_item(arr, i);
+				definitions.push_back(CanvasDefinition::FromData(item));
+			}
+		}
+	}
+
+	EnsureDefault();
+}
+
+void CanvasStore::Load()
+{
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(FilePath().c_str(), "bak");
+	const char *js = root ? obs_data_get_json(root) : nullptr;
+	FromJson(js ? nlohmann::json::parse(js) : nlohmann::json::object());
+}
+
+void CanvasStore::Save() const
+{
+	OBSDataAutoRelease root = obs_data_create_from_json(ToJson().dump().c_str());
 
 	// Ensure the parent dir exists (it does once a profile is created, but be safe).
 	std::filesystem::path dir = std::filesystem::u8path(FilePath()).parent_path();

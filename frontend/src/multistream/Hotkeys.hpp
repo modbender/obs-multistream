@@ -35,6 +35,17 @@ void Save();
 // bindings their registerer loaded. Safe before any hotkey exists (no-op).
 void Load();
 
+// Capture EVERY hotkey's current bindings as a JSON blob keyed by hotkey NAME, in
+// the SAME shape Save()/Load() persist (a restorable snapshot, unlike MethodList's
+// display-only output). Used by settings.snapshot.
+json Snapshot();
+
+// Revert every live hotkey to the bindings in `snap` (a blob from Snapshot()):
+// each named entry's bindings are loaded, and a hotkey absent from the snapshot is
+// cleared, so a binding added after the snapshot is undone. Persists + emits
+// hotkeys.changed. Used by settings.restore.
+void RestoreFromSnapshot(const json &snap);
+
 // Bridge method bodies (registered in g_methods). See bridge.cpp / the header doc
 // on each for the JSON contract.
 bool MethodList(const json &params, json &result, std::string &error);

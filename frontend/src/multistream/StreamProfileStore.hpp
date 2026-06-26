@@ -2,6 +2,8 @@
 
 #include "StreamProfile.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <string>
 #include <vector>
 
@@ -17,6 +19,13 @@ class StreamProfileStore {
 public:
 	void Load(); // read streams.json (replaces contents; re-points primary if missing)
 	void Save() const;
+
+	// The whole model as JSON, in the SAME shape streams.json holds (the single
+	// serializer; Load/Save route through it). FromJson replaces contents and
+	// re-points the primary if missing, mirroring Load(). Used by settings.snapshot/
+	// settings.restore for the transactional Settings footer.
+	nlohmann::json ToJson() const;
+	void FromJson(const nlohmann::json &j);
 
 	const std::vector<StreamProfile> &Profiles() const { return profiles; }
 	bool Empty() const { return profiles.empty(); }

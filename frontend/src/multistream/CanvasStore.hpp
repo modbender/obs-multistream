@@ -2,6 +2,8 @@
 
 #include "CanvasDefinition.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <string>
 #include <vector>
 
@@ -19,6 +21,13 @@ public:
 
 	void Load();       // read canvases.json (replaces contents; re-seeds Default if absent)
 	void Save() const; // write canvases.json atomically
+
+	// The whole model as JSON, in the SAME shape canvases.json holds (the single
+	// serializer; Load/Save route through it). FromJson replaces contents and
+	// re-seeds the Default if absent, mirroring Load(). Used by settings.snapshot/
+	// settings.restore for the transactional Settings footer.
+	nlohmann::json ToJson() const;
+	void FromJson(const nlohmann::json &j);
 
 	const std::vector<CanvasDefinition> &Definitions() const { return definitions; }
 	const CanvasDefinition &Default() const; // always present (see invariant above)

@@ -2,6 +2,8 @@
 
 #include "OutputBinding.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <string>
 
 // Holds the OutputBindings (profile x canvas routing edges) for the new frontend
@@ -18,6 +20,13 @@ class OutputBindingStore {
 public:
 	void Load(); // read output_bindings.json into bindings (empty if absent)
 	void Save() const;
+
+	// The whole model as JSON, in the SAME shape output_bindings.json holds (the
+	// single serializer; Load/Save route through it). FromJson replaces contents,
+	// mirroring Load(). Used by settings.snapshot/settings.restore for the
+	// transactional Settings footer.
+	nlohmann::json ToJson() const;
+	void FromJson(const nlohmann::json &j);
 
 	OutputBindings &Bindings() { return bindings; }
 	const OutputBindings &Bindings() const { return bindings; }

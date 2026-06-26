@@ -5,6 +5,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <shobjidl.h>
@@ -4295,6 +4296,194 @@ bool MethodMcpRegenerateToken(const json &, json &result, std::string &error)
 	return true;
 }
 
+// --- transactional settings snapshot / restore ------------------------------
+// One C++ pair that captures EVERY settings category to a single blob and reverts
+// it, so the Settings dialog's OK/Apply/Cancel footer can roll back on Cancel
+// without per-item diffing in JS. Capture reuses each category's existing getter /
+// store serializer; restore reuses each setter / store FromJson and re-emits the
+// change events so the UI + preview resync. Token regeneration is intentionally
+// NOT captured/reverted -- it is irreversible.
+
+bool MethodSettingsSnapshot(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json snap;
+	{
+		json v;
+		std::string e;
+		MethodSettingsGetVideo(json::object(), v, e);
+		snap["video"] = v;
+	}
+	{
+		json a;
+		std::string e;
+		MethodSettingsGetAudio(json::object(), a, e);
+		snap["audio"] = a;
+	}
+	{
+		json d;
+		std::string e;
+		MethodAudioGetGlobalDevices(json::object(), d, e);
+		snap["globalDevices"] = d;
+	}
+	snap["canvases"] = ObsBootstrap::Canvases().ToJson();
+	snap["streamProfiles"] = ObsBootstrap::StreamProfiles().ToJson();
+	snap["outputBindings"] = ObsBootstrap::OutputBindings().ToJson();
+	snap["hotkeys"] = Hotkeys::Snapshot();
+	{
+		json m;
+		std::string e;
+		MethodMcpGetConfig(json::object(), m, e);
+		snap["mcp"] = m;
+	}
+	result = std::move(snap);
+	return true;
+}
+
+bool MethodSettingsRestore(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "settings.restore expects an object";
+		return false;
+	}
+
+	if (params.contains("video")) {
+		json r;
+		std::string e;
+		MethodSettingsSetVideo(params["video"], r, e);
+	}
+	if (params.contains("audio")) {
+		json r;
+		std::string e;
+		MethodSettingsSetAudio(params["audio"], r, e);
+	}
+	if (params.contains("globalDevices") && params["globalDevices"].is_array()) {
+		for (const json &slot : params["globalDevices"]) {
+			if (!slot.is_object() || !slot.contains("channel")) {
+				continue;
+			}
+			json setParams = json::object();
+			setParams["channel"] = slot["channel"];
+			// null/absent/non-string deviceId all mean "disable this slot".
+			setParams["deviceId"] = (slot.contains("deviceId") && slot["deviceId"].is_string())
+							? slot["deviceId"]
+							: json(nullptr);
+			json r;
+			std::string e;
+			MethodAudioSetGlobalDevice(setParams, r, e);
+		}
+	}
+
+	if (params.contains("streamProfiles")) {
+		StreamProfileStore &s = ObsBootstrap::StreamProfiles();
+		s.FromJson(params["streamProfiles"]);
+		s.Save();
+	}
+	if (params.contains("outputBindings")) {
+		OutputBindingStore &s = ObsBootstrap::OutputBindings();
+		s.FromJson(params["outputBindings"]);
+		s.Save();
+	}
+
+	if (params.contains("canvases")) {
+		CanvasStore &cs = ObsBootstrap::Canvases();
+
+		// Snapshot the pre-restore non-Default canvases (uuid + resolution) so we can
+		// tell which live mixes were created during the edit (tear them down) and
+		// which surviving ones had a resolution change (revert the mix). A live canvas
+		// can't be edited, so it can't appear in a revert delta; we still defensively
+		// skip touching one.
+		struct Prev {
+			std::string uuid;
+			uint32_t w, h, fpsN, fpsD;
+		};
+		std::vector<Prev> before;
+		for (const CanvasDefinition &d : cs.Definitions()) {
+			if (!d.isDefault) {
+				before.push_back({d.uuid, d.width, d.height, d.fpsNum, d.fpsDen});
+			}
+		}
+
+		cs.FromJson(params["canvases"]);
+		cs.Save();
+
+		std::unordered_set<std::string> after;
+		for (const CanvasDefinition &d : cs.Definitions()) {
+			if (!d.isDefault) {
+				after.insert(d.uuid);
+			}
+		}
+
+		CanvasRuntime &rt = ObsBootstrap::CanvasRuntime();
+
+		// 1) Tear down mixes for canvases created during the edit but absent after the
+		// revert. Mirror MethodCanvasRemove's teardown order: preview surface first
+		// (its obs_display reads the mix on the render thread), then the engine's
+		// cached encoders, then the mix. Skip a live canvas.
+		for (const Prev &p : before) {
+			if (after.count(p.uuid)) {
+				continue;
+			}
+			if (CanvasIsLive(p.uuid)) {
+				continue;
+			}
+			if (PreviewManager *pm = Preview::Instance()) {
+				pm->Destroy(p.uuid);
+			}
+			ObsBootstrap::Multistream().InvalidateCanvasEncoders(p.uuid);
+			rt.RemoveCanvas(p.uuid);
+		}
+
+		// 2) (Re)create mixes for any restored canvas missing one (removed during the
+		// edit, brought back by the revert). EnsureCanvas is idempotent.
+		rt.SyncFromDefinitions();
+
+		// 3) Revert the live mix resolution for surviving non-Default canvases whose
+		// resolution changed during the edit, invalidating their cached encoders too
+		// (mirrors MethodCanvasUpdate). The Default canvas has no runtime mix -- its
+		// resolution drives global video, handled below.
+		for (const CanvasDefinition &d : cs.Definitions()) {
+			if (d.isDefault || CanvasIsLive(d.uuid)) {
+				continue;
+			}
+			for (const Prev &p : before) {
+				if (p.uuid != d.uuid) {
+					continue;
+				}
+				if (p.w != d.width || p.h != d.height || p.fpsN != d.fpsNum || p.fpsD != d.fpsDen) {
+					ObsBootstrap::Multistream().InvalidateCanvasEncoders(d.uuid);
+					rt.ResetVideo(d);
+				}
+				break;
+			}
+		}
+
+		// 4) Make global video follow the restored Default canvas def so the main
+		// pipeline (and output resolution) reverts too. Reuse Task 1's path; skip
+		// while an output is live (a live pipeline can't be reset).
+		if (!AnyOutputActive()) {
+			const CanvasDefinition &def = cs.Default();
+			std::string e;
+			ApplyGlobalVideo(def.width, def.height, def.width, def.height, def.fpsNum, def.fpsDen, e);
+		}
+	}
+
+	if (params.contains("hotkeys")) {
+		Hotkeys::RestoreFromSnapshot(params["hotkeys"]);
+	}
+	if (params.contains("mcp")) {
+		json r;
+		std::string e;
+		MethodMcpSetConfig(params["mcp"], r, e);
+	}
+
+	EmitEvent("canvas.changed", json::object());
+	EmitEvent("outputBinding.changed", json::object());
+	EmitEvent("multistream.changed", json::object());
+	EmitEvent("mcp.changed", json::object());
+	result = json{{"ok", true}};
+	return true;
+}
+
 } // namespace
 
 bool WriteJsonString(const char *file, const char *key, const std::string &value)
@@ -4372,6 +4561,8 @@ void Init()
 		{"settings.setVideo", MethodSettingsSetVideo},
 		{"settings.getAudio", MethodSettingsGetAudio},
 		{"settings.setAudio", MethodSettingsSetAudio},
+		{"settings.snapshot", MethodSettingsSnapshot},
+		{"settings.restore", MethodSettingsRestore},
 		{"canvas.list", MethodCanvasList},
 		{"canvas.create", MethodCanvasCreate},
 		{"canvas.update", MethodCanvasUpdate},
