@@ -205,6 +205,7 @@
             </button>
           </div>
           <span class="help">A bearer token authenticating the client. Regenerating invalidates existing clients.</span>
+          <span class="help warn">Regenerating takes effect immediately and is not undone by Cancel.</span>
         </div>
       </section>
 
@@ -302,6 +303,10 @@
     font-size: 11px;
     color: var(--text-dim);
     line-height: 1.35;
+  }
+  .help.warn {
+    color: var(--meter-yellow, #eab308);
+    margin-top: 4px;
   }
   .status {
     display: flex;

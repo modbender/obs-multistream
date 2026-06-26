@@ -60,6 +60,22 @@
   let loaded = $state(false);
   let audioError = $state<string | null>(null);
 
+  // Transactional revert point. Captured on open and re-captured on Apply; every
+  // dismissal except OK/Apply restores it. null = snapshot unavailable -> Cancel
+  // becomes a no-op (never restore with null). `busy` guards against a second
+  // dismissal firing while a restore/snapshot round-trip is in flight.
+  let baseline = $state<unknown>(null);
+  let busy = $state(false);
+
+  async function captureBaseline() {
+    try {
+      baseline = await obs.call("settings.snapshot");
+    } catch (e) {
+      console.log("OBSSETTINGS: snapshot failed: " + (e as Error).message);
+      baseline = null;
+    }
+  }
+
   async function load() {
     try {
       const [a, slots, ins, outs] = await Promise.all([
@@ -82,6 +98,7 @@
 
   $effect(() => {
     void load();
+    void captureBaseline();
   });
 
   async function setAudio(patch: { sampleRate?: number; speakers?: SpeakerLayout }) {
@@ -113,11 +130,42 @@
     }
   }
 
-  // Task 4 wires the real transactional apply; stub for now.
-  function applyChanges() {}
+  // Apply: edits already landed live, so this just re-baselines the revert point.
+  async function apply() {
+    if (busy) return;
+    busy = true;
+    try {
+      baseline = await obs.call("settings.snapshot");
+    } catch (e) {
+      console.log("OBSSETTINGS: snapshot failed: " + (e as Error).message);
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Cancel / Esc / ✕ / backdrop: revert to the last baseline, then close.
+  async function cancel() {
+    if (busy) return;
+    busy = true;
+    if (baseline) {
+      try {
+        await obs.call("settings.restore", baseline);
+      } catch (e) {
+        console.log("OBSSETTINGS: restore failed: " + (e as Error).message);
+      }
+    }
+    onClose();
+  }
+
+  // OK: commit (re-baseline) then close; never reverts.
+  async function ok() {
+    if (busy) return;
+    await apply();
+    onClose();
+  }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") void cancel();
   }
 </script>
 
@@ -127,13 +175,13 @@
   class="modal-backdrop"
   role="presentation"
   onclick={(e) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) void cancel();
   }}
 >
   <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
     <header class="modal-head">
       <h3>Settings</h3>
-      <button class="icon close" title="Close" onclick={onClose}>✕</button>
+      <button class="icon close" title="Close" disabled={busy} onclick={() => void cancel()}>✕</button>
     </header>
 
     <div class="modal-body">
@@ -230,9 +278,9 @@
     </div>
 
     <footer class="modal-foot">
-      <button class="btn primary" onclick={onClose}>OK</button>
-      <button class="btn" onclick={applyChanges}>Apply</button>
-      <button class="btn ghost" onclick={onClose}>Cancel</button>
+      <button class="btn primary" disabled={busy} onclick={() => void ok()}>OK</button>
+      <button class="btn" disabled={busy} onclick={() => void apply()}>Apply</button>
+      <button class="btn ghost" disabled={busy} onclick={() => void cancel()}>Cancel</button>
     </footer>
   </div>
 </div>
