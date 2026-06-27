@@ -379,6 +379,61 @@ SceneLinkStore &ObsBootstrap::SceneLinks()
 	return *g_canvasRuntime;
 }
 
+void ObsBootstrap::ApplyCanvasSceneLinks(const std::string &mainSceneUuid)
+{
+	if (mainSceneUuid.empty()) {
+		return;
+	}
+	const CanvasSceneLink &link = SceneLinks().Links();
+	auto it = link.map.find(mainSceneUuid);
+	if (it == link.map.end()) {
+		return;
+	}
+	::CanvasRuntime &runtime = CanvasRuntime();
+	for (const auto &[canvasUuid, canvasSceneUuid] : it->second) {
+		// Resolve the stored canvas-scene uuid -> its current name, then switch.
+		for (const CanvasRuntime::SceneInfo &s : runtime.Scenes(canvasUuid)) {
+			if (s.uuid == canvasSceneUuid) {
+				runtime.SetCurrentScene(canvasUuid, s.name);
+				break;
+			}
+		}
+	}
+}
+
+void ObsBootstrap::PruneSceneLinksForMainScene(const std::string &mainSceneUuid)
+{
+	CanvasSceneLink &link = SceneLinks().Links();
+	if (link.map.erase(mainSceneUuid) > 0) {
+		SceneLinks().Save();
+	}
+}
+
+void ObsBootstrap::PruneSceneLinksForCanvas(const std::string &canvasUuid)
+{
+	CanvasSceneLink &link = SceneLinks().Links();
+	bool changed = false;
+	for (auto it = link.map.begin(); it != link.map.end();) {
+		if (it->second.erase(canvasUuid) > 0) {
+			changed = true;
+		}
+		if (it->second.empty()) {
+			it = link.map.erase(it);
+		} else {
+			++it;
+		}
+	}
+	if (changed) {
+		SceneLinks().Save();
+	}
+}
+
+void ObsBootstrap::PruneSceneLinksForCanvasScene(const std::string &canvasUuid, const std::string &canvasSceneUuid)
+{
+	SceneLinks().Links().UnsetByCanvasScene(canvasUuid, canvasSceneUuid);
+	SceneLinks().Save();
+}
+
 MultistreamEngine &ObsBootstrap::Multistream()
 {
 	// Valid only between Start() (constructs g_multistream after the stores load)

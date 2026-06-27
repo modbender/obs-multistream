@@ -1,6 +1,8 @@
 #ifndef OBS_MULTISTREAM_FRONTEND_OBS_BOOTSTRAP_HPP_
 #define OBS_MULTISTREAM_FRONTEND_OBS_BOOTSTRAP_HPP_
 
+#include <string>
+
 // Brings libobs up inside the CEF-hosted browser process and tears it down.
 // Start() initializes the core, the video pipeline (D3D11), and audio, then
 // curated-loads obs-browser (frontend owns CEF) and creates a test scene with a
@@ -51,6 +53,17 @@ OutputBindingStore &OutputBindings();
 // bootstrap (loaded in Start, cleared in Stop). Exposed so the bridge can serve
 // scene-link CRUD over it. Valid between Start() and Stop().
 SceneLinkStore &SceneLinks();
+
+// Switch every non-default canvas to the scene linked from `mainSceneUuid`
+// (CanvasSceneLink::Resolve). Canvases with no link for this main scene are
+// left untouched. Safe to call with an empty/unknown uuid (no-op).
+void ApplyCanvasSceneLinks(const std::string &mainSceneUuid);
+
+// Remove links referencing a deleted entity, then persist. Call from the
+// scene/canvas removal paths so no dangling link survives.
+void PruneSceneLinksForMainScene(const std::string &mainSceneUuid);
+void PruneSceneLinksForCanvas(const std::string &canvasUuid);
+void PruneSceneLinksForCanvasScene(const std::string &canvasUuid, const std::string &canvasSceneUuid);
 
 // The encode-once / fan-out streaming engine, owned by the bootstrap
 // (constructed in Start after the stores load, torn down in Stop before they
