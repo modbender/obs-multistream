@@ -212,6 +212,10 @@
       expandedKind = kind;
     }
   }
+
+  // The expander renders once below the grid (not as a grid cell), so resolve the
+  // open canvas from its uuid. Clears itself if that canvas is removed.
+  const expandedCanvas = $derived(expandedUuid ? (canvases.find((c) => c.uuid === expandedUuid) ?? null) : null);
 </script>
 
 <div class="canvases">
@@ -258,16 +262,19 @@
             >
           </div>
         </li>
-        {#if expandedUuid === c.uuid}
-          <li class="expander">
-            <div class="exp-head">{expandedKind === "video" ? "Video" : "Audio"} encoder settings</div>
-            {#key c.uuid + ":" + expandedKind}
-              <PropertyForm kind="encoder" ref={c.uuid + ":" + expandedKind} />
-            {/key}
-          </li>
-        {/if}
       {/each}
     </ul>
+
+    {#if expandedCanvas}
+      <div class="expander">
+        <div class="exp-head">
+          {expandedCanvas.name} · {expandedKind === "video" ? "Video" : "Audio"} encoder settings
+        </div>
+        {#key expandedCanvas.uuid + ":" + expandedKind}
+          <PropertyForm kind="encoder" ref={expandedCanvas.uuid + ":" + expandedKind} />
+        {/key}
+      </div>
+    {/if}
 
     <div class="addbar">
       <button class="btn" onclick={openAdd}>+ Add Canvas</button>
@@ -394,7 +401,6 @@
   }
   .tile-body:hover {
     background: var(--bg-raised);
-    border-color: transparent;
   }
   .aspect-frame {
     flex: 0 0 auto;
@@ -479,7 +485,7 @@
     cursor: default;
   }
   .expander {
-    grid-column: 1 / -1;
+    margin-top: 12px;
     border: 1px solid var(--border);
     background: var(--bg-raised);
     padding: 12px 12px 14px;

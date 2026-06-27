@@ -250,7 +250,6 @@
   }
   .tile-body:hover {
     background: var(--bg-raised);
-    border-color: transparent;
   }
   .info {
     min-width: 0;
