@@ -992,6 +992,10 @@ export interface ObsMethods {
   "theme.load": { state: string };
   "layout.save": { saved: boolean };
   "layout.load": { layout: string };
+  // Current session log (Item 16). getCurrent returns the active log file path plus
+  // its contents, tail-capped at 512KB by the backend. No params; the viewer modal
+  // re-calls it on Refresh.
+  "log.getCurrent": { path: string; contents: string };
   // Scene collections (named, switchable scene/source sets, Phase 6a). list
   // enumerates every collection with the active one flagged; create/rename/remove
   // mutate the registry; switch tears down the current scene world and loads the

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { obs, type GeneralSettings } from "./bridge";
   import { openMissingFiles } from "./missingFilesOpener.svelte";
+  import { openLogViewer } from "./logViewerOpener.svelte";
 
   // General app settings, live-applied (the page model has no Apply boundary):
   // each control change pushes only its changed key via settings.setGeneral and
@@ -235,6 +236,12 @@
     <h4>Sources</h4>
     <button class="action" onclick={() => openMissingFiles()}>Find Missing Files…</button>
     <p class="dim note">Locate and relink sources whose media file has moved or been renamed.</p>
+  </section>
+
+  <section class="group">
+    <h4>Diagnostics</h4>
+    <button class="action" onclick={() => openLogViewer()}>View Current Log</button>
+    <p class="dim note">Show the current session log for troubleshooting and bug reports.</p>
   </section>
 
   {#if error}<p class="error">{error}</p>{/if}

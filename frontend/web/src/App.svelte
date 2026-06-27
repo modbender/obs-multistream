@@ -19,6 +19,8 @@
   import { aboutOpen, closeAbout } from "./lib/aboutOpener.svelte";
   import MissingFilesDialog from "./lib/MissingFilesDialog.svelte";
   import { missingFilesOpen, closeMissingFiles } from "./lib/missingFilesOpener.svelte";
+  import LogViewerDialog from "./lib/LogViewerDialog.svelte";
+  import { logViewerOpen, closeLogViewer } from "./lib/logViewerOpener.svelte";
   import { undoStore } from "./lib/undoStore.svelte";
   import { obs } from "./lib/bridge";
   import { clipboard } from "./lib/clipboardStore.svelte";
@@ -132,6 +134,10 @@
 
 {#if missingFilesOpen.open}
   <MissingFilesDialog onClose={closeMissingFiles} />
+{/if}
+
+{#if logViewerOpen.open}
+  <LogViewerDialog onClose={closeLogViewer} />
 {/if}
 
 <Toast />
