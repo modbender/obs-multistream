@@ -1064,14 +1064,41 @@ void ObsBootstrap::RunCanvasBridgeSelfTest()
 			   json{{"name", "selftest-bridge-canvas"},
 				{"baseWidth", 1280},
 				{"baseHeight", 720},
-				{"fpsNum", 30},
-				{"fpsDen", 1}},
+				{"outputWidth", 854},
+				{"outputHeight", 480},
+				{"scaleType", "lanczos"},
+				{"fpsNum", 60000},
+				{"fpsDen", 1001}},
 			   ok);
 	if (!ok || !created.is_object()) {
 		return;
 	}
 	const std::string uuid = created.value("uuid", std::string());
 	HostLog("[selftest] canvas.create -> uuid=" + uuid);
+
+	// Confirm the scaled-output / downscale-filter / fractional-fps fields round-trip
+	// through canvas.list (CanvasToJson reads them straight off the stored def).
+	{
+		json relist = run("canvas.list", json(nullptr), ok);
+		if (ok && relist.is_array()) {
+			for (const auto &c : relist) {
+				if (c.value("uuid", std::string()) != uuid) {
+					continue;
+				}
+				const bool match = c.value("outputWidth", 0u) == 854u &&
+						   c.value("outputHeight", 0u) == 480u &&
+						   c.value("scaleType", std::string()) == "lanczos" &&
+						   c.value("fpsNum", 0u) == 60000u && c.value("fpsDen", 0u) == 1001u;
+				HostLog("[selftest] canvas.create output/scale/fps round-trip -> out " +
+					std::to_string(c.value("outputWidth", 0u)) + "x" +
+					std::to_string(c.value("outputHeight", 0u)) + " scale=" +
+					c.value("scaleType", std::string("?")) + " fps=" +
+					std::to_string(c.value("fpsNum", 0u)) + "/" +
+					std::to_string(c.value("fpsDen", 0u)) + " (" + (match ? "OK" : "MISMATCH") + ")");
+				break;
+			}
+		}
+	}
 
 	// Confirm it persisted to disk by reloading a fresh store.
 	{

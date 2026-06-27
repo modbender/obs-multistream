@@ -41,6 +41,20 @@ video_range_type VideoRangeFromName(const std::string &name)
 {
 	return astrcmpi(name.c_str(), "Full") == 0 ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 }
+
+/* Downscale-filter token -> obs_scale_type, mirroring the bridge's kScaleFilters.
+ * Only the resampling filters are meaningful for a canvas; unknown/empty -> bicubic. */
+obs_scale_type ScaleTypeFromName(const std::string &name)
+{
+	if (astrcmpi(name.c_str(), "bilinear") == 0) {
+		return OBS_SCALE_BILINEAR;
+	} else if (astrcmpi(name.c_str(), "lanczos") == 0) {
+		return OBS_SCALE_LANCZOS;
+	} else if (astrcmpi(name.c_str(), "area") == 0) {
+		return OBS_SCALE_AREA;
+	}
+	return OBS_SCALE_BICUBIC; // includes "bicubic" and any unknown/empty token
+}
 }
 
 static OBSDataAutoRelease EncoderToData(const CanvasEncoderDef &enc)
@@ -76,8 +90,11 @@ OBSDataAutoRelease CanvasDefinition::ToData() const
 
 	obs_data_set_int(d, "width", width);
 	obs_data_set_int(d, "height", height);
+	obs_data_set_int(d, "output_width", outputWidth);
+	obs_data_set_int(d, "output_height", outputHeight);
 	obs_data_set_int(d, "fps_num", fpsNum);
 	obs_data_set_int(d, "fps_den", fpsDen);
+	obs_data_set_string(d, "scale_type", scaleType.c_str());
 	obs_data_set_bool(d, "use_default_resolution", useDefaultResolution);
 
 	obs_data_set_obj(d, "video_encoder", EncoderToData(video));
@@ -106,6 +123,8 @@ CanvasDefinition CanvasDefinition::FromData(obs_data_t *data)
 	 * entry can't create a 0x0 canvas. */
 	def.width = (uint32_t)obs_data_get_int(data, "width");
 	def.height = (uint32_t)obs_data_get_int(data, "height");
+	def.outputWidth = (uint32_t)obs_data_get_int(data, "output_width");   // 0 = mirror base
+	def.outputHeight = (uint32_t)obs_data_get_int(data, "output_height"); // 0 = mirror base
 	def.fpsNum = (uint32_t)obs_data_get_int(data, "fps_num");
 	def.fpsDen = (uint32_t)obs_data_get_int(data, "fps_den");
 	if (def.width == 0 || def.height == 0) {
@@ -115,6 +134,10 @@ CanvasDefinition CanvasDefinition::FromData(obs_data_t *data)
 	if (def.fpsNum == 0) {
 		def.fpsNum = 60;
 		def.fpsDen = 1;
+	}
+	const char *scaleType = obs_data_get_string(data, "scale_type");
+	if (scaleType && *scaleType) {
+		def.scaleType = scaleType; // absent -> keep struct default ("bicubic")
 	}
 	def.useDefaultResolution = obs_data_get_bool(data, "use_default_resolution");
 
@@ -141,13 +164,13 @@ void CanvasDefinition::ToVideoInfo(struct obs_video_info &ovi, const CanvasDefin
 	ovi = {}; // graphics_module left null; the caller fills it from the running pipeline
 	ovi.base_width = res->width;
 	ovi.base_height = res->height;
-	ovi.output_width = res->width;   // unified: edit-surface == encode size
-	ovi.output_height = res->height;
+	ovi.output_width = res->outputWidth ? res->outputWidth : res->width;     // 0 = mirror base
+	ovi.output_height = res->outputHeight ? res->outputHeight : res->height; // 0 = mirror base
 	ovi.fps_num = res->fpsNum;
 	ovi.fps_den = res->fpsDen;
 	ovi.gpu_conversion = true;  // GPU colorspace conversion, matching the main video pipeline
 	ovi.output_format = VideoFormatFromName(col.format);
 	ovi.colorspace = VideoColorSpaceFromName(col.space);
 	ovi.range = VideoRangeFromName(col.range);
-	ovi.scale_type = OBS_SCALE_BICUBIC;
+	ovi.scale_type = ScaleTypeFromName(res->scaleType);
 }

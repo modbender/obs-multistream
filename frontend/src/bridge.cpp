@@ -383,7 +383,7 @@ bool ReadDimension(const json &params, const char *key, uint32_t current, uint32
 // never left broken, then re-letterboxes the preview + resizes the program
 // transition. Caller owns the live-active/live-canvas guard.
 static bool ApplyGlobalVideo(uint32_t baseW, uint32_t baseH, uint32_t outW, uint32_t outH, uint32_t fpsNum,
-			     uint32_t fpsDen, std::string &error)
+			     uint32_t fpsDen, obs_scale_type scaleType, std::string &error)
 {
 	obs_video_info ovi = {};
 	if (!obs_get_video_info(&ovi)) {
@@ -398,14 +398,16 @@ static bool ApplyGlobalVideo(uint32_t baseW, uint32_t baseH, uint32_t outW, uint
 	ovi.output_height = outH ? outH : baseH;
 	ovi.fps_num = fpsNum;
 	ovi.fps_den = fpsDen;
+	ovi.scale_type = scaleType;
 
-	// All non-resolution fields are copied from the current config, so if these six
-	// already match there is genuinely nothing to reset. Skip the full pipeline
-	// reset (and its preview flicker) -- this also makes the redundant double-apply
-	// on a Settings Cancel a no-op.
+	// All non-resolution fields are copied from the current config, so if these
+	// seven already match there is genuinely nothing to reset. Skip the full
+	// pipeline reset (and its preview flicker) -- this also makes the redundant
+	// double-apply on a Settings Cancel a no-op.
 	if (ovi.base_width == previous.base_width && ovi.base_height == previous.base_height &&
 	    ovi.output_width == previous.output_width && ovi.output_height == previous.output_height &&
-	    ovi.fps_num == previous.fps_num && ovi.fps_den == previous.fps_den) {
+	    ovi.fps_num == previous.fps_num && ovi.fps_den == previous.fps_den &&
+	    ovi.scale_type == previous.scale_type) {
 		return true;
 	}
 
@@ -482,7 +484,7 @@ bool MethodSettingsSetVideo(const json &params, json &result, std::string &error
 	}
 
 	if (!ApplyGlobalVideo(ovi.base_width, ovi.base_height, ovi.output_width, ovi.output_height, ovi.fps_num,
-			      ovi.fps_den, error)) {
+			      ovi.fps_den, ovi.scale_type, error)) {
 		return false;
 	}
 
@@ -3807,9 +3809,9 @@ bool CanvasIsLive(const std::string &uuid)
 	return ObsBootstrap::Multistream().IsCanvasLive(uuid);
 }
 
-// Map one CanvasDefinition to the bridge's canvas shape. Resolution is a single
-// value in the model (edit-surface == encode size), so base* and output* mirror
-// it; the field pair is kept so the JS contract reads like the video settings.
+// Map one CanvasDefinition to the bridge's canvas shape. output* is the scaled
+// encode size; a stored 0 means "follow base", so it is reported as the base
+// dimension. scaleType is the downscale filter applied when output != base.
 json CanvasToJson(const CanvasDefinition &def)
 {
 	return json{
@@ -3818,8 +3820,9 @@ json CanvasToJson(const CanvasDefinition &def)
 		{"isDefault", def.isDefault},
 		{"baseWidth", def.width},
 		{"baseHeight", def.height},
-		{"outputWidth", def.width},
-		{"outputHeight", def.height},
+		{"outputWidth", def.outputWidth ? def.outputWidth : def.width},
+		{"outputHeight", def.outputHeight ? def.outputHeight : def.height},
+		{"scaleType", def.scaleType},
 		{"fpsNum", def.fpsNum},
 		{"fpsDen", def.fpsDen},
 		{"videoEncoder", def.video.id},
@@ -3876,11 +3879,54 @@ bool ReadCanvasFps(const json &params, const char *key, uint32_t current, uint32
 		return false;
 	}
 	const int64_t v = it->get<int64_t>();
-	if (v <= 0 || v > 1000) {
-		error = std::string("'") + key + "' must be in 1..1000";
+	// Wide enough for fractional rates: den 1001 (29.97/59.94/23.976) and high
+	// nums (e.g. 60000). 144000 caps both num and den sanely.
+	if (v <= 0 || v > 144000) {
+		error = std::string("'") + key + "' must be in 1..144000";
 		return false;
 	}
 	out = uint32_t(v);
+	return true;
+}
+
+// Optional scaled-output dimension: absent OR explicit 0 -> "follow base" (0). A
+// positive value is the real scaled size; oversized/negative -> error.
+bool ReadCanvasOutputDim(const json &params, const char *key, uint32_t current, uint32_t &out, std::string &error)
+{
+	auto it = params.find(key);
+	if (it == params.end() || it->is_null()) {
+		out = current;
+		return true;
+	}
+	if (!it->is_number_integer() && !it->is_number_unsigned()) {
+		error = std::string("'") + key + "' must be an integer";
+		return false;
+	}
+	const int64_t v = it->get<int64_t>();
+	if (v < 0 || v > 16384) {
+		error = std::string("'") + key + "' must be in 0..16384 (0 = follow base)";
+		return false;
+	}
+	out = uint32_t(v);
+	return true;
+}
+
+// Optional downscale-filter token. Absent/empty -> keep `current`. Only the
+// resampling filters are valid for a canvas; "disable"/"point" are rejected.
+bool ReadCanvasScale(const json &params, const char *key, const std::string &current, std::string &out,
+		     std::string &error)
+{
+	const std::string tok = OptString(params, key);
+	if (tok.empty()) {
+		out = current;
+		return true;
+	}
+	obs_scale_type type;
+	if (!ScaleFilterFromToken(tok, type) || type == OBS_SCALE_DISABLE || type == OBS_SCALE_POINT) {
+		error = std::string("'") + key + "' must be one of bilinear, bicubic, lanczos, area";
+		return false;
+	}
+	out = tok;
 	return true;
 }
 
@@ -3899,10 +3945,13 @@ bool MethodCanvasCreate(const json &params, json &result, std::string &error)
 	CanvasDefinition def;
 	def.name = name;
 	def.isDefault = false;
-	// Resolution: base* drives the single stored width/height; output* is accepted
-	// for contract symmetry but the model unifies them, so base* wins.
+	// base* is the edit surface; output*/scaleType are the scaled encode size and
+	// downscale filter (output 0 = follow base). Absent output -> stays 0.
 	if (!ReadCanvasDim(params, "baseWidth", 1920, def.width, error) ||
 	    !ReadCanvasDim(params, "baseHeight", 1080, def.height, error) ||
+	    !ReadCanvasOutputDim(params, "outputWidth", 0, def.outputWidth, error) ||
+	    !ReadCanvasOutputDim(params, "outputHeight", 0, def.outputHeight, error) ||
+	    !ReadCanvasScale(params, "scaleType", def.scaleType, def.scaleType, error) ||
 	    !ReadCanvasFps(params, "fpsNum", 60, def.fpsNum, error) ||
 	    !ReadCanvasFps(params, "fpsDen", 1, def.fpsDen, error)) {
 		return false;
@@ -3958,8 +4007,13 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 	// Resolve the requested structural values first so we can tell whether any
 	// actually changed before deciding to refuse.
 	uint32_t newW = def->width, newH = def->height, newFpsN = def->fpsNum, newFpsD = def->fpsDen;
+	uint32_t newOutW = def->outputWidth, newOutH = def->outputHeight;
+	std::string newScale = def->scaleType;
 	if (!ReadCanvasDim(params, "baseWidth", def->width, newW, error) ||
 	    !ReadCanvasDim(params, "baseHeight", def->height, newH, error) ||
+	    !ReadCanvasOutputDim(params, "outputWidth", def->outputWidth, newOutW, error) ||
+	    !ReadCanvasOutputDim(params, "outputHeight", def->outputHeight, newOutH, error) ||
+	    !ReadCanvasScale(params, "scaleType", def->scaleType, newScale, error) ||
 	    !ReadCanvasFps(params, "fpsNum", def->fpsNum, newFpsN, error) ||
 	    !ReadCanvasFps(params, "fpsDen", def->fpsDen, newFpsD, error)) {
 		return false;
@@ -3967,8 +4021,11 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 	const std::string venc = OptString(params, "videoEncoder");
 	const std::string aenc = OptString(params, "audioEncoder");
 
+	// Output res and the downscale filter resize/reconfigure the live mix just like
+	// base res, so they are structural and gated by the same live refusal + reset.
 	const bool resChanged = newW != def->width || newH != def->height || newFpsN != def->fpsNum ||
-				newFpsD != def->fpsDen;
+				newFpsD != def->fpsDen || newOutW != def->outputWidth ||
+				newOutH != def->outputHeight || newScale != def->scaleType;
 	const bool vencChanged = !venc.empty() && venc != def->video.id;
 	const bool aencChanged = !aenc.empty() && aenc != def->audio.id;
 
@@ -3982,13 +4039,18 @@ bool MethodCanvasUpdate(const json &params, json &result, std::string &error)
 	// so a failed reset (rolled back inside ApplyGlobalVideo) leaves the def -- and
 	// thus canvases.json -- untouched and consistent with the live pipeline.
 	if (resChanged && def->isDefault) {
-		if (!ApplyGlobalVideo(newW, newH, newW, newH, newFpsN, newFpsD, error)) {
+		obs_scale_type st = OBS_SCALE_BICUBIC;
+		ScaleFilterFromToken(newScale, st); // validated by ReadCanvasScale above
+		if (!ApplyGlobalVideo(newW, newH, newOutW, newOutH, newFpsN, newFpsD, st, error)) {
 			return false;
 		}
 	}
 
 	def->width = newW;
 	def->height = newH;
+	def->outputWidth = newOutW;
+	def->outputHeight = newOutH;
+	def->scaleType = newScale;
 	def->fpsNum = newFpsN;
 	def->fpsDen = newFpsD;
 	// Switching an encoder id replaces its stored settings with that type's
@@ -5799,12 +5861,14 @@ bool MethodSettingsRestore(const json &params, json &result, std::string &error)
 		// skip touching one.
 		struct Prev {
 			std::string uuid;
-			uint32_t w, h, fpsN, fpsD;
+			uint32_t w, h, outW, outH, fpsN, fpsD;
+			std::string scale;
 		};
 		std::vector<Prev> before;
 		for (const CanvasDefinition &d : cs.Definitions()) {
 			if (!d.isDefault) {
-				before.push_back({d.uuid, d.width, d.height, d.fpsNum, d.fpsDen});
+				before.push_back({d.uuid, d.width, d.height, d.outputWidth, d.outputHeight,
+						  d.fpsNum, d.fpsDen, d.scaleType});
 			}
 		}
 
@@ -5854,7 +5918,9 @@ bool MethodSettingsRestore(const json &params, json &result, std::string &error)
 				if (p.uuid != d.uuid) {
 					continue;
 				}
-				if (p.w != d.width || p.h != d.height || p.fpsN != d.fpsNum || p.fpsD != d.fpsDen) {
+				if (p.w != d.width || p.h != d.height || p.outW != d.outputWidth ||
+				    p.outH != d.outputHeight || p.fpsN != d.fpsNum || p.fpsD != d.fpsDen ||
+				    p.scale != d.scaleType) {
 					ObsBootstrap::Multistream().InvalidateCanvasEncoders(d.uuid);
 					rt.ResetVideo(d);
 				}
@@ -5868,7 +5934,10 @@ bool MethodSettingsRestore(const json &params, json &result, std::string &error)
 		if (!AnyOutputActive()) {
 			const CanvasDefinition &def = cs.Default();
 			std::string e;
-			ApplyGlobalVideo(def.width, def.height, def.width, def.height, def.fpsNum, def.fpsDen, e);
+			obs_scale_type st = OBS_SCALE_BICUBIC;
+			ScaleFilterFromToken(def.scaleType, st);
+			ApplyGlobalVideo(def.width, def.height, def.outputWidth, def.outputHeight, def.fpsNum,
+					 def.fpsDen, st, e);
 		}
 	}
 

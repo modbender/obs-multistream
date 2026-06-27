@@ -29,8 +29,11 @@ struct CanvasDefinition {
 
 	uint32_t width = 1920;
 	uint32_t height = 1080;
+	uint32_t outputWidth = 0;       // scaled encode size; 0 = mirror base width
+	uint32_t outputHeight = 0;      // scaled encode size; 0 = mirror base height
 	uint32_t fpsNum = 60;
 	uint32_t fpsDen = 1;
+	std::string scaleType = "bicubic"; // downscale filter token (see kScaleFilters)
 	bool useDefaultResolution = false;
 
 	CanvasEncoderDef video;
