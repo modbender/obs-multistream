@@ -2,69 +2,82 @@
   import {
     obs,
     type CanvasInfo,
+    type OutputBindingInfo,
+    type StreamProfileInfo,
     type MultistreamStatus,
     type MultistreamState,
     type Stats,
     type OutputStat,
   } from "../bridge";
-  import { openSettings } from "../settingsOpener.svelte";
 
-  // All-destinations view: encode-once per canvas, fan out to every enabled output
-  // bound to it. Rows join the multistream status (authoritative live state, pushed)
-  // with the polled per-output stats (bitrate/drops/congestion/duration).
+  // Destinations page: the single place to manage which canvases + destinations are
+  // enabled (the output bindings, moved here from Settings → Outputs) AND to observe
+  // live status. Each canvas and each destination within it has an enable/disable
+  // toggle; actually going live is the header GO LIVE (or the Studio GO-LIVE bar).
   let canvases = $state<CanvasInfo[]>([]);
-  let outputs = $state<MultistreamStatus[]>([]);
+  let bindings = $state<OutputBindingInfo[]>([]);
+  let profiles = $state<StreamProfileInfo[]>([]);
+  let live = $state<MultistreamStatus[]>([]);
   let stats = $state<Stats | null>(null);
   let busy = $state(false);
+  let error = $state<string | null>(null);
 
-  const STATE_COLOR: Record<MultistreamState, string> = {
-    idle: "var(--color-muted)",
-    connecting: "var(--meter-yellow)",
-    live: "var(--meter-green)",
-    error: "var(--color-live)",
-  };
+  // Per-canvas inline "add destination" picker (canvas uuid being added to, + the
+  // chosen profile uuid; "" => unset/no destination yet).
+  let addingFor = $state<string | null>(null);
+  let addProfile = $state("");
 
-  function loadStatus(): void {
-    obs
-      .call("multistream.status")
-      .then((res) => (outputs = res.outputs))
-      .catch(() => {});
-  }
   function loadCanvases(): void {
-    obs
-      .call("canvas.list")
-      .then((list) => (canvases = list))
-      .catch(() => {});
+    obs.call("canvas.list").then((l) => (canvases = l)).catch(() => {});
+  }
+  function loadBindings(): void {
+    obs.call("outputBinding.list").then((l) => (bindings = l)).catch(() => {});
+  }
+  function loadProfiles(): void {
+    obs.call("streamProfile.list").then((l) => (profiles = l)).catch(() => {});
+  }
+  function loadLive(): void {
+    obs.call("multistream.status").then((r) => (live = r.outputs)).catch(() => {});
   }
   function loadStats(): void {
-    obs
-      .call("stats.get")
-      .then((s) => (stats = s))
-      .catch(() => {});
+    obs.call("stats.get").then((s) => (stats = s)).catch(() => {});
   }
 
   $effect(() => {
-    loadStatus();
     loadCanvases();
-    const offMulti = obs.on("multistream.changed", (p) => (outputs = p.outputs));
-    const offBindings = obs.on("outputBinding.changed", loadStatus);
+    loadBindings();
+    loadProfiles();
+    loadLive();
+    const offMulti = obs.on("multistream.changed", (p) => (live = p.outputs));
+    const offBindings = obs.on("outputBinding.changed", () => {
+      loadBindings();
+      loadLive();
+    });
     const offCanvas = obs.on("canvas.changed", loadCanvases);
+    const offProfiles = obs.on("streamProfile.changed", loadProfiles);
     return () => {
       offMulti();
       offBindings();
       offCanvas();
+      offProfiles();
     };
   });
 
-  // stats.get has no push; the page owns a 1s poll (cleared on unmount, which is the
-  // page's lifecycle since App conditionally renders it).
+  // stats.get has no push; own a 1s poll while the page is mounted.
   $effect(() => {
     loadStats();
     const timer = setInterval(loadStats, 1000);
     return () => clearInterval(timer);
   });
 
-  // bindingUuid -> polled per-output stats row.
+  // bindingUuid -> live state / polled stats row.
+  let statusByBinding = $derived.by<Map<string, MultistreamStatus>>(() => {
+    const m = new Map<string, MultistreamStatus>();
+    for (const o of live) {
+      m.set(o.bindingUuid, o);
+    }
+    return m;
+  });
   let statByBinding = $derived.by<Map<string, OutputStat>>(() => {
     const m = new Map<string, OutputStat>();
     if (stats) {
@@ -75,20 +88,28 @@
     return m;
   });
 
-  // One section per canvas (canvas.list order); a canvas with no enabled bindings is
-  // omitted (multistream.status only carries enabled bindings).
-  let groups = $derived.by<{ canvas: CanvasInfo; bindings: MultistreamStatus[] }[]>(() =>
+  // Every canvas that has at least one binding, in canvas.list order, with its
+  // bindings attached. Canvases with no destinations are omitted (nothing to toggle).
+  let groups = $derived.by<{ canvas: CanvasInfo; rows: OutputBindingInfo[] }[]>(() =>
     canvases
-      .map((c) => ({ canvas: c, bindings: outputs.filter((o) => o.canvasUuid === c.uuid) }))
-      .filter((g) => g.bindings.length > 0),
+      .map((c) => ({ canvas: c, rows: bindings.filter((b) => b.canvasUuid === c.uuid) }))
+      .filter((g) => g.rows.length > 0),
   );
 
-  function isRunning(state: MultistreamState): boolean {
-    return state === "live" || state === "connecting";
+  // The effective state of a destination: disabled bindings never go live.
+  function rowState(b: OutputBindingInfo): MultistreamState | "disabled" {
+    if (!b.enabled) {
+      return "disabled";
+    }
+    return statusByBinding.get(b.uuid)?.state ?? "idle";
   }
-  let anyRunning = $derived(outputs.some((o) => isRunning(o.state)));
+  function isRunning(s: MultistreamState | "disabled"): boolean {
+    return s === "live" || s === "connecting";
+  }
 
-  // Aggregate header trio, summed over the live per-output stats rows.
+  let anyRunning = $derived(live.some((o) => isRunning(o.state)));
+
+  // Aggregate header trio over the live per-output stats rows.
   let liveStatRows = $derived(stats ? stats.outputs.filter((o) => o.state === "Live") : []);
   let aggBitrate = $derived((liveStatRows.reduce((s, o) => s + o.bitrateKbps, 0) / 1000).toFixed(1) + " Mb/s");
   let aggDrop = $derived(String(liveStatRows.reduce((s, o) => s + o.droppedFrames, 0)));
@@ -104,25 +125,36 @@
     }
     return fmtDuration(max);
   });
-
   function fmtDuration(ms: number): string {
     const s = Math.floor(ms / 1000);
     const pad = (n: number): string => String(n).padStart(2, "0");
     return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor((s % 3600) / 60)) + ":" + pad(s % 60);
   }
 
-  function titleState(s: MultistreamState): string {
+  const STATE_COLOR: Record<MultistreamState | "disabled", string> = {
+    disabled: "var(--color-muted)",
+    idle: "var(--color-muted)",
+    connecting: "var(--meter-yellow)",
+    live: "var(--meter-green)",
+    error: "var(--color-live)",
+  };
+  const STATE_TAG_BG: Record<MultistreamState | "disabled", string> = {
+    disabled: "color-mix(in srgb, var(--color-muted) 10%, transparent)",
+    idle: "color-mix(in srgb, var(--color-muted) 12%, transparent)",
+    connecting: "color-mix(in srgb, var(--meter-yellow) 14%, transparent)",
+    live: "color-mix(in srgb, var(--meter-green) 14%, transparent)",
+    error: "color-mix(in srgb, var(--color-live) 14%, transparent)",
+  };
+  function titleState(s: MultistreamState | "disabled"): string {
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
-  // Two-letter mark from the profile label: initials of the first two words, else
-  // the first two characters.
   function initials(label: string): string {
     const words = label.trim().split(/\s+/).filter(Boolean);
     if (words.length >= 2) {
       return (words[0][0] + words[1][0]).toUpperCase();
     }
-    return label.trim().slice(0, 2).toUpperCase();
+    return label.trim().slice(0, 2).toUpperCase() || "—";
   }
 
   function health(congestionPct: number): number {
@@ -132,74 +164,81 @@
     return h >= 90 ? "var(--meter-green)" : h >= 70 ? "var(--meter-yellow)" : "var(--color-live)";
   }
 
-  // No stream URL is exposed by the bridge; the secondary line carries a live data
-  // hint instead of the (unavailable) RTMP URL the mock shows.
-  function secondary(o: MultistreamStatus, stat: OutputStat | undefined): string {
-    if (o.state === "live" && stat) {
-      return (stat.bitrateKbps / 1000).toFixed(1) + " Mb/s · " + stat.droppedFrames + " dropped";
+  function isDangling(label: string): boolean {
+    return label === "(deleted)";
+  }
+  function isUnset(label: string): boolean {
+    return label === "(unset)";
+  }
+  function rowName(b: OutputBindingInfo): string {
+    if (isUnset(b.profileLabel)) {
+      return "No destination";
     }
-    if (o.state === "error") {
-      return o.lastError || "error";
-    }
-    return "ready to go live";
+    return b.profileLabel;
   }
 
-  // Section accent: any error -> red, else any live -> green, else muted.
-  function sectionTone(bindings: MultistreamStatus[]): "error" | "live" | "idle" {
-    if (bindings.some((o) => o.state === "error")) {
-      return "error";
-    }
-    if (bindings.some((o) => o.state === "live")) {
-      return "live";
-    }
-    return "idle";
+  // Per-canvas enabled = any of its bindings enabled. Toggling sets them all.
+  function canvasEnabled(rows: OutputBindingInfo[]): boolean {
+    return rows.some((b) => b.enabled);
   }
-  const TONE_DOT: Record<"error" | "live" | "idle", string> = {
-    error: "var(--color-live)",
-    live: "var(--meter-green)",
-    idle: "var(--color-muted)",
-  };
-  const TONE_TAG_BG: Record<"error" | "live" | "idle", string> = {
-    error: "color-mix(in srgb, var(--color-live) 14%, transparent)",
-    live: "color-mix(in srgb, var(--meter-green) 14%, transparent)",
-    idle: "color-mix(in srgb, var(--color-muted) 12%, transparent)",
-  };
-  // Per-row status pill background, tinted off the same per-state colors as
-  // STATE_COLOR so the chip follows the active theme.
-  const STATE_TAG_BG: Record<MultistreamState, string> = {
-    idle: "color-mix(in srgb, var(--color-muted) 12%, transparent)",
-    connecting: "color-mix(in srgb, var(--meter-yellow) 14%, transparent)",
-    live: "color-mix(in srgb, var(--meter-green) 14%, transparent)",
-    error: "color-mix(in srgb, var(--color-live) 14%, transparent)",
-  };
-
-  async function toggleRow(o: MultistreamStatus): Promise<void> {
+  async function toggleCanvas(rows: OutputBindingInfo[]): Promise<void> {
+    const target = !canvasEnabled(rows);
     try {
-      if (isRunning(o.state)) {
-        await obs.call("multistream.stopOutput", { uuid: o.bindingUuid });
-      } else {
-        await obs.call("multistream.startOutput", { uuid: o.bindingUuid });
-      }
-    } catch {
-      // Authoritative state arrives via multistream.changed.
+      await Promise.all(rows.map((b) => obs.call("outputBinding.setEnabled", { uuid: b.uuid, enabled: target })));
+      loadBindings();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  async function toggleRow(b: OutputBindingInfo, enabled: boolean): Promise<void> {
+    try {
+      await obs.call("outputBinding.setEnabled", { uuid: b.uuid, enabled });
+      loadBindings();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  async function removeRow(b: OutputBindingInfo): Promise<void> {
+    try {
+      await obs.call("outputBinding.remove", { uuid: b.uuid });
+      loadBindings();
+    } catch (e) {
+      error = (e as Error).message;
     }
   }
 
-  // GO LIVE / END STREAM drives every binding across all canvases. No start-all
-  // bridge method, so loop; per-call errors are ignored (state arrives via push).
+  function startAdd(canvasUuid: string): void {
+    addingFor = canvasUuid;
+    addProfile = profiles[0]?.uuid ?? "";
+  }
+  function cancelAdd(): void {
+    addingFor = null;
+  }
+  async function confirmAdd(canvasUuid: string): Promise<void> {
+    try {
+      await obs.call("outputBinding.create", {
+        canvasUuid,
+        ...(addProfile ? { profileUuid: addProfile } : {}),
+      });
+      addingFor = null;
+      loadBindings();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+
+  // GO LIVE / END STREAM drives every enabled binding across all canvases.
   async function toggleAll(): Promise<void> {
-    if (busy || outputs.length === 0) {
+    if (busy || live.length === 0) {
       return;
     }
     busy = true;
     try {
       const stopping = anyRunning;
-      for (const o of outputs) {
-        if (stopping) {
-          if (isRunning(o.state)) {
-            await obs.call("multistream.stopOutput", { uuid: o.bindingUuid }).catch(() => {});
-          }
-        } else {
+      for (const o of live) {
+        if (stopping && isRunning(o.state)) {
+          await obs.call("multistream.stopOutput", { uuid: o.bindingUuid }).catch(() => {});
+        } else if (!stopping) {
           await obs.call("multistream.startOutput", { uuid: o.bindingUuid }).catch(() => {});
         }
       }
@@ -221,103 +260,111 @@
         <span class="agg-item"><span class="agg-k">DROP</span><span class="agg-v">{aggDrop}</span></span>
         <span class="agg-item"><span class="agg-k">UPTIME</span><span class="agg-v">{aggUptime}</span></span>
       </div>
-      <button
-        class="golive"
-        class:running={anyRunning}
-        disabled={busy || outputs.length === 0}
-        onclick={() => void toggleAll()}
-      >
+      <button class="golive" class:running={anyRunning} disabled={busy || live.length === 0} onclick={() => void toggleAll()}>
         {anyRunning ? "■  END STREAM" : "●  GO LIVE"}
       </button>
     </div>
   </header>
 
   <div class="body">
+    {#if error}<p class="err">{error}</p>{/if}
+
     {#if groups.length === 0}
-      <p class="empty">No destinations configured.</p>
+      <div class="empty">
+        <p class="empty-title">No destinations yet</p>
+        <p class="empty-sub">Add a stream profile to a canvas to start streaming it. Manage profiles in Settings → Stream Profiles.</p>
+      </div>
     {/if}
 
     {#each groups as g (g.canvas.uuid)}
-      {@const tone = sectionTone(g.bindings)}
-      {@const liveCount = g.bindings.filter((o) => o.state === "live").length}
-      <section class="card">
+      {@const cEnabled = canvasEnabled(g.rows)}
+      {@const liveCount = g.rows.filter((b) => rowState(b) === "live").length}
+      <section class="card" class:off={!cEnabled}>
         <div class="card-head">
-          <span class="card-dot" style:background={TONE_DOT[tone]}></span>
           <span class="card-name">{g.canvas.name}</span>
           <span class="card-meta">
-            {g.canvas.outputWidth}×{g.canvas.outputHeight} · {Math.round(g.canvas.fpsNum / g.canvas.fpsDen)} fps · {g
-              .canvas.videoEncoder || "x264"}
+            {g.canvas.outputWidth}×{g.canvas.outputHeight} · {Math.round(g.canvas.fpsNum / g.canvas.fpsDen)} fps
           </span>
           <span class="card-spacer"></span>
-          <span class="card-tag" style:color={TONE_DOT[tone]} style:background={TONE_TAG_BG[tone]}>
-            {liveCount} / {g.bindings.length} LIVE
-          </span>
+          <span class="card-tag">{liveCount} / {g.rows.length} live</span>
+          <label class="switch" title={cEnabled ? "Disable canvas" : "Enable canvas"}>
+            <input type="checkbox" checked={cEnabled} onchange={() => void toggleCanvas(g.rows)} />
+            <span class="track"><span class="thumb"></span></span>
+          </label>
         </div>
 
         <div class="dest-grid">
-          {#each g.bindings as o (o.bindingUuid)}
-            {@const stat = statByBinding.get(o.bindingUuid)}
-            {@const live = o.state === "live"}
-            {@const h = live && stat ? health(stat.congestionPct) : 0}
-            <div class="dest-tile">
+          {#each g.rows as b (b.uuid)}
+            {@const s = rowState(b)}
+            {@const stat = statByBinding.get(b.uuid)}
+            {@const isLive = s === "live"}
+            {@const h = isLive && stat ? health(stat.congestionPct) : 0}
+            <div class="dest-tile" class:off={!b.enabled}>
               <div class="dest-head">
-                <span class="mark">{initials(o.profileLabel)}</span>
+                <span class="mark">{initials(b.profileLabel)}</span>
                 <div class="dest-col">
                   <div class="dest-line1">
-                    <span class="dest-name">{o.profileLabel}</span>
-                    <span
-                      class="dest-state"
-                      style:color={STATE_COLOR[o.state]}
-                      style:background={STATE_TAG_BG[o.state]}>{titleState(o.state).toUpperCase()}</span
-                    >
+                    <span class="dest-name" class:deleted={isDangling(b.profileLabel)} class:unset={isUnset(b.profileLabel)}>
+                      {rowName(b)}
+                    </span>
+                    <span class="dest-state" style:color={STATE_COLOR[s]} style:background={STATE_TAG_BG[s]}>
+                      {titleState(s).toUpperCase()}
+                    </span>
                   </div>
-                  <div class="dest-sub">{secondary(o, stat)}</div>
+                  <div class="dest-sub">
+                    {#if isLive && stat}
+                      {(stat.bitrateKbps / 1000).toFixed(1)} Mb/s · {stat.droppedFrames} dropped
+                    {:else if s === "error"}
+                      {statusByBinding.get(b.uuid)?.lastError || "error"}
+                    {:else if b.enabled}
+                      ready to go live
+                    {:else}
+                      disabled
+                    {/if}
+                  </div>
                 </div>
+                <label class="switch sm" title={b.enabled ? "Disable" : "Enable"}>
+                  <input type="checkbox" checked={b.enabled} onchange={(e) => void toggleRow(b, e.currentTarget.checked)} />
+                  <span class="track"><span class="thumb"></span></span>
+                </label>
               </div>
 
-              <div class="stats-group">
-                <div class="stat-cell">
-                  <span class="stat-k">BITRATE</span>
-                  <span class="stat-v">{live && stat ? (stat.bitrateKbps / 1000).toFixed(1) + " Mb/s" : "—"}</span>
-                </div>
-                <div class="stat-cell">
-                  <span class="stat-k">DROPPED</span>
-                  <span class="stat-v">
-                    {live && stat ? stat.droppedFrames + " (" + stat.dropPct.toFixed(1) + "%)" : "—"}
-                  </span>
-                </div>
-                <div class="stat-cell">
-                  <span class="stat-k">CONGESTION</span>
-                  <span class="stat-v">{live && stat ? stat.congestionPct.toFixed(1) + "%" : "—"}</span>
-                </div>
-              </div>
-
-              <div class="health-col">
-                <span class="stat-k">HEALTH</span>
+              <div class="health-row">
                 <div class="health-track">
-                  <div
-                    class="health-fill"
-                    style:width={h + "%"}
-                    style:background={live && stat ? healthColor(h) : "transparent"}
-                  ></div>
+                  <div class="health-fill" style:width={h + "%"} style:background={isLive && stat ? healthColor(h) : "transparent"}></div>
                 </div>
+                <button class="trash" title="Remove destination" aria-label="Remove destination" onclick={() => void removeRow(b)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                    <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" />
+                  </svg>
+                </button>
               </div>
-
-              <button
-                class="row-btn"
-                class:stop={isRunning(o.state)}
-                class:retry={o.state === "error"}
-                onclick={() => void toggleRow(o)}
-              >
-                {isRunning(o.state) ? "Stop" : o.state === "error" ? "Retry" : "Start"}
-              </button>
             </div>
           {/each}
+
+          {#if addingFor === g.canvas.uuid}
+            <div class="dest-tile add-form">
+              <span class="add-label">New destination</span>
+              <select bind:value={addProfile}>
+                <option value="">No destination (placeholder)</option>
+                {#each profiles as p (p.uuid)}
+                  <option value={p.uuid}>{p.label || p.platform}</option>
+                {/each}
+              </select>
+              <div class="add-actions">
+                <button class="ghost" onclick={cancelAdd}>Cancel</button>
+                <button class="accent" onclick={() => void confirmAdd(g.canvas.uuid)}>Add</button>
+              </div>
+            </div>
+          {:else}
+            <button class="dest-tile add-tile" onclick={() => startAdd(g.canvas.uuid)}>
+              <span class="add-plus">+</span>
+              <span>Add destination</span>
+            </button>
+          {/if}
         </div>
       </section>
     {/each}
-
-    <button class="add-dest" onclick={() => openSettings("outputs")}>+ &nbsp;Add destination in Settings → Outputs</button>
   </div>
 </div>
 
@@ -413,12 +460,27 @@
     padding: 22px 24px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
+  }
+  .err {
+    margin: 0;
+    color: var(--color-live);
+    font-size: 12px;
   }
   .empty {
+    margin-top: 40px;
+    text-align: center;
+  }
+  .empty-title {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .empty-sub {
     margin: 0;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--color-muted);
   }
 
@@ -426,20 +488,18 @@
     border: var(--border-weight) solid var(--color-border);
     background: var(--color-surface);
   }
+  .card.off {
+    opacity: 0.72;
+  }
   .card-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 13px 16px;
+    gap: 12px;
+    padding: 14px 18px;
     border-bottom: var(--border-weight) solid var(--color-border);
   }
-  .card-dot {
-    flex: 0 0 auto;
-    width: 9px;
-    height: 9px;
-  }
   .card-name {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--color-text);
   }
@@ -453,26 +513,29 @@
     flex: 1;
   }
   .card-tag {
-    flex: 0 0 auto;
     font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.06em;
-    padding: 4px 8px;
+    text-transform: uppercase;
+    color: var(--color-dim);
   }
 
   .dest-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-    padding: 14px 16px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px;
+    padding: 16px 18px;
   }
   .dest-tile {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: 14px;
+    padding: 16px;
     border: var(--border-weight) solid var(--color-border);
     background: var(--color-surface-2);
+  }
+  .dest-tile.off {
+    background: var(--color-base);
   }
   .dest-head {
     display: flex;
@@ -481,15 +544,15 @@
   }
   .mark {
     flex: 0 0 auto;
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--color-dim);
-    background: var(--color-surface-2);
+    background: var(--color-surface);
     border: var(--border-weight) solid var(--color-border);
   }
   .dest-col {
@@ -502,12 +565,21 @@
     gap: 8px;
   }
   .dest-name {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--color-text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .dest-name.deleted {
+    color: var(--color-live);
+    font-style: italic;
+  }
+  .dest-name.unset {
+    color: var(--color-muted);
+    font-style: italic;
+    font-weight: 400;
   }
   .dest-state {
     flex: 0 0 auto;
@@ -525,81 +597,138 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .stats-group {
+  .health-row {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 12px 22px;
-    min-width: 0;
-  }
-  .stat-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .stat-k {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-muted);
-  }
-  .stat-v {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-dim);
-  }
-  .health-col {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    gap: 12px;
   }
   .health-track {
+    flex: 1;
     height: 5px;
     background: var(--color-base);
   }
   .health-fill {
     height: 100%;
+    transition: width 0.3s ease;
   }
-  .row-btn {
-    width: 100%;
-    height: auto;
-    padding: 8px 16px;
-    font-family: var(--font-ui);
-    font-size: 11px;
-    background: transparent;
+  .trash {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    background: none;
     border: var(--border-weight) solid var(--color-border);
-    color: var(--color-dim);
+    color: var(--color-muted);
   }
-  .row-btn:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
-  .row-btn.stop {
-    background: var(--color-live);
-    border-color: var(--color-live);
-    color: #fff;
-  }
-  .row-btn.stop:hover {
-    border-color: var(--color-live);
-    color: #fff;
-  }
-  .row-btn.retry {
+  .trash:hover {
     color: var(--color-live);
     border-color: var(--color-live);
   }
 
-  .add-dest {
+  /* enable/disable switch (square thumb per the 0-radius rule). */
+  .switch {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .track {
+    display: inline-block;
+    width: 38px;
+    height: 20px;
+    background: var(--color-base);
+    border: var(--border-weight) solid var(--color-border);
+    position: relative;
+    transition: background 0.12s ease;
+  }
+  .switch.sm .track {
+    width: 34px;
+    height: 18px;
+  }
+  .thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    background: var(--color-muted);
+    transition:
+      transform 0.12s ease,
+      background 0.12s ease;
+  }
+  .switch.sm .thumb {
+    width: 10px;
+    height: 10px;
+  }
+  .switch input:checked + .track {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    border-color: var(--color-accent);
+  }
+  .switch input:checked + .track .thumb {
+    transform: translateX(18px);
+    background: var(--color-accent);
+  }
+  .switch.sm input:checked + .track .thumb {
+    transform: translateX(16px);
+  }
+  .switch input:focus-visible + .track {
+    outline: 1px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  .add-tile {
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-direction: row;
     height: auto;
-    padding: 13px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--color-dim);
     font-family: var(--font-ui);
     font-size: 12px;
-    background: transparent;
-    border: var(--border-weight) dashed var(--color-border);
-    color: var(--color-dim);
   }
-  .add-dest:hover {
+  .add-tile:hover {
     border-color: var(--color-accent);
     color: var(--color-accent);
+  }
+  .add-plus {
+    font-size: 16px;
+    line-height: 1;
+  }
+  .add-form {
+    gap: 10px;
+  }
+  .add-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .add-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .add-actions .ghost {
+    height: auto;
+    padding: 7px 14px;
+    background: none;
+    font-size: 12px;
+  }
+  .add-actions .accent {
+    height: auto;
+    padding: 7px 16px;
+    font-size: 12px;
   }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { obs, type MultistreamStatus, type MultistreamState } from "../bridge";
-  import { openSettings } from "../settingsOpener.svelte";
+  import { setPage } from "../pageStore.svelte";
 
   // Host supplies tab chrome + strips __* keys; this body declares no props.
   let {}: Record<string, unknown> = $props();
@@ -64,7 +64,7 @@
 
 <div class="dock-body">
   <div class="dock-toolbar">
-    <button class="dock-add" title="Add output (Settings)" onclick={() => openSettings("outputs")}>＋</button>
+    <button class="dock-add" title="Manage destinations (Stream)" onclick={() => setPage("stream")}>＋</button>
   </div>
 
   {#if error}

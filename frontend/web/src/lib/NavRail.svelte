@@ -172,13 +172,14 @@
 
   <div class="footer">
     <div class="collection">
-      <button class="foot-btn" title="Scene Collection" onclick={() => (menuOpen = !menuOpen)}>
+      <button class="foot-btn collection-btn" title="Scene Collection — click to switch" onclick={() => (menuOpen = !menuOpen)}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3.5 L20 8 L12 12.5 L4 8 Z" />
           <path d="M4 12 L12 16.5 L20 12" />
           <path d="M4 16 L12 20.5 L20 16" />
         </svg>
-        <span class="foot-label">{active?.name ?? "Collection"}</span>
+        <span class="foot-kicker">Collection</span>
+        <span class="foot-label name">{active?.name ?? "—"}</span>
       </button>
 
       {#if menuOpen}
@@ -370,6 +371,21 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .collection-btn {
+    gap: 2px;
+  }
+  .foot-kicker {
+    font-family: var(--font-mono);
+    font-size: 7px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .foot-label.name {
+    font-size: 9px;
+    color: var(--color-text);
+    max-width: 62px;
   }
 
   /* Collection popup, anchored to the right of the rail at the button. */

@@ -500,54 +500,57 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 18px 20px;
+    padding: 0;
   }
   .weekrow {
-    width: 100%;
-    max-width: 720px;
-    margin-inline: auto;
+    flex: 0 0 auto;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
-    margin-bottom: 6px;
-    border-inline: var(--border-weight) solid transparent;
+    border-bottom: var(--border-weight) solid var(--color-border);
+    background: var(--color-surface);
   }
   .weekday {
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.1em;
-    color: var(--color-muted);
-    padding: 0 4px 4px;
+    color: var(--color-dim);
+    padding: 9px 12px;
+    text-align: left;
   }
   .grid {
-    width: 100%;
-    max-width: 720px;
-    margin-inline: auto;
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
+    grid-auto-rows: minmax(0, 1fr);
+    gap: var(--border-weight);
     background: var(--color-border);
-    border: var(--border-weight) solid var(--color-border);
+    border-bottom: var(--border-weight) solid var(--color-border);
   }
   .cell {
-    aspect-ratio: 1;
+    min-height: 0;
     background: var(--color-surface);
-    padding: 7px 8px;
+    padding: 6px 8px;
     overflow: hidden;
     cursor: pointer;
     border: 0;
     text-align: left;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    transition: background 0.12s ease;
+  }
+  .cell:hover:not(.out) {
+    background: color-mix(in srgb, var(--color-text) 4%, var(--color-surface));
   }
   .cell.out {
-    opacity: 0.35;
+    background: var(--color-base);
     cursor: default;
   }
   .cell.today {
-    box-shadow: inset 0 0 0 1.5px var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 7%, var(--color-surface));
   }
   .cell:focus-visible {
     outline: 1px solid var(--color-accent);
@@ -555,32 +558,42 @@
   }
   .cell-head {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
   }
   .cell-num {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-dim);
   }
   .cell.today .cell-num {
     font-weight: 600;
-    color: var(--color-accent);
+    color: var(--color-accent-ink);
+    background: var(--color-accent);
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .chip-ev {
-    margin-top: 4px;
-    padding: 3px 5px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 6px;
     background: color-mix(in srgb, var(--color-accent) 16%, transparent);
     border-left: 2px solid var(--color-accent);
     overflow: hidden;
   }
   .chip-time {
+    flex: 0 0 auto;
     font-family: var(--font-mono);
-    font-size: 8px;
+    font-size: 9px;
     color: var(--color-accent);
   }
   .chip-title {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;

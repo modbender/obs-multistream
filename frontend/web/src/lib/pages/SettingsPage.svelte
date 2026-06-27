@@ -1,21 +1,19 @@
 <script lang="ts">
   import CanvasesTab from "../CanvasesTab.svelte";
   import StreamsTab from "../StreamsTab.svelte";
-  import OutputsTab from "../OutputsTab.svelte";
   import HotkeysTab from "../HotkeysTab.svelte";
   import AudioTab from "../AudioTab.svelte";
   import AppearanceTab from "../AppearanceTab.svelte";
   import { settingsNav, setSettingsTab, type SettingsTab } from "../settingsOpener.svelte";
 
   // Full Settings page: header + a 196px left sub-nav + a content pane that renders
-  // the selected tab's component. AI/MCP is no longer here (it's its own nav-rail
-  // page). The page model is live-apply — every tab persists through its own bridge
-  // calls, so there's no OK/Apply/Cancel boundary (the modal's transactional revert
-  // is intentionally dropped).
+  // the selected tab's component. AI/MCP is its own nav-rail page; output bindings
+  // moved to the Stream page (enable/disable per canvas + destination). The page
+  // model is live-apply — every tab persists through its own bridge calls, so
+  // there's no OK/Apply/Cancel boundary.
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "canvases", label: "Canvases" },
     { id: "streams", label: "Stream Profiles" },
-    { id: "outputs", label: "Outputs" },
     { id: "audio", label: "Audio" },
     { id: "hotkeys", label: "Hotkeys" },
     { id: "appearance", label: "Appearance" },
@@ -44,8 +42,6 @@
         <CanvasesTab editCanvas={settingsNav.editCanvas} />
       {:else if settingsNav.tab === "streams"}
         <StreamsTab />
-      {:else if settingsNav.tab === "outputs"}
-        <OutputsTab />
       {:else if settingsNav.tab === "audio"}
         <AudioTab />
       {:else if settingsNav.tab === "hotkeys"}
