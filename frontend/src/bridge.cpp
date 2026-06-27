@@ -1284,6 +1284,324 @@ bool ScaleFilterFromToken(const std::string &token, obs_scale_type &type)
 	return false;
 }
 
+// --- undo recording (apply-target-state) ------------------------------------
+//
+// For mutations that change an existing scene item WITHOUT altering structure,
+// undo and redo are symmetric: both just apply a captured target state. So each
+// mutation type has ONE Apply<X>(state) registered as both the undo and redo
+// callback; the manager hands it the BEFORE payload on undo and the AFTER
+// payload on redo. State carries {canvas, scene, source-uuid, ...} so the target
+// re-resolves via the SAME path the bridge methods use; keying on source uuid
+// (not item id) survives id churn from later add/remove undos.
+
+// Locate a scene item by its source's uuid. Borrowed item (owned by the scene),
+// valid only while `sceneSource` is held. null when none matches.
+obs_sceneitem_t *FindItemBySourceUuid(obs_source_t *sceneSource, const std::string &uuid)
+{
+	obs_scene_t *scene = sceneSource ? obs_scene_from_source(sceneSource) : nullptr;
+	if (!scene || uuid.empty()) {
+		return nullptr;
+	}
+	struct Ctx {
+		const std::string &uuid;
+		obs_sceneitem_t *found;
+	} ctx{uuid, nullptr};
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+			auto *c = static_cast<Ctx *>(param);
+			obs_source_t *src = obs_sceneitem_get_source(item);
+			const char *u = src ? obs_source_get_uuid(src) : nullptr;
+			if (u && c->uuid == u) {
+				c->found = item;
+				return false; // stop
+			}
+			return true;
+		},
+		&ctx);
+	return ctx.found;
+}
+
+// Resolve scene + item from a captured state json (keys: canvas, scene, source).
+// On success `sceneSource` is addref'd (caller releases) and `item` is borrowed.
+bool ResolveStateItem(const json &state, obs_source_t *&sceneSource, obs_sceneitem_t *&item)
+{
+	sceneSource = ResolveTargetScene(state); // reads canvas/scene; addref'd
+	if (!sceneSource) {
+		return false;
+	}
+	item = FindItemBySourceUuid(sceneSource, OptString(state, "source"));
+	if (!item) {
+		obs_source_release(sceneSource);
+		sceneSource = nullptr;
+		return false;
+	}
+	return true;
+}
+
+// Emit + persist after an Apply, matching what the original mutation does so the
+// UI refreshes and the undo persists.
+void CommitStateChange(const json &state, obs_source_t *sceneSource)
+{
+	const CanvasTarget target = ResolveCanvasTarget(state);
+	EmitSceneItemsChanged(sceneSource, target.uuid);
+	if (!target.isAdditional) {
+		SceneCollection::Save();
+	}
+}
+
+// {canvas, scene, source-uuid} -- the re-resolution keys shared by every state.
+json StateBase(const json &params, obs_source_t *src)
+{
+	const char *uuid = src ? obs_source_get_uuid(src) : nullptr;
+	return json{
+		{"canvas", OptString(params, "canvas")},
+		{"scene", OptString(params, "scene")},
+		{"source", uuid ? std::string(uuid) : std::string()},
+	};
+}
+
+// Record an apply-target-state action: undo==redo==apply; the manager picks the
+// data string (BEFORE on undo, AFTER on redo).
+void RecordUndo(const std::string &name, const UndoManager::Cb &apply, const json &before, const json &after)
+{
+	ObsBootstrap::Undo().AddAction(name, apply, apply, before.dump(), after.dump());
+}
+
+// Full item geometry (info2 + crop) plus the re-resolution keys.
+json CaptureTransformState(const json &params, obs_sceneitem_t *item)
+{
+	obs_transform_info info;
+	obs_sceneitem_get_info2(item, &info);
+	obs_sceneitem_crop crop;
+	obs_sceneitem_get_crop(item, &crop);
+
+	json s = StateBase(params, obs_sceneitem_get_source(item));
+	s["pos"] = json{{"x", info.pos.x}, {"y", info.pos.y}};
+	s["rot"] = info.rot;
+	s["scale"] = json{{"x", info.scale.x}, {"y", info.scale.y}};
+	s["alignment"] = info.alignment;
+	s["boundsType"] = static_cast<int>(info.bounds_type);
+	s["boundsAlignment"] = info.bounds_alignment;
+	s["bounds"] = json{{"x", info.bounds.x}, {"y", info.bounds.y}};
+	s["cropToBounds"] = info.crop_to_bounds;
+	s["crop"] = json{{"left", crop.left}, {"top", crop.top}, {"right", crop.right}, {"bottom", crop.bottom}};
+	return s;
+}
+
+void ApplyTransform(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	obs_source_t *sceneSource = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	if (!ResolveStateItem(state, sceneSource, item)) {
+		return;
+	}
+
+	obs_transform_info info;
+	obs_sceneitem_get_info2(item, &info); // seed, then overlay the snapshot
+	auto fnum = [](const json &o, const char *k, float def) -> float {
+		auto it = o.find(k);
+		return (it != o.end() && it->is_number()) ? it->get<float>() : def;
+	};
+	auto subVec = [&](const char *key, float &x, float &y) {
+		auto it = state.find(key);
+		if (it != state.end() && it->is_object()) {
+			x = fnum(*it, "x", x);
+			y = fnum(*it, "y", y);
+		}
+	};
+	subVec("pos", info.pos.x, info.pos.y);
+	info.rot = fnum(state, "rot", info.rot);
+	subVec("scale", info.scale.x, info.scale.y);
+	if (auto it = state.find("alignment"); it != state.end() && it->is_number_integer()) {
+		info.alignment = it->get<uint32_t>();
+	}
+	if (auto it = state.find("boundsType"); it != state.end() && it->is_number_integer()) {
+		info.bounds_type = static_cast<obs_bounds_type>(it->get<int>());
+	}
+	if (auto it = state.find("boundsAlignment"); it != state.end() && it->is_number_integer()) {
+		info.bounds_alignment = it->get<uint32_t>();
+	}
+	subVec("bounds", info.bounds.x, info.bounds.y);
+	if (auto it = state.find("cropToBounds"); it != state.end() && it->is_boolean()) {
+		info.crop_to_bounds = it->get<bool>();
+	}
+
+	obs_sceneitem_crop crop;
+	obs_sceneitem_get_crop(item, &crop);
+	if (auto it = state.find("crop"); it != state.end() && it->is_object()) {
+		auto cropInt = [&](const char *k, int &out) {
+			auto c = it->find(k);
+			if (c != it->end() && c->is_number_integer()) {
+				out = c->get<int>();
+			}
+		};
+		cropInt("left", crop.left);
+		cropInt("top", crop.top);
+		cropInt("right", crop.right);
+		cropInt("bottom", crop.bottom);
+	}
+
+	obs_sceneitem_defer_update_begin(item);
+	obs_sceneitem_set_info2(item, &info);
+	obs_sceneitem_set_crop(item, &crop);
+	obs_sceneitem_defer_update_end(item);
+
+	CommitStateChange(state, sceneSource);
+	obs_source_release(sceneSource);
+}
+
+void ApplyVisible(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	obs_source_t *sceneSource = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	if (!ResolveStateItem(state, sceneSource, item)) {
+		return;
+	}
+	obs_sceneitem_set_visible(item, state.value("visible", false));
+	CommitStateChange(state, sceneSource);
+	obs_source_release(sceneSource);
+}
+
+void ApplyLocked(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	obs_source_t *sceneSource = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	if (!ResolveStateItem(state, sceneSource, item)) {
+		return;
+	}
+	obs_sceneitem_set_locked(item, state.value("locked", false));
+	CommitStateChange(state, sceneSource);
+	obs_source_release(sceneSource);
+}
+
+void ApplyScaleFilter(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	obs_source_t *sceneSource = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	if (!ResolveStateItem(state, sceneSource, item)) {
+		return;
+	}
+	obs_scale_type type;
+	if (ScaleFilterFromToken(OptString(state, "filter"), type)) {
+		obs_sceneitem_set_scale_filter(item, type);
+		CommitStateChange(state, sceneSource);
+	}
+	obs_source_release(sceneSource);
+}
+
+void ApplyRename(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	const std::string name = OptString(state, "name");
+	if (name.empty()) {
+		return;
+	}
+	obs_source_t *sceneSource = nullptr;
+	obs_sceneitem_t *item = nullptr;
+	if (!ResolveStateItem(state, sceneSource, item)) {
+		return;
+	}
+	obs_source_t *src = obs_sceneitem_get_source(item); // borrowed
+	if (src) {
+		obs_source_set_name(src, name.c_str());
+	}
+	CommitStateChange(state, sceneSource);
+	obs_source_release(sceneSource);
+}
+
+// The full scene order as source uuids in native (bottom-to-top) enumeration
+// order -- the order obs_scene_reorder_items expects (index 0 == first_item).
+json CaptureOrderState(const json &params, obs_source_t *sceneSource)
+{
+	json order = json::array();
+	obs_scene_enum_items(
+		obs_scene_from_source(sceneSource),
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+			auto *arr = static_cast<json *>(param);
+			obs_source_t *src = obs_sceneitem_get_source(item);
+			const char *u = src ? obs_source_get_uuid(src) : nullptr;
+			arr->push_back(u ? json(u) : json(""));
+			return true;
+		},
+		&order);
+	return json{
+		{"canvas", OptString(params, "canvas")},
+		{"scene", OptString(params, "scene")},
+		{"order", std::move(order)},
+	};
+}
+
+void ApplyOrder(const std::string &data)
+{
+	json state = json::parse(data, nullptr, false);
+	if (state.is_discarded()) {
+		return;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(state); // addref'd
+	if (!sceneSource) {
+		return;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	auto orderIt = state.find("order");
+	if (orderIt == state.end() || !orderIt->is_array()) {
+		obs_source_release(sceneSource);
+		return;
+	}
+
+	std::unordered_map<std::string, obs_sceneitem_t *> byUuid;
+	obs_scene_enum_items(
+		scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+			auto *m = static_cast<std::unordered_map<std::string, obs_sceneitem_t *> *>(param);
+			obs_source_t *src = obs_sceneitem_get_source(item);
+			const char *u = src ? obs_source_get_uuid(src) : nullptr;
+			if (u) {
+				(*m)[u] = item;
+			}
+			return true;
+		},
+		&byUuid);
+
+	std::vector<obs_sceneitem_t *> ordered;
+	ordered.reserve(orderIt->size());
+	for (const auto &u : *orderIt) {
+		if (!u.is_string()) {
+			continue;
+		}
+		auto f = byUuid.find(u.get<std::string>());
+		if (f != byUuid.end()) {
+			ordered.push_back(f->second);
+		}
+	}
+	// Only reorder when the captured set still matches the scene exactly;
+	// obs_scene_reorder_items no-ops (returns false) if the order is unchanged.
+	if (!ordered.empty() && ordered.size() == byUuid.size()) {
+		obs_scene_reorder_items(scene, ordered.data(), ordered.size());
+	}
+	CommitStateChange(state, sceneSource);
+	obs_source_release(sceneSource);
+}
+
 bool MethodSceneItemsList(const json &params, json &result, std::string &error)
 {
 	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
@@ -1339,12 +1657,18 @@ bool MethodSceneItemsSetVisible(const json &params, json &result, std::string &e
 		error = "no scene item with id " + std::to_string(id);
 		return false;
 	}
+	obs_source_t *itemSrc = obs_sceneitem_get_source(item);
+	json before = StateBase(params, itemSrc);
+	before["visible"] = obs_sceneitem_visible(item);
+	json after = StateBase(params, itemSrc);
+	after["visible"] = visible;
 	obs_sceneitem_set_visible(item, visible);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	if (!ResolveCanvasTarget(params).isAdditional) {
 		SceneCollection::Save();
 	}
+	RecordUndo(visible ? "Show" : "Hide", ApplyVisible, before, after);
 	result = json{{"id", id}, {"visible", visible}};
 	return true;
 }
@@ -1368,12 +1692,18 @@ bool MethodSceneItemsSetLocked(const json &params, json &result, std::string &er
 		error = "no scene item with id " + std::to_string(id);
 		return false;
 	}
+	obs_source_t *itemSrc = obs_sceneitem_get_source(item);
+	json before = StateBase(params, itemSrc);
+	before["locked"] = obs_sceneitem_locked(item);
+	json after = StateBase(params, itemSrc);
+	after["locked"] = locked;
 	obs_sceneitem_set_locked(item, locked);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	if (!ResolveCanvasTarget(params).isAdditional) {
 		SceneCollection::Save();
 	}
+	RecordUndo(locked ? "Lock" : "Unlock", ApplyLocked, before, after);
 	result = json{{"id", id}, {"locked", locked}};
 	return true;
 }
@@ -1448,12 +1778,15 @@ bool MethodSceneItemsReorder(const json &params, json &result, std::string &erro
 		error = "no scene item with id " + std::to_string(id);
 		return false;
 	}
+	json before = CaptureOrderState(params, sceneSource);
 	obs_sceneitem_set_order(item, *movement);
+	json after = CaptureOrderState(params, sceneSource);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	if (!ResolveCanvasTarget(params).isAdditional) {
 		SceneCollection::Save();
 	}
+	RecordUndo("Reorder", ApplyOrder, before, after);
 	result = json{{"id", id}, {"direction", direction}};
 	return true;
 }
@@ -1482,12 +1815,18 @@ bool MethodSceneItemsSetScaleFilter(const json &params, json &result, std::strin
 		error = "no scene item with id " + std::to_string(id);
 		return false;
 	}
+	obs_source_t *itemSrc = obs_sceneitem_get_source(item);
+	json before = StateBase(params, itemSrc);
+	before["filter"] = ScaleFilterToToken(obs_sceneitem_get_scale_filter(item));
+	json after = StateBase(params, itemSrc);
+	after["filter"] = filter;
 	obs_sceneitem_set_scale_filter(item, type);
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	if (!ResolveCanvasTarget(params).isAdditional) {
 		SceneCollection::Save();
 	}
+	RecordUndo("Scale Filtering", ApplyScaleFilter, before, after);
 	result = json{{"id", id}, {"filter", filter}};
 	return true;
 }
@@ -1622,6 +1961,10 @@ bool MethodSceneItemsSetTransform(const json &params, json &result, std::string 
 		return false;
 	}
 
+	const json undoBefore = CaptureTransformState(params, item);
+	obs_source_t *undoSrc = obs_sceneitem_get_source(item);
+	const char *undoSrcName = undoSrc ? obs_source_get_name(undoSrc) : nullptr;
+
 	// Partial update: start from the current transform and overlay only the
 	// fields the caller supplied so the UI can send just what changed.
 	obs_transform_info info;
@@ -1699,6 +2042,9 @@ bool MethodSceneItemsSetTransform(const json &params, json &result, std::string 
 
 	CommitSceneItemChange(params, sceneSource);
 
+	RecordUndo(std::string("Transform ") + (undoSrcName ? undoSrcName : ""), ApplyTransform, undoBefore,
+		   CaptureTransformState(params, item));
+
 	uint32_t baseW = 0, baseH = 0;
 	ResolveBaseSize(params, baseW, baseH);
 	result = SceneItemTransformToJson(item, baseW, baseH);
@@ -1756,6 +2102,10 @@ bool MethodSceneItemsTransformAction(const json &params, json &result, std::stri
 		return false;
 	}
 
+	const json undoBefore = CaptureTransformState(params, item);
+	obs_source_t *undoSrc = obs_sceneitem_get_source(item);
+	const char *undoSrcName = undoSrc ? obs_source_get_name(undoSrc) : nullptr;
+
 	uint32_t baseW = 0, baseH = 0;
 	ResolveBaseSize(params, baseW, baseH);
 
@@ -1804,6 +2154,10 @@ bool MethodSceneItemsTransformAction(const json &params, json &result, std::stri
 	obs_sceneitem_defer_update_end(item);
 
 	CommitSceneItemChange(params, sceneSource);
+
+	RecordUndo(std::string("Transform ") + (undoSrcName ? undoSrcName : ""), ApplyTransform, undoBefore,
+		   CaptureTransformState(params, item));
+
 	result = SceneItemTransformToJson(item, baseW, baseH);
 	obs_source_release(sceneSource);
 	return true;
@@ -2032,12 +2386,18 @@ bool MethodSourcesRename(const json &params, json &result, std::string &error)
 			return false;
 		}
 	}
+	const std::string oldName = curName ? curName : "";
+	json before = StateBase(params, src);
+	before["name"] = oldName;
+	json after = StateBase(params, src);
+	after["name"] = name;
 	obs_source_set_name(src, name.c_str());
 	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
 	obs_source_release(sceneSource);
 	if (!ResolveCanvasTarget(params).isAdditional) {
 		SceneCollection::Save();
 	}
+	RecordUndo("Rename", ApplyRename, before, after);
 	result = json{{"id", id}, {"source", name}};
 	return true;
 }

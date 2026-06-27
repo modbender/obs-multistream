@@ -2,6 +2,16 @@
 
 #include <utility>
 
+namespace {
+// Exception-safe suppression of recording around an in-flight apply: a throwing
+// callback can never leave disableRefs stuck > 0.
+struct DisableGuard {
+	UndoManager *m;
+	explicit DisableGuard(UndoManager *m_) : m(m_) { m->PushDisabled(); }
+	~DisableGuard() { m->PopDisabled(); }
+};
+} // namespace
+
 void UndoManager::AddAction(const std::string &name, const Cb &undo, const Cb &redo, const std::string &undoData,
 			    const std::string &redoData)
 {
@@ -19,6 +29,10 @@ void UndoManager::AddAction(const std::string &name, const Cb &undo, const Cb &r
 
 void UndoManager::Undo()
 {
+	// Refuse to re-enter while an apply is already in flight (recording disabled).
+	if (disableRefs != 0) {
+		return;
+	}
 	if (undoItems.empty()) {
 		return;
 	}
@@ -26,12 +40,12 @@ void UndoManager::Undo()
 	Item item = std::move(undoItems.back());
 	undoItems.pop_back();
 
-	// Re-applying a snapshot must not record a new action.
-	PushDisabled();
 	if (item.undo) {
+		// Re-applying a snapshot must not record a new action; the guard
+		// restores the ref count even if the callback throws.
+		DisableGuard guard(this);
 		item.undo(item.undoData);
 	}
-	PopDisabled();
 
 	redoItems.push_back(std::move(item));
 	notify();
@@ -39,6 +53,9 @@ void UndoManager::Undo()
 
 void UndoManager::Redo()
 {
+	if (disableRefs != 0) {
+		return;
+	}
 	if (redoItems.empty()) {
 		return;
 	}
@@ -46,12 +63,10 @@ void UndoManager::Redo()
 	Item item = std::move(redoItems.back());
 	redoItems.pop_back();
 
-	// Re-applying a snapshot must not record a new action.
-	PushDisabled();
 	if (item.redo) {
+		DisableGuard guard(this);
 		item.redo(item.redoData);
 	}
-	PopDisabled();
 
 	undoItems.push_back(std::move(item));
 	notify();
