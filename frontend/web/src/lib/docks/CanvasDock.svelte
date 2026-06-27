@@ -16,6 +16,7 @@
   import { openFilters } from "../filterDialogOpener.svelte";
   import { openTransform } from "../transformOpener.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
+  import { scaleFilterMenu } from "../scaleFilterMenu";
   import { defaultCanvas } from "./defaultCanvasStore.svelte";
 
   // A composite, inseparable dock for one NON-DEFAULT canvas (hierarchy-model.html
@@ -324,6 +325,11 @@
             ),
         },
         { label: "Rename", action: () => beginRenameSource(item) },
+        scaleFilterMenu(item.scaleFilter, (filter) =>
+          void obs
+            .call("sceneItems.setScaleFilter", { canvas: canvasUuid, scene: currentScene, id: item.id, filter })
+            .catch(report),
+        ),
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
         { label: item.locked ? "Unlock" : "Lock", action: () => void toggleLocked(item) },
@@ -351,6 +357,7 @@
   }): (ContextMenuItem | null)[] {
     const call = (method: string, params: Record<string, unknown>) =>
       obs.call(method, { canvas: canvasUuid, scene: p.scene, id: p.id, ...params }).catch(report);
+    const currentFilter = items.find((i) => i.id === p.id)?.scaleFilter ?? "disable";
     return [
       {
         label: "Edit Transform",
@@ -358,6 +365,7 @@
           p.id != null &&
           openTransform({ canvas: canvasUuid, scene: p.scene ?? undefined, id: p.id }, p.source ?? "(unnamed)"),
       },
+      scaleFilterMenu(currentFilter, (filter) => void call("sceneItems.setScaleFilter", { filter })),
       null,
       { label: p.visible ? "Hide" : "Show", action: () => void call("sceneItems.setVisible", { visible: !p.visible }) },
       { label: p.locked ? "Unlock" : "Lock", action: () => void call("sceneItems.setLocked", { locked: !p.locked }) },

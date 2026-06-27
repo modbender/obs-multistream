@@ -84,6 +84,26 @@
     };
   }
 
+  function duplicateCollection() {
+    menuOpen = false;
+    if (!active) {
+      return;
+    }
+    const current = active;
+    dialog = {
+      kind: "prompt",
+      title: "Duplicate Scene Collection",
+      initial: current.name + " copy",
+      confirmLabel: "Duplicate",
+      onCommit: (name) => {
+        if (!name) {
+          return;
+        }
+        obs.call("collections.duplicate", { id: current.id, name }).catch(showError);
+      },
+    };
+  }
+
   function deleteCollection() {
     menuOpen = false;
     if (!active) {
@@ -193,6 +213,7 @@
           <div class="menu-sep"></div>
           <button class="menu-item" role="menuitem" onclick={newCollection}>New…</button>
           <button class="menu-item" role="menuitem" onclick={renameCollection}>Rename…</button>
+          <button class="menu-item" role="menuitem" onclick={duplicateCollection}>Duplicate…</button>
           <button class="menu-item" role="menuitem" disabled={collections.length <= 1} onclick={deleteCollection}>Delete</button>
         </div>
       {/if}

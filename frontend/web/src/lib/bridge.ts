@@ -40,6 +40,7 @@ export interface SceneItem {
   source: string | null;
   visible: boolean;
   locked: boolean;
+  scaleFilter: string;
 }
 
 export type ReorderDirection = "up" | "down" | "top" | "bottom";
@@ -649,6 +650,7 @@ export interface ObsMethods {
   "sceneItems.list": SceneItem[];
   "sceneItems.setVisible": { id: number; visible: boolean };
   "sceneItems.setLocked": { id: number; locked: boolean };
+  "sceneItems.setScaleFilter": Record<string, never>;
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
   // Numeric transform read/edit (Edit Transform dialog). getTransform loads the
@@ -784,6 +786,7 @@ export interface ObsMethods {
   // transitions.changed so the Scenes/Sources/preview resync on their own.
   "collections.list": CollectionInfo[];
   "collections.create": { id: string };
+  "collections.duplicate": { id: string; name: string };
   "collections.rename": { id: string; name: string };
   "collections.switch": { active: string };
   "collections.remove": { removed: boolean };

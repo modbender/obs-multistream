@@ -9,6 +9,7 @@
   import { openFilters } from "../filterDialogOpener.svelte";
   import { openTransform } from "../transformOpener.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
+  import { scaleFilterMenu } from "../scaleFilterMenu";
 
   let {}: Record<string, unknown> = $props();
 
@@ -180,6 +181,9 @@
           action: () => openTransform({ scene: currentScene ?? undefined, id: item.id }, item.source ?? "(unnamed)"),
         },
         { label: "Rename", action: () => beginRename(item) },
+        scaleFilterMenu(item.scaleFilter, (filter) =>
+          void obs.call("sceneItems.setScaleFilter", { scene: currentScene, id: item.id, filter }).catch(report),
+        ),
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
         { label: item.locked ? "Unlock" : "Lock", action: () => void toggleLocked(item) },
