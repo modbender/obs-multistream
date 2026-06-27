@@ -133,8 +133,8 @@
         class="item"
         class:disabled={item.disabled}
         class:danger={item.danger}
-        role="menuitemcheckbox"
-        aria-checked={item.checked ? "true" : "false"}
+        role={"checked" in item ? "menuitemcheckbox" : "menuitem"}
+        aria-checked={"checked" in item ? (item.checked ? "true" : "false") : undefined}
         onclick={(e) => {
           e.stopPropagation();
           run(item);
