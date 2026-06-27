@@ -24,6 +24,13 @@
   const currentScene = $derived(defaultCanvas.current);
 
   let items = $state<SceneItem[]>([]);
+  // Session-only name filter. Reorder is disabled while filtering since the
+  // up/down indices only make sense against the full, unfiltered ordering.
+  let filter = $state("");
+  const filtering = $derived(filter.trim().length > 0);
+  const filteredItems = $derived(
+    filtering ? items.filter((i) => (i.source ?? "").toLowerCase().includes(filter.trim().toLowerCase())) : items,
+  );
   let loaded = $state(false);
   let error = $state<string | null>(null);
   let selectedItemId = $state<number | null>(null);
@@ -295,10 +302,14 @@
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
         { label: item.locked ? "Unlock" : "Lock", action: () => void toggleLocked(item) },
         null,
-        { label: "Move Up", disabled: idx === 0, action: () => void reorder(item, "up") },
-        { label: "Move Down", disabled: idx === items.length - 1, action: () => void reorder(item, "down") },
-        { label: "Move to Top", disabled: idx === 0, action: () => void reorder(item, "top") },
-        { label: "Move to Bottom", disabled: idx === items.length - 1, action: () => void reorder(item, "bottom") },
+        { label: "Move Up", disabled: filtering || idx === 0, action: () => void reorder(item, "up") },
+        { label: "Move Down", disabled: filtering || idx === items.length - 1, action: () => void reorder(item, "down") },
+        { label: "Move to Top", disabled: filtering || idx === 0, action: () => void reorder(item, "top") },
+        {
+          label: "Move to Bottom",
+          disabled: filtering || idx === items.length - 1,
+          action: () => void reorder(item, "bottom"),
+        },
         ...(item.source ? [null, ...projectorItems({ kind: "source", name: item.source })] : []),
         null,
         { label: "Remove", danger: true, action: () => void remove(item) },
@@ -309,6 +320,7 @@
 
 <div class="dock-body">
   <div class="dock-toolbar">
+    <input class="dock-search" placeholder="Filter…" bind:value={filter} />
     <button class="dock-add" title="Add source" disabled={!currentScene} onclick={() => (adding = true)}>＋</button>
   </div>
 
@@ -320,9 +332,11 @@
     <p class="dock-msg">Loading…</p>
   {:else if items.length === 0}
     <p class="dock-msg">No sources</p>
+  {:else if filteredItems.length === 0}
+    <p class="dock-msg">No matches</p>
   {:else}
     <ul class="dock-list">
-      {#each items as item, idx (item.id)}
+      {#each filteredItems as item, idx (item.id)}
         <li
           class="dock-row"
           class:sel={item.id === selectedItemId}
@@ -344,11 +358,16 @@
           {/if}
           <span class="dock-actions">
             <button class="dock-icon" title="Properties" onclick={() => openProperties(item)}>⚙</button>
-            <button class="dock-icon" title="Move up" disabled={idx === 0} onclick={() => void reorder(item, "up")}>▲</button>
+            <button
+              class="dock-icon"
+              title="Move up"
+              disabled={filtering || idx === 0}
+              onclick={() => void reorder(item, "up")}>▲</button
+            >
             <button
               class="dock-icon"
               title="Move down"
-              disabled={idx === items.length - 1}
+              disabled={filtering || idx === items.length - 1}
               onclick={() => void reorder(item, "down")}>▼</button
             >
             <button class="dock-icon" title="Remove" onclick={() => void remove(item)}>🗑</button>
@@ -403,6 +422,20 @@
   }
   .inline:focus {
     outline: none;
+  }
+  .dock-search {
+    flex: 1;
+    min-width: 0;
+    background: var(--color-base);
+    border: var(--border-weight) solid var(--color-border);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  .dock-search:focus {
+    outline: none;
+    border-color: var(--color-accent);
   }
   .modal-backdrop {
     position: fixed;

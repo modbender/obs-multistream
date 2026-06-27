@@ -36,6 +36,12 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
+    // Fullscreen toggles regardless of focus (not gated on editable target).
+    if (e.key === "F11") {
+      e.preventDefault();
+      void obs.call("window.toggleFullscreen").catch(() => {});
+      return;
+    }
     // Windows modifier; ignore Alt-combos and editable targets.
     if (!e.ctrlKey || e.altKey || isEditable(e.target)) {
       return;

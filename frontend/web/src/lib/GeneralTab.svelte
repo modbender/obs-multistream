@@ -32,6 +32,7 @@
     multiviewDrawNames: true,
     multiviewDrawSafeAreas: false,
     importerPrompts: true,
+    scenesGridMode: false,
   });
 
   let loaded = $state(false);

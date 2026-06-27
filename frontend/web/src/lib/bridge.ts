@@ -252,6 +252,7 @@ export interface GeneralSettings {
   multiviewDrawNames: boolean;
   multiviewDrawSafeAreas: boolean;
   importerPrompts: boolean;
+  scenesGridMode: boolean;
 }
 
 /** Advanced app settings (process priority, stream delay, auto-reconnect, network,
@@ -969,6 +970,8 @@ export interface ObsMethods {
   "window.detach": { windowId: number };
   "window.redock": { redocked: number };
   "window.list": { windows: { windowId: number; dock: string }[] };
+  // Toggles the host window's borderless fullscreen; returns the new state.
+  "window.toggleFullscreen": { fullscreen: boolean };
   // Engine undo stack. state reports can-undo/can-redo + the next action names;
   // undo/redo pop/replay the top entry. All emit undo.changed after mutating.
   "undo.state": UndoState;

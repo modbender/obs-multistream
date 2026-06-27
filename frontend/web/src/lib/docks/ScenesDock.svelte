@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { obs, type SceneInfo } from "../bridge";
   import { defaultCanvas } from "./defaultCanvasStore.svelte";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
@@ -10,7 +11,29 @@
   onMount(() => {
     defaultCanvas.start();
     prefetchMonitors();
+    obs
+      .call("settings.getGeneral")
+      .then((g) => (gridMode = g.scenesGridMode))
+      .catch(() => {});
+    const offGeneral = obs.on("settings.generalChanged", (g) => (gridMode = g.scenesGridMode));
+    return () => offGeneral();
   });
+
+  // Session-only name filter; grid/list layout mirrors the persisted general setting.
+  let filter = $state("");
+  let gridMode = $state(false);
+
+  const filteredScenes = $derived(
+    filter.trim()
+      ? defaultCanvas.scenes.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase()))
+      : defaultCanvas.scenes,
+  );
+
+  function toggleGrid() {
+    const next = !gridMode;
+    gridMode = next; // optimistic; generalChanged reconciles
+    obs.call("settings.setGeneral", { scenesGridMode: next }).catch(report);
+  }
 
   let adding = $state(false);
   let newName = $state("");
@@ -121,8 +144,27 @@
   }
 </script>
 
+<!-- Per-scene label/rename, shared by both layouts so selection, activation, and
+     rename behave identically in list and grid. -->
+{#snippet sceneCell(scene: SceneInfo)}
+  {#if renamingFrom === scene.name}
+    <input class="inline" bind:value={renameTo} onkeydown={onRenameKey} onblur={commitRename} use:focusOnMount />
+  {:else}
+    <button class="dock-label" ondblclick={() => beginRename(scene.name)} onclick={() => setCurrent(scene.name)}>
+      {scene.name}
+    </button>
+  {/if}
+{/snippet}
+
 <div class="dock-body">
   <div class="dock-toolbar">
+    <input class="dock-search" placeholder="Filter…" bind:value={filter} />
+    <button
+      class="dock-add"
+      title={gridMode ? "List view" : "Grid view"}
+      aria-pressed={gridMode}
+      onclick={toggleGrid}>{gridMode ? "☰" : "▦"}</button
+    >
     <button class="dock-add" title="Add scene" onclick={beginAdd}>＋</button>
   </div>
 
@@ -130,22 +172,37 @@
     <p class="dock-msg err">{defaultCanvas.error}</p>
   {:else if !defaultCanvas.loaded}
     <p class="dock-msg">Loading…</p>
+  {:else if gridMode}
+    <div class="scene-grid">
+      {#each filteredScenes as scene (scene.name)}
+        <div class="grid-tile" class:sel={scene.current} oncontextmenu={(e) => openMenu(e, scene.name)} role="listitem">
+          {@render sceneCell(scene)}
+        </div>
+      {/each}
+
+      {#if adding}
+        <div class="grid-tile">
+          <input
+            class="inline"
+            placeholder="Scene name"
+            bind:value={newName}
+            onkeydown={onAddKey}
+            onblur={commitAdd}
+            use:focusOnMount
+          />
+        </div>
+      {/if}
+    </div>
+
+    {#if filteredScenes.length === 0 && !adding}
+      <p class="dock-msg">{filter.trim() ? "No matches" : "No scenes"}</p>
+    {/if}
   {:else}
     <ul class="dock-list">
-      {#each defaultCanvas.scenes as scene (scene.name)}
+      {#each filteredScenes as scene (scene.name)}
         <li class="dock-row" class:sel={scene.current} oncontextmenu={(e) => openMenu(e, scene.name)}>
-          {#if renamingFrom === scene.name}
-            <input
-              class="inline"
-              bind:value={renameTo}
-              onkeydown={onRenameKey}
-              onblur={commitRename}
-              use:focusOnMount
-            />
-          {:else}
-            <button class="dock-label" ondblclick={() => beginRename(scene.name)} onclick={() => setCurrent(scene.name)}>
-              {scene.name}
-            </button>
+          {@render sceneCell(scene)}
+          {#if renamingFrom !== scene.name}
             <span class="dock-actions">
               <button class="dock-icon" title="Rename" onclick={() => beginRename(scene.name)}>✎</button>
               <button
@@ -173,8 +230,8 @@
       {/if}
     </ul>
 
-    {#if defaultCanvas.scenes.length === 0 && !adding}
-      <p class="dock-msg">No scenes</p>
+    {#if filteredScenes.length === 0 && !adding}
+      <p class="dock-msg">{filter.trim() ? "No matches" : "No scenes"}</p>
     {/if}
   {/if}
 
@@ -199,5 +256,47 @@
   }
   .inline:focus {
     outline: none;
+  }
+  .dock-search {
+    flex: 1;
+    min-width: 0;
+    background: var(--color-base);
+    border: var(--border-weight) solid var(--color-border);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  .dock-search:focus {
+    outline: none;
+    border-color: var(--color-accent);
+  }
+  .scene-grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 4px;
+    padding: 6px;
+    align-content: start;
+  }
+  .grid-tile {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 6px 8px;
+    background: var(--color-base);
+    border: var(--border-weight) solid var(--color-border);
+    border-left: 3px solid transparent;
+  }
+  :root[data-selection-style="left-bar"] .grid-tile.sel {
+    border-left-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  }
+  :root[data-selection-style="fill"] .grid-tile.sel {
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  }
+  .grid-tile.sel :global(.dock-label) {
+    color: var(--color-accent);
   }
 </style>
