@@ -394,7 +394,9 @@ void ObsBootstrap::ApplyCanvasSceneLinks(const std::string &mainSceneUuid)
 		// Resolve the stored canvas-scene uuid -> its current name, then switch.
 		for (const CanvasRuntime::SceneInfo &s : runtime.Scenes(canvasUuid)) {
 			if (s.uuid == canvasSceneUuid) {
-				runtime.SetCurrentScene(canvasUuid, s.name);
+				if (runtime.SetCurrentScene(canvasUuid, s.name)) {
+					Bridge::EmitEvent("scenes.changed", nlohmann::json{{"canvas", canvasUuid}});
+				}
 				break;
 			}
 		}
