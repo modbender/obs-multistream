@@ -1,4 +1,4 @@
-// Shared opener for the source Filters dialog. Mirrors settingsOpener/themeEditorOpener:
+// Shared opener for the source Filters dialog. Mirrors settingsOpener:
 // App owns the single FilterDialog mount gated on `.open`; any component (a source
 // context menu, an audio-mixer row) calls openFilters(source, kind) to request it.
 

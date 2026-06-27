@@ -1,4 +1,4 @@
-// Shared opener for the About dialog. Mirrors settingsOpener/themeEditorOpener:
+// Shared opener for the About dialog. Mirrors settingsOpener:
 // App owns the single AboutDialog mount gated on `.open`; the Help menu calls
 // openAbout() to request it.
 

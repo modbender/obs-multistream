@@ -8,8 +8,6 @@
   import AiPage from "./lib/pages/AiPage.svelte";
   import SettingsPage from "./lib/pages/SettingsPage.svelte";
   import { themeStore } from "./lib/theme/themeStore.svelte";
-  import ThemeEditor from "./lib/ThemeEditor.svelte";
-  import { themeEditorOpener, closeThemeEditor } from "./lib/themeEditorOpener.svelte";
   import FilterDialog from "./lib/FilterDialog.svelte";
   import { filterDialogOpener, closeFilters } from "./lib/filterDialogOpener.svelte";
   import TransformDialog from "./lib/TransformDialog.svelte";
@@ -41,10 +39,6 @@
     {/if}
   </main>
 </div>
-
-{#if themeEditorOpener.open}
-  <ThemeEditor onClose={closeThemeEditor} />
-{/if}
 
 {#if filterDialogOpener.open && filterDialogOpener.source}
   <FilterDialog source={filterDialogOpener.source} onClose={closeFilters} />
