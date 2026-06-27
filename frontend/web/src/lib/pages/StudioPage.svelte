@@ -10,6 +10,8 @@
     setCanvasUserHidden,
     clearCanvasUserHidden,
   } from "../dock/canvasReconciler";
+  import { startBrowserDockReconciler, reconcileBrowserDocks } from "../dock/browserDockReconciler";
+  import { browserDockStore } from "../browserDockStore.svelte";
   import {
     obs,
     type CanvasInfo,
@@ -28,6 +30,7 @@
   let visibleDocks = $state<Record<string, boolean>>({});
   let canvasDocksPresent = $state<Set<string>>(new Set());
   let stopReconciler: (() => void) | undefined;
+  let stopBrowserReconciler: (() => void) | undefined;
 
   // CANVASES bar + GO-LIVE bar data, read independently of the Dockview lifecycle.
   let canvases = $state<CanvasInfo[]>([]);
@@ -157,7 +160,20 @@
     ];
   });
 
-  onDestroy(() => stopReconciler?.());
+  onDestroy(() => {
+    stopReconciler?.();
+    stopBrowserReconciler?.();
+  });
+
+  // Store-change reactivity for the user-defined browser docks. The store is a
+  // rune-backed $state (no bridge events), so reconcile here whenever the dock set
+  // changes (add/edit/remove) or the api becomes ready. Mirrors the per-canvas dot
+  // effect above; the reconcile is idempotent.
+  $effect(() => {
+    if (!api) return;
+    void browserDockStore.docks;
+    reconcileBrowserDocks(api, detachDock);
+  });
 
   // Explicitly suspend every native preview overlay (Default + each CanvasDock,
   // which all hide off the ref-counted previewGate) while Studio is off-page,
@@ -369,6 +385,9 @@
     }
     // Output-gated per-canvas composite docks (added/removed as canvases enable).
     stopReconciler = startCanvasDockReconciler(dv, detachDock);
+    // User-defined browser docks (iframe panels). Loads the set + asserts panels;
+    // ongoing add/edit/remove reactivity is the $effect above.
+    stopBrowserReconciler = startBrowserDockReconciler(dv, detachDock);
 
     // A detached window closed (explicit redock or user OS-close): restore the
     // dock to the main window. Static docks re-add from DOCKS; dynamic canvas docks
@@ -378,6 +397,8 @@
       if (api.getPanel(p.dock)) return; // already present
       if (p.dock.startsWith("canvas:")) {
         void reconcileCanvasDocks(api, detachDock);
+      } else if (p.dock.startsWith("browserdock:")) {
+        reconcileBrowserDocks(api, detachDock);
       } else if (DOCKS.some((d) => d.id === p.dock)) {
         api.addPanel(panelOptions(p.dock, detachDock));
       }
@@ -405,6 +426,8 @@
     // buildDefaultLayout clears the dynamic canvas docks; re-assert them (the
     // reconciler's event subscriptions stay live but only fire on canvas changes).
     void reconcileCanvasDocks(api, detachDock);
+    // Likewise re-assert the user-defined browser docks dropped by the clear.
+    reconcileBrowserDocks(api, detachDock);
   }
 
   // Dockview 6.6.1 has no `locked` api setter; disabling drag-and-drop via

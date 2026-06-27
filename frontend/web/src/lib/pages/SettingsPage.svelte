@@ -4,6 +4,7 @@
   import StreamsTab from "../StreamsTab.svelte";
   import HotkeysTab from "../HotkeysTab.svelte";
   import AudioTab from "../AudioTab.svelte";
+  import BrowserDocksTab from "../BrowserDocksTab.svelte";
   import AppearanceTab from "../AppearanceTab.svelte";
   import AdvancedTab from "../AdvancedTab.svelte";
   import { settingsNav, setSettingsTab, type SettingsTab } from "../settingsOpener.svelte";
@@ -19,6 +20,7 @@
     { id: "streams", label: "Stream Profiles" },
     { id: "audio", label: "Audio" },
     { id: "hotkeys", label: "Hotkeys" },
+    { id: "browserDocks", label: "Browser Docks" },
     { id: "appearance", label: "Appearance" },
     { id: "advanced", label: "Advanced" },
   ];
@@ -52,6 +54,8 @@
         <AudioTab />
       {:else if settingsNav.tab === "hotkeys"}
         <HotkeysTab />
+      {:else if settingsNav.tab === "browserDocks"}
+        <BrowserDocksTab />
       {:else if settingsNav.tab === "appearance"}
         <AppearanceTab />
       {:else if settingsNav.tab === "advanced"}

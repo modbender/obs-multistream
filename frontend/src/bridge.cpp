@@ -6443,6 +6443,81 @@ bool MethodVirtualCamSetConfig(const json &params, json &result, std::string &er
 	return true;
 }
 
+// Custom browser docks (user-defined {id,title,url} web panels, Task 12). A flat
+// per-app list persisted to browser_docks.json under the shared basic dir; no obs
+// refs. The frontend owns add/edit/remove and writes back the whole list.
+
+bool MethodBrowserDocksList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	const std::string path = MultistreamBasicPath("browser_docks.json");
+	json arr = json::array();
+	OBSDataAutoRelease root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
+	if (root) {
+		OBSDataArrayAutoRelease docks = obs_data_get_array(root, "docks");
+		const size_t count = docks ? obs_data_array_count(docks) : 0;
+		for (size_t i = 0; i < count; i++) {
+			OBSDataAutoRelease item = obs_data_array_item(docks, i);
+			const char *id = obs_data_get_string(item, "id");
+			if (!id || !*id) {
+				continue;
+			}
+			const char *title = obs_data_get_string(item, "title");
+			const char *url = obs_data_get_string(item, "url");
+			arr.push_back(json{{"id", id}, {"title", title ? title : ""}, {"url", url ? url : ""}});
+		}
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodBrowserDocksSet(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object() || !params.contains("docks") || !params["docks"].is_array()) {
+		error = "browserDocks.set requires a 'docks' array";
+		return false;
+	}
+
+	OBSDataAutoRelease root = obs_data_create();
+	OBSDataArrayAutoRelease arr = obs_data_array_create();
+	json saved = json::array();
+	for (const auto &d : params["docks"]) {
+		if (!d.is_object()) {
+			continue;
+		}
+		auto idIt = d.find("id");
+		auto urlIt = d.find("url");
+		if (idIt == d.end() || !idIt->is_string() || idIt->get<std::string>().empty()) {
+			continue; // malformed: drop
+		}
+		if (urlIt == d.end() || !urlIt->is_string()) {
+			continue;
+		}
+		auto titleIt = d.find("title");
+		const std::string id = idIt->get<std::string>();
+		const std::string url = urlIt->get<std::string>();
+		const std::string title =
+			(titleIt != d.end() && titleIt->is_string()) ? titleIt->get<std::string>() : std::string();
+
+		OBSDataAutoRelease item = obs_data_create();
+		obs_data_set_string(item, "id", id.c_str());
+		obs_data_set_string(item, "title", title.c_str());
+		obs_data_set_string(item, "url", url.c_str());
+		obs_data_array_push_back(arr, item);
+		saved.push_back(json{{"id", id}, {"title", title}, {"url", url}});
+	}
+	obs_data_set_array(root, "docks", arr);
+
+	const std::string path = MultistreamBasicPath("browser_docks.json");
+	std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
+	os_mkdirs(dir.u8string().c_str());
+	if (!obs_data_save_json_pretty_safe(root, path.c_str(), "tmp", "bak")) {
+		error = "failed to write browser_docks.json";
+		return false;
+	}
+	result = std::move(saved);
+	return true;
+}
+
 } // namespace
 
 bool WriteJsonString(const char *file, const char *key, const std::string &value)
@@ -6601,6 +6676,8 @@ void Init()
 		{"mcp.getConfig", MethodMcpGetConfig},
 		{"mcp.setConfig", MethodMcpSetConfig},
 		{"mcp.regenerateToken", MethodMcpRegenerateToken},
+		{"browserDocks.list", MethodBrowserDocksList},
+		{"browserDocks.set", MethodBrowserDocksSet},
 	};
 
 	// Notify JS whenever the undo stack changes (add/undo/redo/clear) so the UI's

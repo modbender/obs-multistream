@@ -7,6 +7,7 @@
   import { createContentRenderer } from "./mountAdapter";
   import { DockTab } from "./tabRenderer";
   import CanvasDock from "../docks/CanvasDock.svelte";
+  import BrowserDock from "../docks/BrowserDock.svelte";
 
   // onReady hands the caller the DockviewApi (fired from this host's onMount) so it
   // can build the default layout + save/load. The caller adds panels with the
@@ -28,6 +29,9 @@
   // component "canvas" + JSON-safe params {canvasUuid, canvasName}); register the
   // one shared renderer here since they are not static DOCKS entries.
   renderers["canvas"] = createContentRenderer(CanvasDock as unknown as Component<Record<string, unknown>>);
+  // User-defined browser docks (Task 12): one shared renderer for all
+  // `browserdock:<id>` panels; browserDockReconciler supplies {url,title} params.
+  renderers["browserdock"] = createContentRenderer(BrowserDock as unknown as Component<Record<string, unknown>>);
 
   function buildOptions(): DockviewComponentOptions {
     return {

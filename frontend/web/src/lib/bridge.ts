@@ -737,6 +737,16 @@ export interface VirtualCamConfig {
   canvas: string;
 }
 
+// --- custom browser docks (user-defined web panels, Task 12) -----------------
+
+/** One user-defined browser dock: an {id,title,url} that becomes a Dockview panel
+ * hosting an <iframe src=url>. `id` is frontend-generated and stable across edits. */
+export interface BrowserDock {
+  id: string;
+  title: string;
+  url: string;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -914,6 +924,11 @@ export interface ObsMethods {
   "mcp.getConfig": McpConfig;
   "mcp.setConfig": McpConfig;
   "mcp.regenerateToken": { token: string };
+  // Custom browser docks (user-defined {id,title,url} web panels, Task 12). list
+  // returns the saved set; set overwrites the whole list (the frontend manages
+  // add/edit/remove client-side then persists the full list) and echoes it back.
+  "browserDocks.list": BrowserDock[];
+  "browserDocks.set": BrowserDock[];
   // Stats snapshot (general perf + per-output live stats). Polled by the Stats
   // dock on a ~1s interval; there is no push, so the dock owns the cadence.
   "stats.get": Stats;
