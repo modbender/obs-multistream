@@ -38,6 +38,7 @@
 #include "preview_window.hpp"
 #include "projector_window.hpp"
 #include "scene_collections.hpp"
+#include "session_log.hpp"
 #include "scene_persistence.hpp"
 #include "transitions.hpp"
 #include "UndoManager.hpp"
@@ -504,6 +505,10 @@ bool ObsBootstrap::Start()
 	SetEnvironmentVariableW(L"OBS_FRONTEND_OWNS_CEF", L"1");
 
 	base_set_log_handler(ObsLogHandler, nullptr);
+
+	// Chain a per-session file writer onto the stderr/HostLog handler installed
+	// above so every blog() line is also persisted under .../obs-multistream/logs.
+	SessionLog::Init();
 
 	if (!obs_startup("en-US", nullptr, nullptr)) {
 		HostLog("[obs] obs_startup failed");
@@ -2440,4 +2445,8 @@ void ObsBootstrap::Stop()
 	// residuals (no per-run growth), not host-introduced leaks.
 	HostLog("[obs] leaks: " + std::to_string(bnum_allocs()));
 	HostLog("[obs] shutdown complete");
+
+	// Restore the stderr/HostLog handler and close the session log file last, after
+	// obs_shutdown's own blog output has been captured.
+	SessionLog::Shutdown();
 }

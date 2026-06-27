@@ -83,6 +83,8 @@ target_sources(
     src/tray.hpp
     src/transitions.cpp
     src/transitions.hpp
+    src/session_log.cpp
+    src/session_log.hpp
     src/log.hpp
     api-impl/frontend_callbacks.cpp
     api-impl/frontend_callbacks.hpp

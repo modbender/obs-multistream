@@ -4,7 +4,9 @@
 #include <cmath>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -36,6 +38,7 @@
 #include "properties_serializer.hpp"
 #include "scene_collections.hpp"
 #include "scene_persistence.hpp"
+#include "session_log.hpp"
 #include "transitions.hpp"
 #include "window_manager.hpp"
 #include "UndoManager.hpp"
@@ -7164,6 +7167,33 @@ bool MethodScreenshotTakeSource(const json &params, json &result, std::string &e
 	return true;
 }
 
+// Return this session's log file path plus its contents. The tail is capped at
+// kLogTailCap bytes so a long-running session can't produce a giant payload; the
+// file is read fresh from disk so it reflects everything flushed so far.
+bool MethodLogGetCurrent(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	constexpr std::streamoff kLogTailCap = 512 * 1024;
+
+	const std::string path = SessionLog::CurrentPath();
+	std::string contents;
+	if (!path.empty()) {
+		std::ifstream in(std::filesystem::u8path(path), std::ios::in | std::ios::binary);
+		if (in) {
+			in.seekg(0, std::ios::end);
+			const std::streamoff size = in.tellg();
+			std::streamoff start = 0;
+			if (size > kLogTailCap) {
+				start = size - kLogTailCap;
+			}
+			in.seekg(start, std::ios::beg);
+			contents.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+		}
+	}
+
+	result = json{{"path", path}, {"contents", contents}};
+	return true;
+}
+
 void Init()
 {
 	g_methods = {
@@ -7303,6 +7333,7 @@ void Init()
 		{"mcp.regenerateToken", MethodMcpRegenerateToken},
 		{"browserDocks.list", MethodBrowserDocksList},
 		{"browserDocks.set", MethodBrowserDocksSet},
+		{"log.getCurrent", MethodLogGetCurrent},
 	};
 
 	// Notify JS whenever the undo stack changes (add/undo/redo/clear) so the UI's
