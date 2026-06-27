@@ -13,6 +13,7 @@
   import { previewSuspended, suspendPreview } from "../previewGate.svelte";
   import { WINDOW_ID } from "../windowContext";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
+  import { clipboard } from "../clipboardStore.svelte";
   import { openFilters } from "../filterDialogOpener.svelte";
   import { openTransform } from "../transformOpener.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
@@ -309,6 +310,93 @@
     }
   }
 
+  // ---- clipboard actions (copy/paste/duplicate/filters/transform/group) ------
+  // Every call carries this canvas's uuid (the additional-canvas path); paste
+  // lands in this canvas's current scene. Filter copy/paste keys off the source
+  // name and so shares the same clipboard slots as the global SourcesDock.
+  function copySource(item: SceneItem) {
+    if (item.source) {
+      clipboard.source = { ref: item.source, name: item.source };
+    }
+  }
+  async function pasteSource() {
+    if (!clipboard.source || !currentScene) {
+      return;
+    }
+    try {
+      await obs.call("sources.addExisting", { canvas: canvasUuid, scene: currentScene, name: clipboard.source.ref });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function duplicateItem(item: SceneItem) {
+    try {
+      await obs.call("sources.duplicate", { canvas: canvasUuid, scene: currentScene, id: item.id });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function copyFilters(item: SceneItem) {
+    if (!item.source) {
+      return;
+    }
+    try {
+      clipboard.filters = (await obs.call("filters.copyChain", { source: item.source })).filters;
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function pasteFilters(item: SceneItem) {
+    if (!item.source || !clipboard.filters) {
+      return;
+    }
+    try {
+      await obs.call("filters.pasteChain", { source: item.source, filters: clipboard.filters });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function copyTransform(item: SceneItem) {
+    try {
+      clipboard.transform = await obs.call("sceneItems.getTransform", {
+        canvas: canvasUuid,
+        scene: currentScene,
+        id: item.id,
+      });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function pasteTransform(item: SceneItem) {
+    if (!clipboard.transform) {
+      return;
+    }
+    try {
+      await obs.call("sceneItems.setTransform", {
+        canvas: canvasUuid,
+        scene: currentScene,
+        id: item.id,
+        transform: clipboard.transform,
+      });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function groupItem(item: SceneItem) {
+    try {
+      await obs.call("sceneItems.group", { canvas: canvasUuid, scene: currentScene, ids: [item.id] });
+    } catch (e) {
+      report(e);
+    }
+  }
+  async function ungroupItem(item: SceneItem) {
+    try {
+      await obs.call("sceneItems.ungroup", { canvas: canvasUuid, scene: currentScene, id: item.id });
+    } catch (e) {
+      report(e);
+    }
+  }
+
   function openSourceMenu(e: MouseEvent, item: SceneItem, idx: number) {
     e.preventDefault();
     menu = {
@@ -330,6 +418,18 @@
             .call("sceneItems.setScaleFilter", { canvas: canvasUuid, scene: currentScene, id: item.id, filter })
             .catch(report),
         ),
+        null,
+        { label: "Copy", disabled: !item.source, action: () => copySource(item) },
+        { label: "Paste", disabled: !clipboard.source, action: () => void pasteSource() },
+        { label: "Duplicate", action: () => void duplicateItem(item) },
+        null,
+        { label: "Copy Filters", disabled: !item.source, action: () => void copyFilters(item) },
+        { label: "Paste Filters", disabled: !clipboard.filters, action: () => void pasteFilters(item) },
+        { label: "Copy Transform", action: () => void copyTransform(item) },
+        { label: "Paste Transform", disabled: !clipboard.transform, action: () => void pasteTransform(item) },
+        null,
+        { label: "Group", action: () => void groupItem(item) },
+        { label: "Ungroup", action: () => void ungroupItem(item) },
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
         { label: item.locked ? "Unlock" : "Lock", action: () => void toggleLocked(item) },

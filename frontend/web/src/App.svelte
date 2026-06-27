@@ -16,6 +16,9 @@
   import AboutDialog from "./lib/AboutDialog.svelte";
   import { aboutOpen, closeAbout } from "./lib/aboutOpener.svelte";
   import { undoStore } from "./lib/undoStore.svelte";
+  import { obs } from "./lib/bridge";
+  import { clipboard } from "./lib/clipboardStore.svelte";
+  import { sourceSelection } from "./lib/sourceSelectionStore.svelte";
 
   // Apply the saved (or default Industrial) theme before first paint settles.
   void themeStore.hydrate();
@@ -42,6 +45,19 @@
     } else if ((key === "z" && e.shiftKey) || key === "y") {
       e.preventDefault();
       undoStore.redo();
+    } else if (key === "c") {
+      // Copy the globally-selected source as a reference (name) for later paste.
+      const it = sourceSelection.item;
+      if (it?.source) {
+        e.preventDefault();
+        clipboard.source = { ref: it.source, name: it.source };
+      }
+    } else if (key === "v") {
+      // Paste a reference of the copied source into the global current scene.
+      if (clipboard.source && sourceSelection.scene) {
+        e.preventDefault();
+        obs.call("sources.addExisting", { scene: sourceSelection.scene, name: clipboard.source.ref }).catch(() => {});
+      }
     }
   }
 

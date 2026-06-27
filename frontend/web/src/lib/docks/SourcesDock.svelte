@@ -6,6 +6,8 @@
   import PropertyForm from "../properties/PropertyForm.svelte";
   import { suspendPreview } from "../previewGate.svelte";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
+  import { clipboard } from "../clipboardStore.svelte";
+  import { sourceSelection } from "../sourceSelectionStore.svelte";
   import { openFilters } from "../filterDialogOpener.svelte";
   import { openTransform } from "../transformOpener.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
@@ -93,6 +95,12 @@
     void load();
   });
 
+  // Publish the global selection so the app-level Ctrl+C/Ctrl+V can act on it.
+  $effect(() => {
+    sourceSelection.scene = currentScene;
+    sourceSelection.item = items.find((i) => i.id === selectedItemId) ?? null;
+  });
+
   // Refresh on item mutations targeting the global path (canvas=null) for our scene.
   $effect(() => {
     return obs.on("sceneItems.changed", (p) => {
@@ -168,6 +176,90 @@
     }
   }
 
+  // ---- clipboard actions (copy/paste/duplicate/filters/transform/group) ------
+  // All target the global channel-0 path (no canvas); paste lands in currentScene.
+  function copySource(item: SceneItem) {
+    if (item.source) {
+      clipboard.source = { ref: item.source, name: item.source };
+    }
+  }
+
+  async function pasteSource() {
+    if (!clipboard.source || !currentScene) {
+      return;
+    }
+    try {
+      await obs.call("sources.addExisting", { scene: currentScene, name: clipboard.source.ref });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function duplicateItem(item: SceneItem) {
+    try {
+      await obs.call("sources.duplicate", { scene: currentScene, id: item.id });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function copyFilters(item: SceneItem) {
+    if (!item.source) {
+      return;
+    }
+    try {
+      clipboard.filters = (await obs.call("filters.copyChain", { source: item.source })).filters;
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function pasteFilters(item: SceneItem) {
+    if (!item.source || !clipboard.filters) {
+      return;
+    }
+    try {
+      await obs.call("filters.pasteChain", { source: item.source, filters: clipboard.filters });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function copyTransform(item: SceneItem) {
+    try {
+      clipboard.transform = await obs.call("sceneItems.getTransform", { scene: currentScene, id: item.id });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function pasteTransform(item: SceneItem) {
+    if (!clipboard.transform) {
+      return;
+    }
+    try {
+      await obs.call("sceneItems.setTransform", { scene: currentScene, id: item.id, transform: clipboard.transform });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function groupItem(item: SceneItem) {
+    try {
+      await obs.call("sceneItems.group", { scene: currentScene, ids: [item.id] });
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  async function ungroupItem(item: SceneItem) {
+    try {
+      await obs.call("sceneItems.ungroup", { scene: currentScene, id: item.id });
+    } catch (e) {
+      report(e);
+    }
+  }
+
   function openMenu(e: MouseEvent, item: SceneItem, idx: number) {
     e.preventDefault();
     menu = {
@@ -184,6 +276,18 @@
         scaleFilterMenu(item.scaleFilter, (filter) =>
           void obs.call("sceneItems.setScaleFilter", { scene: currentScene, id: item.id, filter }).catch(report),
         ),
+        null,
+        { label: "Copy", disabled: !item.source, action: () => copySource(item) },
+        { label: "Paste", disabled: !clipboard.source, action: () => void pasteSource() },
+        { label: "Duplicate", action: () => void duplicateItem(item) },
+        null,
+        { label: "Copy Filters", disabled: !item.source, action: () => void copyFilters(item) },
+        { label: "Paste Filters", disabled: !clipboard.filters, action: () => void pasteFilters(item) },
+        { label: "Copy Transform", action: () => void copyTransform(item) },
+        { label: "Paste Transform", disabled: !clipboard.transform, action: () => void pasteTransform(item) },
+        null,
+        { label: "Group", action: () => void groupItem(item) },
+        { label: "Ungroup", action: () => void ungroupItem(item) },
         null,
         { label: item.visible ? "Hide" : "Show", action: () => void toggleVisible(item) },
         { label: item.locked ? "Unlock" : "Lock", action: () => void toggleLocked(item) },

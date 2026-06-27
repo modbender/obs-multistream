@@ -291,6 +291,14 @@ export interface FilterInfo {
   enabled: boolean;
 }
 
+/** One filter in a copied chain (filters.copyChain entry / filters.pasteChain input). */
+export interface CopiedFilter {
+  id: string | null;
+  name: string | null;
+  settings: Record<string, unknown>;
+  enabled: boolean;
+}
+
 // --- stream profiles (reusable destination credentials, 4.4.2) --------------
 
 /** A stream profile as reported by streamProfile.list / returned by update. */
@@ -664,6 +672,9 @@ export interface ObsMethods {
   "sceneItems.setScaleFilter": Record<string, never>;
   "sceneItems.remove": { removed: number };
   "sceneItems.reorder": { id: number; direction: ReorderDirection };
+  // Group selected items into a new group / dissolve a group (neither is undoable yet).
+  "sceneItems.group": { id: number; source: string };
+  "sceneItems.ungroup": { ungrouped: boolean };
   // Numeric transform read/edit (Edit Transform dialog). getTransform loads the
   // full geometry; setTransform applies a partial (send only changed fields) and
   // echoes the full updated transform; transformAction runs a quick action and
@@ -679,6 +690,8 @@ export interface ObsMethods {
   "sources.rename": { id: number; source: string };
   "sources.listExisting": string[];
   "sources.addExisting": { id: number; source: string };
+  // Duplicate the source of a scene item in place (undo-recorded).
+  "sources.duplicate": { id: number; source: string };
   // Generic obs_properties renderer (4.3.2).
   "properties.get": PropertiesResult;
   "properties.set": PropertiesResult;
@@ -709,6 +722,9 @@ export interface ObsMethods {
   "filters.setEnabled": { name: string; enabled: boolean };
   "filters.reorder": { name: string; direction: ReorderDirection };
   "filters.rename": { name: string };
+  // Copy/paste a whole filter chain between sources (paste is not yet undoable).
+  "filters.copyChain": { filters: CopiedFilter[] };
+  "filters.pasteChain": { pasted: number };
   // Stream profiles (reusable destination credentials, 4.4.2).
   "streamProfile.list": StreamProfileInfo[];
   "streamProfile.create": { uuid: string };
