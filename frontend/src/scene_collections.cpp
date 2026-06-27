@@ -306,6 +306,19 @@ bool SceneCollections::Switch(const std::string &id, std::string &error)
 	ObsBootstrap::OutputBindings().Load(ActiveBindingsPath());
 	ObsBootstrap::SceneLinks().Load(ActiveSceneLinksPath());
 
+	// Re-apply scene links to the new collection's restored program scene so
+	// "following" canvases come up on their linked scene rather than their own
+	// saved current scene.
+	{
+		OBSSourceAutoRelease program = Transitions::GetProgramScene();
+		if (program) {
+			const char *pu = obs_source_get_uuid(program);
+			if (pu) {
+				ObsBootstrap::ApplyCanvasSceneLinks(pu);
+			}
+		}
+	}
+
 	// Resync every window: the active collection, its scene list, and the transition
 	// (re-created above) all changed; the bindings swap re-decides preview-gating
 	// (outputBinding.changed) and refreshes the Multistream dock (multistream.changed).

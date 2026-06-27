@@ -648,6 +648,18 @@ bool ObsBootstrap::Start()
 	Mcp::SetInstance(g_mcp.get());
 	g_mcp->Start();
 
+	// Re-apply scene links to the restored program scene so "following" canvases
+	// come up on their linked scene rather than their own saved current scene.
+	{
+		OBSSourceAutoRelease program = Transitions::GetProgramScene();
+		if (program) {
+			const char *pu = obs_source_get_uuid(program);
+			if (pu) {
+				ApplyCanvasSceneLinks(pu);
+			}
+		}
+	}
+
 	return true;
 }
 
