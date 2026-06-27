@@ -513,6 +513,7 @@
     grid-template-columns: repeat(7, 1fr);
     gap: 1px;
     margin-bottom: 6px;
+    border-inline: var(--border-weight) solid transparent;
   }
   .weekday {
     font-family: var(--font-mono);
