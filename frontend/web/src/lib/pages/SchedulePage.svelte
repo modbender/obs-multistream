@@ -502,6 +502,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: auto;
     padding: 0;
   }
   .weekrow {
@@ -524,7 +525,7 @@
     min-height: 0;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    grid-auto-rows: minmax(0, 1fr);
+    grid-auto-rows: minmax(108px, 1fr);
     gap: var(--border-weight);
     background: var(--color-border);
     border-bottom: var(--border-weight) solid var(--color-border);

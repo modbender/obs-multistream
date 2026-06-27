@@ -642,8 +642,8 @@
     height: 0;
   }
   .track {
-    display: inline-block;
-    width: 38px;
+    display: block;
+    width: 36px;
     height: 20px;
     background: var(--color-base);
     border: var(--border-weight) solid var(--color-border);
@@ -651,18 +651,19 @@
     transition: background 0.12s ease;
   }
   .switch.sm .track {
-    width: 34px;
+    width: 32px;
     height: 18px;
   }
   .thumb {
     position: absolute;
-    top: 2px;
-    left: 2px;
+    top: 50%;
+    left: 3px;
     width: 12px;
     height: 12px;
+    transform: translateY(-50%);
     background: var(--color-muted);
     transition:
-      transform 0.12s ease,
+      left 0.12s ease,
       background 0.12s ease;
   }
   .switch.sm .thumb {
@@ -674,11 +675,11 @@
     border-color: var(--color-accent);
   }
   .switch input:checked + .track .thumb {
-    transform: translateX(18px);
+    left: calc(100% - 12px - 3px);
     background: var(--color-accent);
   }
   .switch.sm input:checked + .track .thumb {
-    transform: translateX(16px);
+    left: calc(100% - 10px - 3px);
   }
   .switch input:focus-visible + .track {
     outline: 1px solid var(--color-accent);
