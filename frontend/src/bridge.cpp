@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -11,6 +12,9 @@
 
 #include <shobjidl.h>
 #include <shlwapi.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+#pragma comment(lib, "windowscodecs.lib")
 
 #include <obs.h>
 #include <obs.hpp>
@@ -49,6 +53,7 @@
 #include <util/platform.h>
 #include <graphics/vec2.h>
 #include <graphics/vec3.h>
+#include <graphics/vec4.h>
 #include <graphics/matrix4.h>
 
 namespace Bridge {
@@ -6851,6 +6856,314 @@ std::string ReadJsonString(const char *file, const char *key)
 	return v ? std::string(v) : std::string();
 }
 
+// Encode a tightly-packed (stride == w*4) GS_RGBA buffer to a PNG file via the
+// Windows Imaging Component, mirroring the legacy SaveJxr COM pattern with the
+// PNG container. WIC needs COM up on the calling thread (the CEF UI thread); we
+// init MULTITHREADED and only balance with CoUninitialize when our init actually
+// took (S_OK/S_FALSE) -- RPC_E_CHANGED_MODE means COM was already up in another
+// model and our ref was not taken, so we must not uninit then.
+bool EncodePngFile(const wchar_t *wpath, const uint8_t *pixels, uint32_t w, uint32_t h, std::string &errOut)
+{
+	using Microsoft::WRL::ComPtr;
+
+	const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	const bool needUninit = SUCCEEDED(coInit);
+
+	HRESULT hr;
+	{
+		ComPtr<IWICImagingFactory> factory;
+		hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+				      IID_PPV_ARGS(factory.GetAddressOf()));
+		ComPtr<IWICStream> stream;
+		if (SUCCEEDED(hr)) {
+			hr = factory->CreateStream(stream.GetAddressOf());
+		}
+		if (SUCCEEDED(hr)) {
+			hr = stream->InitializeFromFilename(wpath, GENERIC_WRITE);
+		}
+		ComPtr<IWICBitmapEncoder> encoder;
+		if (SUCCEEDED(hr)) {
+			hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.GetAddressOf());
+		}
+		if (SUCCEEDED(hr)) {
+			hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
+		}
+		ComPtr<IWICBitmapFrameEncode> frame;
+		ComPtr<IPropertyBag2> options;
+		if (SUCCEEDED(hr)) {
+			hr = encoder->CreateNewFrame(frame.GetAddressOf(), options.GetAddressOf());
+		}
+		if (SUCCEEDED(hr)) {
+			hr = frame->Initialize(options.Get());
+		}
+		if (SUCCEEDED(hr)) {
+			hr = frame->SetSize(w, h);
+		}
+		WICPixelFormatGUID format = GUID_WICPixelFormat32bppRGBA;
+		if (SUCCEEDED(hr)) {
+			hr = frame->SetPixelFormat(&format);
+		}
+		if (SUCCEEDED(hr)) {
+			// GS_RGBA is R,G,B,A byte order with opaque alpha; a WIC-negotiated substitute
+			// format is acceptable for opaque RGBA, so a format mismatch is not rejected.
+			hr = frame->WritePixels(h, w * 4, w * h * 4, const_cast<BYTE *>(pixels));
+		}
+		if (SUCCEEDED(hr)) {
+			hr = frame->Commit();
+		}
+		if (SUCCEEDED(hr)) {
+			hr = encoder->Commit();
+		}
+	}
+
+	if (needUninit) {
+		CoUninitialize();
+	}
+
+	if (FAILED(hr)) {
+		errOut = "failed to encode PNG";
+		return false;
+	}
+	return true;
+}
+
+// Render `renderFn` into a w*h GS_RGBA texture and write it out as PNG. Runs the
+// whole capture synchronously inside one obs graphics block: on D3D11 the staging
+// map flushes and blocks until the copy completes, so the pixels are valid
+// immediately (the legacy tick-split only existed to avoid stalling the render
+// thread, irrelevant for a one-shot bridge call). Both gs objects are destroyed
+// and the graphics context left on every path; the stage surface is unmapped
+// before destroy. Output is native size with a 1:1 viewport (no letterbox).
+bool CaptureToPng(uint32_t w, uint32_t h, const std::function<void()> &renderFn, const std::string &outPath,
+		  std::string &errOut)
+{
+	if (!w || !h) {
+		errOut = "source has no video";
+		return false;
+	}
+
+	obs_enter_graphics();
+
+	gs_texrender_t *texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	gs_stagesurf_t *stage = gs_stagesurface_create(w, h, GS_RGBA);
+
+	bool beginOk = false;
+	if (gs_texrender_begin(texrender, w, h)) {
+		beginOk = true;
+
+		vec4 zero;
+		vec4_zero(&zero);
+		gs_clear(GS_CLEAR_COLOR, &zero, 0.0f, 0);
+
+		gs_viewport_push();
+		gs_projection_push();
+		gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
+		gs_set_viewport(0, 0, (int)w, (int)h);
+
+		gs_blend_state_push();
+		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+
+		renderFn();
+
+		gs_blend_state_pop();
+		gs_projection_pop();
+		gs_viewport_pop();
+		gs_texrender_end(texrender);
+	}
+
+	std::vector<uint8_t> pixels;
+	bool mapped = false;
+	if (beginOk) {
+		gs_stage_texture(stage, gs_texrender_get_texture(texrender));
+		uint8_t *data = nullptr;
+		uint32_t linesize = 0;
+		if (gs_stagesurface_map(stage, &data, &linesize)) {
+			pixels.resize((size_t)w * h * 4);
+			for (uint32_t y = 0; y < h; ++y) {
+				memcpy(pixels.data() + (size_t)y * w * 4, data + (size_t)y * linesize,
+				       (size_t)w * 4);
+			}
+			gs_stagesurface_unmap(stage);
+			mapped = true;
+		}
+	}
+
+	gs_stagesurface_destroy(stage);
+	gs_texrender_destroy(texrender);
+	obs_leave_graphics();
+
+	if (!beginOk || !mapped) {
+		errOut = "failed to render screenshot";
+		return false;
+	}
+
+	wchar_t *wpath = nullptr;
+	os_utf8_to_wcs_ptr(outPath.c_str(), 0, &wpath);
+	if (!wpath) {
+		errOut = "failed to encode PNG";
+		return false;
+	}
+	const bool ok = EncodePngFile(wpath, pixels.data(), w, h, errOut);
+	bfree(wpath);
+	return ok;
+}
+
+// Replace characters Windows forbids in file names (and control chars) with '_';
+// fall back to `fallback` when nothing usable remains.
+std::string SanitizeScreenshotName(const std::string &name, const char *fallback)
+{
+	std::string out;
+	out.reserve(name.size());
+	for (unsigned char c : name) {
+		if (c < 0x20 || strchr("<>:\"/\\|?*", c) != nullptr) {
+			out.push_back('_');
+		} else {
+			out.push_back((char)c);
+		}
+	}
+	if (out.empty()) {
+		out = fallback;
+	}
+	return out;
+}
+
+// Build <config>/obs-multistream/screenshots/<name>_<YYYY-MM-DD_HH-MM-SS>.png,
+// creating the directory if needed. Returns false (with errOut) when the path
+// can't be resolved or the directory can't be created.
+bool BuildScreenshotPath(const std::string &name, const char *fallback, std::string &fullPath, std::string &errOut)
+{
+	char dir[512];
+	if (os_get_config_path(dir, sizeof(dir), "obs-multistream/screenshots") <= 0) {
+		errOut = "failed to resolve screenshots directory";
+		return false;
+	}
+	if (os_mkdirs(dir) == MKDIR_ERROR) {
+		errOut = "failed to create screenshots directory";
+		return false;
+	}
+
+	const time_t t = time(nullptr);
+	struct tm lt;
+	localtime_s(&lt, &t);
+	char ts[32];
+	strftime(ts, sizeof(ts), "%Y-%m-%d_%H-%M-%S", &lt);
+
+	fullPath = std::string(dir) + "/" + SanitizeScreenshotName(name, fallback) + "_" + ts + ".png";
+	return true;
+}
+
+// Capture the composited program for the addressed canvas (absent/Default ->
+// the global pipeline; otherwise the additional canvas's mix) to a PNG.
+bool MethodScreenshotTakeProgram(const json &params, json &result, std::string &error)
+{
+	const CanvasTarget t = ResolveCanvasTarget(params);
+
+	uint32_t w = 0;
+	uint32_t h = 0;
+	std::function<void()> renderFn;
+	std::string name;
+
+	if (t.isAdditional) {
+		obs_canvas_t *cv = ObsBootstrap::CanvasRuntime().Find(t.uuid);
+		if (!cv) {
+			error = "canvas not found";
+			return false;
+		}
+		obs_video_info ovi;
+		if (!obs_canvas_get_video_info(cv, &ovi)) {
+			error = "canvas has no video";
+			return false;
+		}
+		w = ovi.base_width;
+		h = ovi.base_height;
+		renderFn = [cv]() { obs_canvas_render(cv); };
+		const char *n = obs_canvas_get_name(cv);
+		name = (n && *n) ? n : "Program";
+	} else {
+		obs_video_info ovi;
+		if (!obs_get_video_info(&ovi)) {
+			error = "no video";
+			return false;
+		}
+		w = ovi.base_width;
+		h = ovi.base_height;
+		renderFn = []() { obs_render_main_texture(); };
+		name = ObsBootstrap::Canvases().Default().name;
+		if (name.empty()) {
+			name = "Program";
+		}
+	}
+
+	std::string fullPath;
+	if (!BuildScreenshotPath(name, "Program", fullPath, error)) {
+		return false;
+	}
+	if (!CaptureToPng(w, h, renderFn, fullPath, error)) {
+		return false;
+	}
+
+	blog(LOG_INFO, "Saved program screenshot to '%s'", fullPath.c_str());
+	EmitEvent("screenshot.saved", json{{"path", fullPath}});
+	result = json{{"ok", true}, {"path", fullPath}};
+	return true;
+}
+
+// Capture a single scene item's source to a PNG. Resolution mirrors
+// sceneItems.setScaleFilter ({canvas,scene,id}); the addref'd scene source is
+// held across the capture (it owns the item + source) and released on every path.
+bool MethodScreenshotTakeSource(const json &params, json &result, std::string &error)
+{
+	int64_t id = 0;
+	if (!ItemIdFromParams(params, id, error)) {
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	obs_sceneitem_t *item = FindSceneItem(scene, id);
+	if (!item) {
+		obs_source_release(sceneSource);
+		error = "no scene item with id " + std::to_string(id);
+		return false;
+	}
+
+	obs_source_t *src = obs_sceneitem_get_source(item); // borrowed; kept alive by sceneSource
+	const uint32_t w = obs_source_get_width(src);
+	const uint32_t h = obs_source_get_height(src);
+	if (!w || !h) {
+		obs_source_release(sceneSource);
+		error = "source has no video";
+		return false;
+	}
+	const char *n = obs_source_get_name(src);
+	const std::string name = (n && *n) ? n : "Source";
+
+	std::string fullPath;
+	if (!BuildScreenshotPath(name, "Source", fullPath, error)) {
+		obs_source_release(sceneSource);
+		return false;
+	}
+
+	auto renderFn = [src]() {
+		obs_source_inc_showing(src);
+		obs_source_video_render(src);
+		obs_source_dec_showing(src);
+	};
+	const bool ok = CaptureToPng(w, h, renderFn, fullPath, error);
+	obs_source_release(sceneSource);
+	if (!ok) {
+		return false;
+	}
+
+	blog(LOG_INFO, "Saved source screenshot to '%s'", fullPath.c_str());
+	EmitEvent("screenshot.saved", json{{"path", fullPath}});
+	result = json{{"ok", true}, {"path", fullPath}};
+	return true;
+}
+
 void Init()
 {
 	g_methods = {
@@ -6889,6 +7202,8 @@ void Init()
 		{"sceneItems.setColor", MethodSceneItemsSetColor},
 		{"sceneItems.group", MethodSceneItemsGroup},
 		{"sceneItems.ungroup", MethodSceneItemsUngroup},
+		{"screenshot.takeProgram", MethodScreenshotTakeProgram},
+		{"screenshot.takeSource", MethodScreenshotTakeSource},
 		{"sourceTypes.list", MethodSourceTypesList},
 		{"sources.create", MethodSourcesCreate},
 		{"sources.listExisting", MethodSourcesListExisting},
