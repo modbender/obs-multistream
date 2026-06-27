@@ -5,7 +5,7 @@
 
 import { setPage } from "./pageStore.svelte";
 
-export type SettingsTab = "canvases" | "streams" | "audio" | "hotkeys" | "appearance";
+export type SettingsTab = "general" | "canvases" | "streams" | "audio" | "hotkeys" | "appearance";
 
 export const settingsNav = $state<{ tab: SettingsTab; editCanvas: string | null }>({
   tab: "canvases",

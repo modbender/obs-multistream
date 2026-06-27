@@ -37,6 +37,11 @@
   let busy = $state(false);
   let dialog = $state<DialogSpec | null>(null);
 
+  // Go-live confirmation prompts (settings.getGeneral), kept in sync via
+  // settings.generalChanged. When set, toggleLive routes through a confirm dialog.
+  let warnGoLive = $state(false);
+  let warnStop = $state(false);
+
   // Virtual camera: live state + target canvas (uuid; "" = Default / global
   // program video), kept in sync via virtualCam.changed. The right-click picker
   // anchors at vcamMenuPos when open.
@@ -227,6 +232,13 @@
     loadCanvases();
     loadStatus();
     obs
+      .call("settings.getGeneral")
+      .then((g) => {
+        warnGoLive = g.warnBeforeGoLive;
+        warnStop = g.warnBeforeStop;
+      })
+      .catch(() => {});
+    obs
       .call("display.listMonitors")
       .then((res) => (monitors = res?.monitors ?? []))
       .catch((e) => console.log("display.listMonitors failed: " + (e as Error).message));
@@ -244,11 +256,16 @@
       vcamActive = s.active;
       vcamCanvas = s.canvas;
     });
+    const offGeneral = obs.on("settings.generalChanged", (g) => {
+      warnGoLive = g.warnBeforeGoLive;
+      warnStop = g.warnBeforeStop;
+    });
     return () => {
       offCanvas();
       offMulti();
       offBindings();
       offVcam();
+      offGeneral();
     };
   });
 
@@ -474,7 +491,7 @@
     };
   }
 
-  async function toggleLive(): Promise<void> {
+  async function doToggleLive(): Promise<void> {
     if (busy || focusedOutputs.length === 0) return;
     busy = true;
     try {
@@ -495,6 +512,32 @@
     } finally {
       busy = false;
     }
+  }
+
+  // Route through a confirm dialog when the matching go-live warning is enabled;
+  // otherwise toggle directly. The busy / empty-outputs guards live in doToggleLive.
+  function toggleLive(): void {
+    if (anyRunning && warnStop) {
+      dialog = {
+        kind: "confirm",
+        title: "Stop Stream",
+        message: "Stop streaming on the focused canvas?",
+        confirmLabel: "Stop",
+        onCommit: () => void doToggleLive(),
+      };
+      return;
+    }
+    if (!anyRunning && warnGoLive) {
+      dialog = {
+        kind: "confirm",
+        title: "Go Live",
+        message: "Start streaming on the focused canvas?",
+        confirmLabel: "Go Live",
+        onCommit: () => void doToggleLive(),
+      };
+      return;
+    }
+    void doToggleLive();
   }
 
   // Virtual camera start/stop. Authoritative state arrives via virtualCam.changed,

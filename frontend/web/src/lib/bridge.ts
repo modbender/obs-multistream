@@ -232,6 +232,28 @@ export interface MonitorDevice {
 /** How a source's audio is monitored, mapping the OBS_MONITORING_TYPE_* enum. */
 export type AudioMonitoringType = "none" | "monitorOnly" | "monitorAndOutput";
 
+/** General app settings (snapping, projectors, go-live warnings, system tray,
+ * multiview, importer prompts). A flat object; setGeneral applies any present
+ * subset and echoes the full post-apply state. `snapDistance` is clamped 0..100
+ * server-side; `multiviewLayout` is one of the multiview layout ids. */
+export interface GeneralSettings {
+  projectorAlwaysOnTop: boolean;
+  snapEnabled: boolean;
+  snapDistance: number;
+  snapToEdge: boolean;
+  snapToSource: boolean;
+  snapToCenter: boolean;
+  warnBeforeGoLive: boolean;
+  warnBeforeStop: boolean;
+  startMinimized: boolean;
+  minimizeToTray: boolean;
+  alwaysShowTray: boolean;
+  multiviewLayout: string;
+  multiviewDrawNames: boolean;
+  multiviewDrawSafeAreas: boolean;
+  importerPrompts: boolean;
+}
+
 /** A source's advanced audio properties (Advanced Audio Properties dialog).
  * `volumeDb` is null when muted to silence (-inf); `tracks` is the 6 mixer-track
  * enable flags; `balance` is 0..1 (0.5 = center). */
@@ -750,6 +772,11 @@ export interface ObsMethods {
   "settings.setVideo": VideoSettings;
   "settings.getAudio": AudioSettings;
   "settings.setAudio": AudioSettings;
+  // General app settings (snapping/projectors/go-live warnings/tray/multiview/
+  // importer). setGeneral applies any present subset, persists, and echoes the
+  // full post-apply state (snapDistance clamped 0..100 server-side).
+  "settings.getGeneral": GeneralSettings;
+  "settings.setGeneral": GeneralSettings;
   // Canvases (native multistream encode targets, 4.4.1).
   "canvas.list": CanvasInfo[];
   "canvas.create": { uuid: string };
@@ -920,6 +947,8 @@ export interface ObsEvents {
   };
   "settings.videoChanged": VideoSettings;
   "settings.audioChanged": AudioSettings;
+  // General app settings changed (any setGeneral apply); the full state is pushed.
+  "settings.generalChanged": GeneralSettings;
   "canvas.changed": Record<string, never>;
   "streamProfile.changed": Record<string, never>;
   "outputBinding.changed": Record<string, never>;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import GeneralTab from "../GeneralTab.svelte";
   import CanvasesTab from "../CanvasesTab.svelte";
   import StreamsTab from "../StreamsTab.svelte";
   import HotkeysTab from "../HotkeysTab.svelte";
@@ -12,6 +13,7 @@
   // model is live-apply — every tab persists through its own bridge calls, so
   // there's no OK/Apply/Cancel boundary.
   const tabs: { id: SettingsTab; label: string }[] = [
+    { id: "general", label: "General" },
     { id: "canvases", label: "Canvases" },
     { id: "streams", label: "Stream Profiles" },
     { id: "audio", label: "Audio" },
@@ -38,7 +40,9 @@
     </nav>
 
     <div class="pane">
-      {#if settingsNav.tab === "canvases"}
+      {#if settingsNav.tab === "general"}
+        <GeneralTab />
+      {:else if settingsNav.tab === "canvases"}
         <CanvasesTab editCanvas={settingsNav.editCanvas} />
       {:else if settingsNav.tab === "streams"}
         <StreamsTab />
