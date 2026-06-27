@@ -5731,6 +5731,56 @@ bool MethodWindowList(const json & /*params*/, json &result, std::string & /*err
 	return true;
 }
 
+// Host-window borderless-fullscreen toggle (Fullscreen Interface / F11). Saved
+// across calls so the toggle can restore the original framed geometry. UI thread
+// only, so plain file-scope state is safe.
+bool g_hostFullscreen = false;
+LONG_PTR g_savedHostStyle = 0;
+WINDOWPLACEMENT g_savedHostPlacement = {sizeof(WINDOWPLACEMENT)};
+
+bool MethodWindowToggleFullscreen(const json & /*params*/, json &result, std::string &error)
+{
+	PreviewManager *pm = Preview::Instance();
+	HWND host = pm ? pm->MainHostHwnd() : nullptr;
+	if (!host) {
+		error = "no host window";
+		return false;
+	}
+
+	if (!g_hostFullscreen) {
+		// Enter: save the framed style + placement, then go borderless WS_POPUP
+		// covering the current monitor. SWP_FRAMECHANGED fires WM_SIZE, which
+		// re-runs LayoutBrowser (CEF child resizes) and re-reports preview rects.
+		g_savedHostStyle = GetWindowLongPtrW(host, GWL_STYLE);
+		g_savedHostPlacement.length = sizeof(g_savedHostPlacement);
+		GetWindowPlacement(host, &g_savedHostPlacement);
+
+		MONITORINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		if (!GetMonitorInfoW(MonitorFromWindow(host, MONITOR_DEFAULTTONEAREST), &mi)) {
+			error = "failed to query monitor";
+			return false;
+		}
+		SetWindowLongPtrW(host, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+		SetWindowPos(host, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+			     mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+			     SWP_FRAMECHANGED | SWP_NOACTIVATE);
+		g_hostFullscreen = true;
+	} else {
+		// Exit: restore the saved style, re-apply the frame, then the saved
+		// placement (also restores a prior maximized/normal state).
+		SetWindowLongPtrW(host, GWL_STYLE, g_savedHostStyle);
+		SetWindowPos(host, nullptr, 0, 0, 0, 0,
+			     SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		SetWindowPlacement(host, &g_savedHostPlacement);
+		g_hostFullscreen = false;
+	}
+
+	HostLog(std::string("[bridge] window.toggleFullscreen -> ") + (g_hostFullscreen ? "on" : "off"));
+	result = json{{"fullscreen", g_hostFullscreen}};
+	return true;
+}
+
 // Native projectors (fullscreen / windowed) — drive ProjectorManager and broadcast
 // projector.changed on open/close.
 
@@ -6664,6 +6714,7 @@ void Init()
 		{"window.detach", MethodWindowDetach},
 		{"window.redock", MethodWindowRedock},
 		{"window.list", MethodWindowList},
+		{"window.toggleFullscreen", MethodWindowToggleFullscreen},
 		{"display.listMonitors", MethodDisplayListMonitors},
 		{"projector.open", MethodProjectorOpen},
 		{"projector.close", MethodProjectorClose},

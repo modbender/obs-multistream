@@ -28,6 +28,7 @@ struct GeneralSettings {
 	bool multiviewDrawNames = true;                // Item 10
 	bool multiviewDrawSafeAreas = false;           // Item 10
 	bool importerPrompts = true;                   // Item 17
+	bool scenesGridMode = false;                   // Item 13 (Scenes panel grid/list view)
 
 	// Round-trip every field to general.json (file keys snake_case). Missing keys
 	// fall back to the struct defaults. Save() is called on each bridge set.
@@ -71,6 +72,7 @@ inline constexpr GeneralBoolField kGeneralBoolFields[] = {
 	{"multiviewDrawNames", "multiview_draw_names", &GeneralSettings::multiviewDrawNames},
 	{"multiviewDrawSafeAreas", "multiview_draw_safe_areas", &GeneralSettings::multiviewDrawSafeAreas},
 	{"importerPrompts", "importer_prompts", &GeneralSettings::importerPrompts},
+	{"scenesGridMode", "scenes_grid_mode", &GeneralSettings::scenesGridMode},
 };
 inline constexpr GeneralStringField kGeneralStringFields[] = {
 	{"multiviewLayout", "multiview_layout", &GeneralSettings::multiviewLayout},
