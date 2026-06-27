@@ -963,6 +963,13 @@ export interface ObsMethods {
   // add/edit/remove client-side then persists the full list) and echoes it back.
   "browserDocks.list": BrowserDock[];
   "browserDocks.set": BrowserDock[];
+  // Screenshots (composited program / one source's video -> a timestamped PNG in
+  // the config screenshots dir). takeProgram optionally targets a canvas (omit, or
+  // pass the Default uuid, for the global program); takeSource addresses a scene
+  // item ({ scene, id, canvas? }, mirroring sceneItems.setScaleFilter). Both echo
+  // the saved path and emit screenshot.saved.
+  "screenshot.takeProgram": { ok: boolean; path: string };
+  "screenshot.takeSource": { ok: boolean; path: string };
   // Stats snapshot (general perf + per-output live stats). Polled by the Stats
   // dock on a ~1s interval; there is no push, so the dock owns the cadence.
   "stats.get": Stats;
@@ -1083,6 +1090,9 @@ export interface ObsEvents {
   // The undo stack changed (a recorded mutation, an undo, or a redo); the mirror
   // re-applies the pushed state to refresh the shortcuts + toolbar buttons.
   "undo.changed": UndoState;
+  // A screenshot was saved (program or source); the app-root toast surfaces the
+  // path. Fires on every successful capture.
+  "screenshot.saved": { path: string };
 }
 
 export interface BridgeError extends Error {

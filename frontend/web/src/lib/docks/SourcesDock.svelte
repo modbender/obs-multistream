@@ -316,6 +316,11 @@
         colorMenu(item.color, (color) =>
           void obs.call("sceneItems.setColor", { scene: currentScene, id: item.id, color }).catch(report),
         ),
+        {
+          label: "Screenshot",
+          disabled: !item.source,
+          action: () => void obs.call("screenshot.takeSource", { scene: currentScene, id: item.id }).catch(report),
+        },
         null,
         { label: "Copy", disabled: !item.source, action: () => copySource(item) },
         { label: "Paste", disabled: !clipboard.source, action: () => void pasteSource() },

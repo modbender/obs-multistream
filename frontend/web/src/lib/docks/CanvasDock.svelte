@@ -453,6 +453,14 @@
             .call("sceneItems.setColor", { canvas: canvasUuid, scene: currentScene, id: item.id, color })
             .catch(report),
         ),
+        {
+          label: "Screenshot",
+          disabled: !item.source,
+          action: () =>
+            void obs
+              .call("screenshot.takeSource", { canvas: canvasUuid, scene: currentScene, id: item.id })
+              .catch(report),
+        },
         null,
         { label: "Copy", disabled: !item.source, action: () => copySource(item) },
         { label: "Paste", disabled: !clipboard.source, action: () => void pasteSource() },
@@ -516,6 +524,7 @@
           ]
         : []),
       colorMenu(currentColor, (color) => void call("sceneItems.setColor", { color })),
+      { label: "Screenshot", disabled: !p.source, action: () => void call("screenshot.takeSource", {}) },
       null,
       { label: p.visible ? "Hide" : "Show", action: () => void call("sceneItems.setVisible", { visible: !p.visible }) },
       { label: p.locked ? "Unlock" : "Lock", action: () => void call("sceneItems.setLocked", { locked: !p.locked }) },

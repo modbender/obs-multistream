@@ -585,6 +585,17 @@
     void doToggleLive();
   }
 
+  // Screenshot the focused canvas's program. The bar is per-focused-canvas (like
+  // VCAM/go-live), so it captures activeCanvasUuid; passing the Default canvas's
+  // uuid is handled server-side as the global program. A toast confirms the save.
+  async function takeScreenshot(): Promise<void> {
+    try {
+      await obs.call("screenshot.takeProgram", { canvas: activeCanvasUuid ?? "" });
+    } catch (e) {
+      console.log("screenshot failed: " + (e as Error).message);
+    }
+  }
+
   // Virtual camera start/stop. Authoritative state arrives via virtualCam.changed,
   // so don't optimistically flip here.
   async function toggleVcam(): Promise<void> {
@@ -704,6 +715,13 @@
     </div>
 
     <div class="cluster right">
+      <button
+        class="vcam"
+        onclick={() => void takeScreenshot()}
+        title={"Screenshot " + (focusedCanvas?.name ?? "program") + " (Ctrl+Shift+S captures Default)"}
+      >
+        📸 Screenshot
+      </button>
       <button
         class="vcam"
         class:active={vcamActive}

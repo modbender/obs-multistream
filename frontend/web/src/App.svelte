@@ -23,6 +23,8 @@
   import { obs } from "./lib/bridge";
   import { clipboard } from "./lib/clipboardStore.svelte";
   import { sourceSelection } from "./lib/sourceSelectionStore.svelte";
+  import Toast from "./lib/Toast.svelte";
+  import { showToast } from "./lib/toastStore.svelte";
 
   // Apply the saved (or default Industrial) theme before first paint settles.
   void themeStore.hydrate();
@@ -68,13 +70,26 @@
         e.preventDefault();
         obs.call("sources.addExisting", { scene: sourceSelection.scene, name: clipboard.source.ref }).catch(() => {});
       }
+    } else if (key === "s" && e.shiftKey) {
+      // Ctrl+Shift+S: screenshot the program (Default canvas). OBS leaves its
+      // screenshot hotkey unbound by default, so this is our own clear default.
+      e.preventDefault();
+      void obs.call("screenshot.takeProgram").catch(() => {});
     }
   }
 
   onMount(() => {
     undoStore.start();
     window.addEventListener("keydown", onKeydown);
-    return () => window.removeEventListener("keydown", onKeydown);
+    // Surface every saved screenshot (program or source) as a transient toast.
+    const offShot = obs.on("screenshot.saved", (p) => {
+      const file = p.path.split(/[\\/]/).pop() || p.path;
+      showToast("Screenshot saved: " + file, p.path);
+    });
+    return () => {
+      window.removeEventListener("keydown", onKeydown);
+      offShot();
+    };
   });
 </script>
 
@@ -118,6 +133,8 @@
 {#if missingFilesOpen.open}
   <MissingFilesDialog onClose={closeMissingFiles} />
 {/if}
+
+<Toast />
 
 <style>
   .shell {
