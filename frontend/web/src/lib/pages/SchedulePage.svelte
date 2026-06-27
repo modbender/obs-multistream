@@ -499,13 +499,19 @@
   .cal-wrap {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     padding: 18px 20px;
   }
   .weekrow {
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
     margin-bottom: 6px;
   }
   .weekday {
@@ -516,16 +522,17 @@
     padding: 0 4px 4px;
   }
   .grid {
-    flex: 1;
-    min-height: 0;
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    grid-auto-rows: 1fr;
     gap: 1px;
     background: var(--color-border);
     border: var(--border-weight) solid var(--color-border);
   }
   .cell {
+    aspect-ratio: 1;
     background: var(--color-surface);
     padding: 7px 8px;
     overflow: hidden;
