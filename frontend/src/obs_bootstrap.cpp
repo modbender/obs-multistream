@@ -37,6 +37,7 @@
 #include "scene_collections.hpp"
 #include "scene_persistence.hpp"
 #include "transitions.hpp"
+#include "UndoManager.hpp"
 
 namespace {
 
@@ -250,6 +251,11 @@ SceneLinkStore g_sceneLinks;
 // target the active collection's file; cleared in Stop.
 SceneCollections g_sceneCollections;
 
+// The per-scene-collection undo/redo stack. Empty at boot; mutations record into
+// it (a later task), the scene-collection switch + Stop clear it. Its onChanged is
+// wired to the undo.changed event in Bridge::Init.
+UndoManager g_undo;
+
 // The fan-out streaming engine, constructed after the stores load (it captures
 // them by reference) and reset in Stop before they clear.
 std::unique_ptr<MultistreamEngine> g_multistream;
@@ -369,6 +375,11 @@ OutputBindingStore &ObsBootstrap::OutputBindings()
 SceneLinkStore &ObsBootstrap::SceneLinks()
 {
 	return g_sceneLinks;
+}
+
+UndoManager &ObsBootstrap::Undo()
+{
+	return g_undo;
 }
 
 ::CanvasRuntime &ObsBootstrap::CanvasRuntime()
@@ -2319,6 +2330,7 @@ void ObsBootstrap::Stop()
 	g_outputBindings.Clear();
 	g_sceneLinks.Clear();
 	g_sceneCollections.Clear();
+	g_undo.Clear();
 
 	obs_shutdown();
 

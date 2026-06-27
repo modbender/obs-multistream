@@ -30,6 +30,7 @@
 #include "scene_persistence.hpp"
 #include "transitions.hpp"
 #include "window_manager.hpp"
+#include "UndoManager.hpp"
 
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
@@ -112,6 +113,27 @@ json BuildStatusArray()
 		});
 	}
 	return arr;
+}
+
+// Serialize the undo stack's current state for both undo.state and the
+// undo.changed push, so the method and the event report an identical shape.
+json UndoStateJson()
+{
+	const UndoManager::State st = ObsBootstrap::Undo().GetState();
+	return json{
+		{"canUndo", st.canUndo},
+		{"canRedo", st.canRedo},
+		{"undoName", st.undoName},
+		{"redoName", st.redoName},
+	};
+}
+
+// Push the current undo state as the "undo.changed" event. Wired as the
+// UndoManager's onChanged in Init; runs on the UI thread (the only mutator), so a
+// direct EmitEvent suffices.
+void EmitUndoChanged()
+{
+	EmitEvent("undo.changed", UndoStateJson());
 }
 
 // --- method bodies ----------------------------------------------------------
@@ -3616,6 +3638,28 @@ bool MethodMultistreamStopOutput(const json &params, json &result, std::string &
 	return true;
 }
 
+// --- undo / redo ------------------------------------------------------------
+
+bool MethodUndoUndo(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	ObsBootstrap::Undo().Undo();
+	result = json::object();
+	return true;
+}
+
+bool MethodUndoRedo(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	ObsBootstrap::Undo().Redo();
+	result = json::object();
+	return true;
+}
+
+bool MethodUndoState(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	result = UndoStateJson();
+	return true;
+}
+
 // --- stats snapshot (general perf + per-output streaming, polled ~1x/s) ------
 
 // Per-binding bitrate cache. stats.get is polled ~1x/s; bitrate is the delta of
@@ -4955,6 +4999,9 @@ void Init()
 		{"multistream.status", MethodMultistreamStatus},
 		{"multistream.startOutput", MethodMultistreamStartOutput},
 		{"multistream.stopOutput", MethodMultistreamStopOutput},
+		{"undo.undo", MethodUndoUndo},
+		{"undo.redo", MethodUndoRedo},
+		{"undo.state", MethodUndoState},
 		{"stats.get", MethodStatsGet},
 		{"audio.list", MethodAudioList},
 		{"audio.setDeflection", MethodAudioSetDeflection},
@@ -4985,6 +5032,10 @@ void Init()
 		{"mcp.regenerateToken", MethodMcpRegenerateToken},
 	};
 
+	// Notify JS whenever the undo stack changes (add/undo/redo/clear) so the UI's
+	// undo/redo affordance re-reads canUndo/canRedo + names.
+	ObsBootstrap::Undo().onChanged = [] { EmitUndoChanged(); };
+
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);
 	HostLog("[bridge] init: " + std::to_string(g_methods.size()) + " methods, obs event forwarding armed");
 }
@@ -4992,6 +5043,9 @@ void Init()
 void Shutdown()
 {
 	obs_frontend_remove_event_callback(OnFrontendEvent, nullptr);
+	// Drop the undo->event hook so the g_undo.Clear() later in Stop() (after the CEF
+	// loop has returned) doesn't try to emit through a torn-down bridge.
+	ObsBootstrap::Undo().onChanged = nullptr;
 	g_methods.clear();
 	if (g_cpuInfo) {
 		os_cpu_usage_info_destroy(g_cpuInfo);

@@ -86,6 +86,10 @@ target_sources(
     utility/CanvasSceneLink.cpp
     utility/OutputBinding.cpp
     utility/StreamProfile.cpp
+    # Qt-free undo/redo stack (std-only; no libobs), ported from the legacy
+    # undo_stack. Out of the /wd4201 set -- it includes no obs.h.
+    utility/UndoManager.cpp
+    utility/UndoManager.hpp
     src/multistream/CanvasStore.cpp
     src/multistream/CanvasStore.hpp
     src/multistream/StreamProfileStore.cpp

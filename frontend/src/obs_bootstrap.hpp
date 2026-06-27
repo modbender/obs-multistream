@@ -22,6 +22,7 @@ class MultistreamEngine;
 class CanvasRuntime;
 class AudioMonitor;
 class SceneCollections;
+class UndoManager;
 
 namespace ObsBootstrap {
 bool Start();
@@ -83,6 +84,12 @@ CanvasRuntime &CanvasRuntime();
 // bridge methods + the throttled audio.levels emit can read/write over it. Valid
 // between Start() and Stop().
 AudioMonitor &AudioMonitor();
+
+// The per-scene-collection undo/redo stack (deque-based action history). Owned by
+// the bootstrap (cleared in Stop and on scene-collection switch). Exposed so the
+// bridge can serve undo.undo/redo/state over it and wire its onChanged to the
+// undo.changed event. Valid between Start() and Stop().
+UndoManager &Undo();
 
 // Re-fire OBS_FRONTEND_EVENT_SCENE_CHANGED through the shim so the loaded UI page
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).

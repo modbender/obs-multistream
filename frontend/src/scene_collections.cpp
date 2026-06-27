@@ -9,6 +9,7 @@
 #include "obs_bootstrap.hpp"
 #include "scene_persistence.hpp"
 #include "transitions.hpp"
+#include "UndoManager.hpp"
 
 #include <obs.h>
 #include <obs.hpp>
@@ -359,6 +360,10 @@ bool SceneCollections::Switch(const std::string &id, std::string &error)
 	// after activeId_ flipped above so ActiveBindingsPath() resolves the target.
 	ObsBootstrap::OutputBindings().Load(ActiveBindingsPath());
 	ObsBootstrap::SceneLinks().Load(ActiveSceneLinksPath());
+
+	// The undo stack is per-collection: the outgoing collection's action history
+	// references its now-destroyed scenes, so switching invalidates it.
+	ObsBootstrap::Undo().Clear();
 
 	// Re-apply scene links to the new collection's restored program scene so
 	// "following" canvases come up on their linked scene rather than their own
