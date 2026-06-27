@@ -2622,6 +2622,114 @@ bool MethodSourcesDuplicate(const json &params, json &result, std::string &error
 	return true;
 }
 
+// Group existing scene items into a new group source (powers "Group"). params:
+// {scene?, canvas?, ids:[int...], name?}. Resolves each id to an item, skipping
+// any that don't resolve or are themselves groups (libobs forbids nesting), and
+// requires at least one groupable item. Returns {id, source} = the new group
+// item's id + the group source's uuid. NOT wired into undo: group/ungroup are
+// structural multi-item ops the current single-item snapshot undo infra cannot
+// faithfully invert; a whole-scene snapshot/restore is a separate follow-up.
+bool MethodSceneItemsGroup(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object() || !params.contains("ids") || !params["ids"].is_array() || params["ids"].empty()) {
+		error = "sceneItems.group requires a non-empty 'ids' array";
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+
+	// Resolve ids -> items (borrowed; owned by the scene). Drop unresolved ids and
+	// existing groups, both of which obs_scene_insert_group would reject outright.
+	std::vector<obs_sceneitem_t *> items;
+	for (const auto &entry : params["ids"]) {
+		if (!entry.is_number_integer()) {
+			continue;
+		}
+		obs_sceneitem_t *item = FindSceneItem(scene, entry.get<int64_t>());
+		if (item && !obs_sceneitem_is_group(item)) {
+			items.push_back(item);
+		}
+	}
+	if (items.empty()) {
+		obs_source_release(sceneSource);
+		error = "none of the given ids resolved to a groupable scene item";
+		return false;
+	}
+
+	std::string base = OptString(params, "name");
+	if (base.empty()) {
+		base = "Group";
+	}
+	const std::string groupName = UniqueSourceName(base);
+
+	// Groups the EXISTING items into a new group; the returned group item is owned
+	// by the scene (borrowed, like obs_scene_add) -- do NOT release it. The items
+	// array is borrowed too (libobs only re-links the items, never releases them).
+	obs_sceneitem_t *group = obs_scene_insert_group(scene, groupName.c_str(), items.data(), items.size());
+	if (!group) {
+		obs_source_release(sceneSource);
+		error = "obs_scene_insert_group failed";
+		return false;
+	}
+	const int64_t groupId = obs_sceneitem_get_id(group);
+	obs_source_t *groupSrc = obs_sceneitem_get_source(group); // borrowed
+	const char *groupUuid = groupSrc ? obs_source_get_uuid(groupSrc) : nullptr;
+	const std::string uuid = groupUuid ? groupUuid : "";
+
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
+	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
+	result = json{{"id", groupId}, {"source", uuid}};
+	return true;
+}
+
+// Dissolve a group, reparenting its children back into the scene (powers
+// "Ungroup"). params: {scene?, canvas?, id}. Errors if the id isn't a group.
+// NOT wired into undo for the same reason as MethodSceneItemsGroup.
+bool MethodSceneItemsUngroup(const json &params, json &result, std::string &error)
+{
+	int64_t id = 0;
+	if (!ItemIdFromParams(params, id, error)) {
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	obs_sceneitem_t *item = FindSceneItem(scene, id);
+	if (!item) {
+		obs_source_release(sceneSource);
+		error = "no scene item with id " + std::to_string(id);
+		return false;
+	}
+	if (!obs_sceneitem_is_group(item)) {
+		obs_source_release(sceneSource);
+		error = "scene item " + std::to_string(id) + " is not a group";
+		return false;
+	}
+
+	// Dissolves the group and reparents its children into the scene; releases the
+	// scene's own ref on the group item internally, so `item` is invalid after the
+	// call. We hold no extra ref on it (FindSceneItem borrows) -- nothing to free.
+	obs_sceneitem_group_ungroup(item);
+
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
+	obs_source_release(sceneSource);
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
+	result = json{{"ungrouped", true}};
+	return true;
+}
+
 // Rename a scene item's underlying source by scene-item id (works on both the
 // global and additional-canvas paths via ResolveTargetScene). params:
 // {canvas?, scene?, id, name}. Rejects a clash with a DIFFERENT existing source.
@@ -5713,6 +5821,8 @@ void Init()
 		{"sceneItems.setTransform", MethodSceneItemsSetTransform},
 		{"sceneItems.transformAction", MethodSceneItemsTransformAction},
 		{"sceneItems.setScaleFilter", MethodSceneItemsSetScaleFilter},
+		{"sceneItems.group", MethodSceneItemsGroup},
+		{"sceneItems.ungroup", MethodSceneItemsUngroup},
 		{"sourceTypes.list", MethodSourceTypesList},
 		{"sources.create", MethodSourcesCreate},
 		{"sources.listExisting", MethodSourcesListExisting},
