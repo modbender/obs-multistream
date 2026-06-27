@@ -79,6 +79,8 @@ target_sources(
     src/scene_collections.hpp
     src/scene_persistence.cpp
     src/scene_persistence.hpp
+    src/tray.cpp
+    src/tray.hpp
     src/transitions.cpp
     src/transitions.hpp
     src/log.hpp
@@ -192,6 +194,7 @@ set_source_files_properties(
   src/audio/AudioMonitor.cpp
   src/scene_collections.cpp
   src/scene_persistence.cpp
+  src/tray.cpp
   src/transitions.cpp
   api-impl/frontend_callbacks.cpp
   utility/CanvasDefinition.cpp

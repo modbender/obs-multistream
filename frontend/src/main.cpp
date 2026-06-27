@@ -13,6 +13,7 @@
 #include "app_icon.hpp"
 #include "bridge.hpp"
 #include "client.hpp"
+#include "GeneralSettings.hpp"
 #include "interact_window.hpp"
 #include "log.hpp"
 #include "obs_bootstrap.hpp"
@@ -20,6 +21,7 @@
 #include "projector_window.hpp"
 #include "scene_persistence.hpp"
 #include "scheme.hpp"
+#include "tray.hpp"
 #include "window_manager.hpp"
 
 namespace {
@@ -53,6 +55,12 @@ std::unique_ptr<ProjectorManager> g_projector;
 // window's display is destroyed (DestroyAll) before ObsBootstrap::Stop() frees the
 // source mixes.
 std::unique_ptr<InteractManager> g_interact;
+
+// Owns the system-tray icon + its context menu (Show/Hide, Start/Stop All,
+// Virtual Camera toggle, Exit). Created after ObsBootstrap::Start() (the menu
+// actions reach into the engine + settings). NIM_DELETE'd in WM_CLOSE before the
+// host window is destroyed.
+std::unique_ptr<TrayIcon> g_tray;
 
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
@@ -98,6 +106,20 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_SIZE:
 		LayoutBrowser(hwnd);
 		return 0;
+	case TrayIcon::kTrayCallbackMsg:
+		if (g_tray) {
+			g_tray->OnCallback(wparam, lparam);
+		}
+		return 0;
+	case WM_SYSCOMMAND:
+		// Intercept the minimize gesture when "minimize to tray" is on: hide the
+		// window to the tray instead of minimizing to the taskbar. Mask off the
+		// low 4 bits (system reserves them) before comparing the command.
+		if ((wparam & 0xFFF0) == SC_MINIMIZE && g_tray && ObsBootstrap::General().minimizeToTray) {
+			g_tray->HideHost();
+			return 0;
+		}
+		break;
 	case WM_TIMER:
 		if (wparam == kSizeProbeTimerId) {
 			KillTimer(hwnd, kSizeProbeTimerId);
@@ -132,6 +154,11 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		return 0;
 	case WM_CLOSE:
+		// Remove the tray icon while the host HWND is still valid (NIM_DELETE keys
+		// off it); otherwise a ghost icon lingers in the notification area.
+		if (g_tray) {
+			g_tray->Remove();
+		}
 		// Close every detached window first so the shared browser_list_ can drain
 		// to empty -- a live detached browser would otherwise keep
 		// CefRunMessageLoop alive after the main window closes (the N-browsers quit
@@ -251,6 +278,19 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 	g_interact = std::make_unique<InteractManager>(hInstance);
 	Interact::SetInstance(g_interact.get());
 
+	// System tray. Created here so its menu actions (Start/Stop All, Virtual
+	// Camera, settings reads) have the engine + settings available. Policy: pin
+	// the icon now only when alwaysShowTray is set; otherwise it is added lazily
+	// the first time the window minimizes to the tray (HideHost) and removed when
+	// restored (ShowHost). Start-minimized hides straight to the tray.
+	g_tray = std::make_unique<TrayIcon>();
+	if (ObsBootstrap::General().alwaysShowTray) {
+		g_tray->Create(host, hInstance);
+	}
+	if (ObsBootstrap::General().startMinimized) {
+		g_tray->HideHost();
+	}
+
 	// Probe the test source's size after its async CEF browser has spun up.
 	SetTimer(host, kSizeProbeTimerId, 4000, nullptr);
 
@@ -310,6 +350,13 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 
 	// Drop the process-wide shared Client ref so it doesn't outlive teardown.
 	Client::SetShared(nullptr);
+
+	// Tray icon was already NIM_DELETE'd in WM_CLOSE (while the HWND was valid);
+	// drop the owner here. Remove() is idempotent if WM_CLOSE didn't run.
+	if (g_tray) {
+		g_tray->Remove();
+		g_tray.reset();
+	}
 
 	// Tear down every detached window's surfaces + browser BEFORE g_preview->DestroyAll()
 	// and ObsBootstrap::Stop() free the canvas mixes those surfaces render (UAF discipline).
