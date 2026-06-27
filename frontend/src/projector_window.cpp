@@ -9,6 +9,7 @@
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
 #include "obs_bootstrap.hpp"
+#include "GeneralSettings.hpp"
 
 #include <obs.h>
 
@@ -343,6 +344,13 @@ bool ProjectorWindow::Create(HINSTANCE instance, const RECT &monitorRect)
 		UpdateWindow(hwnd_);
 	}
 
+	// Honor the global "projectors always on top" preference at create time. For
+	// fullscreen this is mostly redundant (already HWND_TOP over the taskbar) but
+	// harmless; for windowed it pins the window above normal windows.
+	if (ObsBootstrap::General().projectorAlwaysOnTop) {
+		SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+
 	// The obs_display covers the whole client area (device px; the process is
 	// per-monitor-DPI-aware v2 so GetClientRect is in device px).
 	RECT client;
@@ -572,6 +580,17 @@ void ProjectorManager::DestroyAll()
 		p->Destroy();
 	}
 	projectors_.clear();
+}
+
+void ProjectorManager::ApplyAlwaysOnTop(bool onTop)
+{
+	for (auto &p : projectors_) {
+		HWND hwnd = p->Hwnd();
+		if (hwnd) {
+			SetWindowPos(hwnd, onTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+				     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+	}
 }
 
 bool ProjectorManager::HasDisplayForTest(int projectorId) const

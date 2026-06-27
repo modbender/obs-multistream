@@ -25,6 +25,7 @@
 #include "mcp/McpServer.hpp"
 #include "interact_window.hpp"
 #include "obs_bootstrap.hpp"
+#include "GeneralSettings.hpp"
 #include "preview_window.hpp"
 #include "projector_window.hpp"
 #include "properties_serializer.hpp"
@@ -513,6 +514,70 @@ bool MethodSettingsSetVideo(const json &params, json &result, std::string &error
 		std::to_string(applied.base_height) + " out " + std::to_string(applied.output_width) + "x" +
 		std::to_string(applied.output_height) + " @ " + std::to_string(applied.fps_num) + "/" +
 		std::to_string(applied.fps_den));
+	return true;
+}
+
+// Build the full General-settings wire object (camelCase keys) from the struct.
+// Shared by settings.getGeneral and the settings.setGeneral response/event so the
+// two can't drift; iterates the same descriptor tables the persistence layer uses.
+json GeneralToJson(const GeneralSettings &g)
+{
+	json out = json::object();
+	for (const GeneralBoolField &f : kGeneralBoolFields) {
+		out[f.json] = g.*f.member;
+	}
+	for (const GeneralStringField &f : kGeneralStringFields) {
+		out[f.json] = g.*f.member;
+	}
+	for (const GeneralDoubleField &f : kGeneralDoubleFields) {
+		out[f.json] = g.*f.member;
+	}
+	return out;
+}
+
+bool MethodSettingsGetGeneral(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	result = GeneralToJson(ObsBootstrap::General());
+	return true;
+}
+
+bool MethodSettingsSetGeneral(const json &params, json &result, std::string &error)
+{
+	if (!params.is_object()) {
+		error = "setGeneral expects an object";
+		return false;
+	}
+	GeneralSettings &g = ObsBootstrap::General();
+	// Apply ONLY present keys of the matching type; unknown keys are ignored.
+	for (const GeneralBoolField &f : kGeneralBoolFields) {
+		auto it = params.find(f.json);
+		if (it != params.end() && it->is_boolean()) {
+			g.*f.member = it->get<bool>();
+		}
+	}
+	for (const GeneralStringField &f : kGeneralStringFields) {
+		auto it = params.find(f.json);
+		if (it != params.end() && it->is_string()) {
+			g.*f.member = it->get<std::string>();
+		}
+	}
+	for (const GeneralDoubleField &f : kGeneralDoubleFields) {
+		auto it = params.find(f.json);
+		if (it != params.end() && it->is_number()) {
+			double v = it->get<double>();
+			v = v < f.min ? f.min : (v > f.max ? f.max : v);
+			g.*f.member = v;
+		}
+	}
+	g.Save();
+
+	// Live-apply the one wired effect: re-pin open projectors' always-on-top.
+	if (Projector::Instance()) {
+		Projector::Instance()->ApplyAlwaysOnTop(g.projectorAlwaysOnTop);
+	}
+
+	result = GeneralToJson(g);
+	EmitEvent("settings.generalChanged", result);
 	return true;
 }
 
@@ -6232,6 +6297,8 @@ void Init()
 		{"settings.setVideo", MethodSettingsSetVideo},
 		{"settings.getAudio", MethodSettingsGetAudio},
 		{"settings.setAudio", MethodSettingsSetAudio},
+		{"settings.getGeneral", MethodSettingsGetGeneral},
+		{"settings.setGeneral", MethodSettingsSetGeneral},
 		{"settings.snapshot", MethodSettingsSnapshot},
 		{"settings.restore", MethodSettingsRestore},
 		{"canvas.list", MethodCanvasList},

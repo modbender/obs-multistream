@@ -61,6 +61,8 @@ target_sources(
     src/properties_serializer.hpp
     src/obs_bootstrap.cpp
     src/obs_bootstrap.hpp
+    src/GeneralSettings.cpp
+    src/GeneralSettings.hpp
     src/preview_window.cpp
     src/preview_window.hpp
     src/window_manager.cpp
@@ -178,6 +180,7 @@ target_link_options(${_target} PRIVATE "/IGNORE:4199")
 set_source_files_properties(
   src/main.cpp
   src/obs_bootstrap.cpp
+  src/GeneralSettings.cpp
   src/bridge.cpp
   src/properties_serializer.cpp
   src/preview_window.cpp

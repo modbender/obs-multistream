@@ -24,6 +24,7 @@ class AudioMonitor;
 class SceneCollections;
 class UndoManager;
 class VirtualCamManager;
+struct GeneralSettings;
 
 namespace ObsBootstrap {
 bool Start();
@@ -98,6 +99,13 @@ UndoManager &Undo();
 // down). Exposed so the bridge can serve virtualCam.* over it. Valid between
 // Start() and Stop().
 VirtualCamManager &VirtualCam();
+
+// The global "General settings" bag (projector always-on-top, snapping prefs,
+// tray/multiview/importer prefs), persisted to general.json. Owned by the
+// bootstrap (Load() early in Start). Exposed so the bridge can serve
+// settings.getGeneral/setGeneral over it and other systems can read prefs.
+// Valid between Start() and Stop().
+GeneralSettings &General();
 
 // Re-fire OBS_FRONTEND_EVENT_SCENE_CHANGED through the shim so the loaded UI page
 // observes a forwarded obs.event (proves obs->shim->bridge->JS post-load).

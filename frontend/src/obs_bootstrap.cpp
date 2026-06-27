@@ -32,6 +32,7 @@
 #include "multistream/SceneLinkStore.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include "multistream/VirtualCamManager.hpp"
+#include "GeneralSettings.hpp"
 #include "paths.hpp"
 #include "preview_window.hpp"
 #include "projector_window.hpp"
@@ -252,6 +253,10 @@ SceneLinkStore g_sceneLinks;
 // status hook below. Shut down in Stop before the canvases it feeds are torn down.
 VirtualCamManager g_virtualCam;
 
+// The global General settings bag, loaded early in Start (other systems read its
+// prefs) and persisted on each bridge set. A plain struct -- no teardown needed.
+GeneralSettings g_general;
+
 // The scene-collection registry (per-collection scene sets). Loaded + migrated
 // in Start before scenes are restored, so the no-arg SceneCollection::Save/Load
 // target the active collection's file; cleared in Stop.
@@ -391,6 +396,11 @@ UndoManager &ObsBootstrap::Undo()
 VirtualCamManager &ObsBootstrap::VirtualCam()
 {
 	return g_virtualCam;
+}
+
+GeneralSettings &ObsBootstrap::General()
+{
+	return g_general;
 }
 
 ::CanvasRuntime &ObsBootstrap::CanvasRuntime()
@@ -535,6 +545,10 @@ bool ObsBootstrap::Start()
 	// before module load + the FINISHED_LOADING fan-out, so the bridge's
 	// frontend event callback is registered when those events fire.
 	Bridge::Init();
+
+	// Load the global General settings early: projectors + later systems read it.
+	g_general.Load();
+	HostLog("[obs] general settings loaded");
 
 	LoadCuratedModules();
 

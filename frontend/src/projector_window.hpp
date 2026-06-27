@@ -162,6 +162,11 @@ public:
 	// the canvas mixes are freed and before obs_shutdown.
 	void DestroyAll();
 
+	// Re-apply the always-on-top window style to every live projector (called when
+	// the General setting changes so open projectors update without a reopen). UI
+	// thread.
+	void ApplyAlwaysOnTop(bool onTop);
+
 	// Whether the projector with `projectorId` has a live obs_display. Used by the
 	// smoke self-test. false for an unknown id.
 	bool HasDisplayForTest(int projectorId) const;
