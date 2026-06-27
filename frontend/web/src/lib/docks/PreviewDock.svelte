@@ -14,6 +14,21 @@
   let menu = $state<{ x: number; y: number; items: (ContextMenuItem | null)[] } | null>(null);
   let propsForSource = $state<string | null>(null);
 
+  // The Properties modal overlaps the native overlay. Acquire/release the preview
+  // suspension together with `propsForSource` (not in a reactive $effect) so the
+  // gate ref-count never transiently hits zero during the context-menu -> modal
+  // handoff -- which would let the overlay re-raise above the modal.
+  let propsRelease: (() => void) | null = null;
+  function openProps(source: string) {
+    propsForSource = source;
+    propsRelease ??= suspendPreview();
+  }
+  function closeProps() {
+    propsForSource = null;
+    propsRelease?.();
+    propsRelease = null;
+  }
+
   // Source context menu for the right-clicked scene item. Default surface, so every
   // call OMITS the canvas param (global channel-0 path).
   function buildItems(p: {
@@ -30,7 +45,7 @@
         label: "Properties",
         action: () => {
           if (p.source) {
-            propsForSource = p.source;
+            openProps(p.source);
           }
         },
       },
@@ -134,13 +149,6 @@
       return suspendPreview();
     }
   });
-
-  // The properties modal overlaps the preview; suspend the native overlay while open.
-  $effect(() => {
-    if (propsForSource) {
-      return suspendPreview();
-    }
-  });
 </script>
 
 <section class="preview" bind:this={previewEl}>
@@ -156,13 +164,13 @@
     class="modal-backdrop"
     role="presentation"
     onclick={(e) => {
-      if (e.target === e.currentTarget) propsForSource = null;
+      if (e.target === e.currentTarget) closeProps();
     }}
   >
     <div class="modal" role="dialog" aria-modal="true" aria-label="Source properties">
       <header class="modal-head">
         <h3>Properties — {propsForSource}</h3>
-        <button class="dock-icon close" title="Close" onclick={() => (propsForSource = null)}>✕</button>
+        <button class="dock-icon close" title="Close" onclick={closeProps}>✕</button>
       </header>
       <div class="modal-body">
         <PropertyForm kind="source" ref={propsForSource} />

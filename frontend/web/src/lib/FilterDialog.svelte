@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { obs, type FilterInfo, type FilterType, type ReorderDirection } from "./bridge";
   import PropertyForm from "./properties/PropertyForm.svelte";
-  import { suspendPreview } from "./previewGate.svelte";
+  import { filterDialogOpener, type FilterKind } from "./filterDialogOpener.svelte";
 
   interface Props {
     source: string;
@@ -10,12 +10,17 @@
   }
   let { source, onClose }: Props = $props();
 
-  // This dialog overlaps the native preview overlay (a sibling HWND painted above
-  // CEF), so suspend it while open -- otherwise the overlay would occlude the modal.
+  // The native preview overlay (a sibling HWND painted above CEF) is suspended by
+  // the opener (openFilters) for this dialog's whole lifetime, so it never occludes
+  // the modal. Suspending in the opener rather than here keeps the gate ref-count
+  // from transiently hitting zero on a context-menu -> modal handoff.
   // Side effect: filter changes aren't visible live IN the dialog yet; that needs an
   // in-dialog preview surface (known follow-up). The effect IS visible in the main
   // preview once the dialog closes and the overlay re-asserts.
-  $effect(() => suspendPreview());
+
+  // Which stream the picker offers types for. Audio sources ask for audio-only so
+  // video filters never appear in their list.
+  const kind = $derived<FilterKind>(filterDialogOpener.kind);
 
   let filters = $state<FilterInfo[]>([]);
   let loaded = $state(false);
@@ -44,8 +49,12 @@
 
   // Split into the two <optgroup>s the picker renders. A filter type can be both
   // video and audio; bucket it by its primary stream (video wins) so it appears once.
-  const videoTypes = $derived(types.filter((t) => t.video));
-  const audioTypes = $derived(types.filter((t) => t.audio && !t.video));
+  // For an audio-only request, suppress the Video group entirely and list every audio
+  // type (including dual-capability ones, which the video-wins rule would drop).
+  const videoTypes = $derived(kind === "audio" ? [] : types.filter((t) => t.video));
+  const audioTypes = $derived(
+    kind === "audio" ? types.filter((t) => t.audio) : types.filter((t) => t.audio && !t.video),
+  );
 
   async function loadFilters(keepSelection = true) {
     error = null;
@@ -64,7 +73,7 @@
 
   async function loadTypes() {
     try {
-      types = await obs.call("filterTypes.list", { kind: "all" });
+      types = await obs.call("filterTypes.list", { kind });
     } catch (e) {
       report(e);
     } finally {

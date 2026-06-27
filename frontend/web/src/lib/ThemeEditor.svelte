@@ -2,13 +2,12 @@
   import { themeStore } from "./theme/themeStore.svelte";
   import type { ThemeTokens } from "./theme/tokens";
   import Segmented, { type SegmentedOption } from "./Segmented.svelte";
-  import { suspendPreview } from "./previewGate.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
-  // The editor modal overlaps the native preview region, which paints above the
-  // browser; suspend it so the modal isn't occluded.
-  $effect(() => suspendPreview());
+  // The editor modal overlaps the native preview region (a HWND painted above the
+  // browser); the opener (openThemeEditor) suspends that overlay for the editor's
+  // whole lifetime, so it never occludes the modal.
 
   // --- data-driven axis tables (DRY) -----------------------------------------
 

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { obs, type Transform, type TransformTarget, type TransformAction } from "./bridge";
-  import { suspendPreview } from "./previewGate.svelte";
 
   interface Props {
     target: TransformTarget;
@@ -9,9 +8,10 @@
   }
   let { target, label, onClose }: Props = $props();
 
-  // Overlaps the native preview overlay (a sibling HWND above CEF); suspend it
-  // while open so the overlay doesn't occlude the modal (same as FilterDialog).
-  $effect(() => suspendPreview());
+  // The native preview overlay (a sibling HWND above CEF) is suspended by the opener
+  // (openTransform) for this dialog's whole lifetime, so it never occludes the modal.
+  // Suspending in the opener rather than here keeps the gate ref-count from
+  // transiently hitting zero on a context-menu -> modal handoff.
 
   let xf = $state<Transform | null>(null);
   let loaded = $state(false);

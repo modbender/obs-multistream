@@ -154,7 +154,7 @@
               aria-pressed={src.muted}
               onclick={() => void toggleMuted(src)}>{src.muted ? "🔇" : "🔊"}</button
             >
-            <button class="mute filters" title="Filters" onclick={() => openFilters(src.name)}>🎛</button>
+            <button class="mute filters" title="Filters" onclick={() => openFilters(src.name, "audio")}>🎛</button>
             <input
               class="fader"
               type="range"
