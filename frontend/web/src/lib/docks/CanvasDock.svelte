@@ -7,6 +7,7 @@
     type ReorderDirection,
     type MultistreamState,
     type CanvasInfo,
+    type SceneLinkInfo,
   } from "../bridge";
   import { openSettings } from "../settingsOpener.svelte";
   import { previewSuspended, suspendPreview } from "../previewGate.svelte";
@@ -16,7 +17,6 @@
   import { openTransform } from "../transformOpener.svelte";
   import { prefetchMonitors, projectorItems } from "../projectorMenu";
   import { defaultCanvas } from "./defaultCanvasStore.svelte";
-  import type { SceneLinkInfo } from "../bridge";
 
   // A composite, inseparable dock for one NON-DEFAULT canvas (hierarchy-model.html
   // §1 right column): an inline preview + this canvas's own scenes + its own
@@ -430,6 +430,11 @@
       }
     });
     const offLinks = obs.on("sceneLink.changed", () => void loadLinks());
+    // Renaming a Default (main) scene emits scenes.changed{canvas:null}; reload so
+    // the 🔗 tooltip + submenu checks reflect the new main-scene name immediately.
+    const offDefaultScenes = obs.on("scenes.changed", (p) => {
+      if (p.canvas == null) void loadLinks();
+    });
     const offItems = obs.on("sceneItems.changed", (p) => {
       if (p.canvas === canvasUuid && (!p.scene || p.scene === currentScene)) {
         void loadItems();
@@ -460,6 +465,7 @@
       window.removeEventListener("scroll", reportRect, true);
       offScenes();
       offLinks();
+      offDefaultScenes();
       offItems();
       offSel();
       offStatus();
@@ -898,7 +904,6 @@
     font-size: 10px;
     color: var(--color-dim);
     cursor: default;
-    margin-left: 2px;
   }
   .es-eye {
     flex: 0 0 auto;
