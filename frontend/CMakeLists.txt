@@ -67,6 +67,8 @@ target_sources(
     src/window_manager.hpp
     src/projector_window.cpp
     src/projector_window.hpp
+    src/interact_window.cpp
+    src/interact_window.hpp
     src/audio/AudioMonitor.cpp
     src/audio/AudioMonitor.hpp
     src/scene_collections.cpp
@@ -180,6 +182,7 @@ set_source_files_properties(
   src/properties_serializer.cpp
   src/preview_window.cpp
   src/projector_window.cpp
+  src/interact_window.cpp
   src/audio/AudioMonitor.cpp
   src/scene_collections.cpp
   src/scene_persistence.cpp

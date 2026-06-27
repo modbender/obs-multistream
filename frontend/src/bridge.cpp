@@ -23,6 +23,7 @@
 #include "audio/AudioMonitor.hpp"
 #include "log.hpp"
 #include "mcp/McpServer.hpp"
+#include "interact_window.hpp"
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
 #include "projector_window.hpp"
@@ -1819,6 +1820,10 @@ bool MethodSceneItemsList(const json &params, json &result, std::string &error)
 							  {"locked", obs_sceneitem_locked(item)},
 							  {"scaleFilter",
 							   ScaleFilterToToken(obs_sceneitem_get_scale_filter(item))},
+							  {"interactive",
+							   src ? ((obs_source_get_output_flags(src) &
+								   OBS_SOURCE_INTERACTION) != 0)
+							       : false},
 						  });
 			return true;
 		},
@@ -5402,6 +5407,60 @@ bool MethodDisplayListMonitors(const json & /*params*/, json &result, std::strin
 	return true;
 }
 
+// Open a native interaction window for an interactive source (uuid or name).
+bool MethodSourcesInteract(const json &params, json &result, std::string &error)
+{
+	obs_source_t *src = ResolveAudioSource(params); // addref'd; uuid-then-name
+	if (!src) {
+		error = "no such source";
+		return false;
+	}
+	if (!(obs_source_get_output_flags(src) & OBS_SOURCE_INTERACTION)) {
+		obs_source_release(src);
+		error = "source is not interactive";
+		return false;
+	}
+
+	InteractManager *im = Interact::Instance();
+	if (!im) {
+		obs_source_release(src);
+		error = "interact manager not active";
+		return false;
+	}
+
+	const int id = im->Open(src, error); // Open takes its own ref
+	obs_source_release(src);
+	if (id <= 0) {
+		if (error.empty()) {
+			error = "failed to open interaction window";
+		}
+		return false;
+	}
+
+	HostLog("[bridge] sources.interact -> ok id=" + std::to_string(id));
+	result = json{{"ok", true}, {"interactId", id}};
+	return true;
+}
+
+// Close a native interaction window by its id.
+bool MethodSourcesCloseInteract(const json &params, json &result, std::string &error)
+{
+	InteractManager *im = Interact::Instance();
+	if (!im) {
+		error = "interact manager not active";
+		return false;
+	}
+	if (!params.is_object() || !params.contains("interactId") || !params["interactId"].is_number_integer()) {
+		error = "sources.closeInteract requires an integer 'interactId'";
+		return false;
+	}
+	const int id = params["interactId"].get<int>();
+	im->Close(id);
+	HostLog("[bridge] sources.closeInteract id=" + std::to_string(id));
+	result = json{{"ok", true}};
+	return true;
+}
+
 bool MethodProjectorOpen(const json &params, json &result, std::string &error)
 {
 	ProjectorManager *pm = Projector::Instance();
@@ -6161,6 +6220,8 @@ void Init()
 		{"projector.open", MethodProjectorOpen},
 		{"projector.close", MethodProjectorClose},
 		{"projector.list", MethodProjectorList},
+		{"sources.interact", MethodSourcesInteract},
+		{"sources.closeInteract", MethodSourcesCloseInteract},
 		{"hotkeys.list", Hotkeys::MethodList},
 		{"hotkeys.set", Hotkeys::MethodSet},
 		{"hotkeys.clear", Hotkeys::MethodClear},

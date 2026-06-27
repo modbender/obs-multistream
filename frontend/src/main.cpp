@@ -13,6 +13,7 @@
 #include "app_icon.hpp"
 #include "bridge.hpp"
 #include "client.hpp"
+#include "interact_window.hpp"
 #include "log.hpp"
 #include "obs_bootstrap.hpp"
 #include "preview_window.hpp"
@@ -46,6 +47,12 @@ std::unique_ptr<WindowManager> g_windows;
 // the preview manager; every projector's display is destroyed (DestroyAll) before
 // ObsBootstrap::Stop() frees the canvas mixes a canvas projector renders.
 std::unique_ptr<ProjectorManager> g_projector;
+
+// Owns the native source-interaction windows (each a top-level obs_display window
+// forwarding input into one source). Created next to the projector manager; every
+// window's display is destroyed (DestroyAll) before ObsBootstrap::Stop() frees the
+// source mixes.
+std::unique_ptr<InteractManager> g_interact;
 
 // The UI loads from the offline app:// bundle served by scheme.cpp.
 const char *StartupUrl()
@@ -240,6 +247,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 	g_projector = std::make_unique<ProjectorManager>(hInstance);
 	Projector::SetInstance(g_projector.get());
 
+	// Stand up the source-interaction manager (top-level interaction windows).
+	g_interact = std::make_unique<InteractManager>(hInstance);
+	Interact::SetInstance(g_interact.get());
+
 	// Probe the test source's size after its async CEF browser has spun up.
 	SetTimer(host, kSizeProbeTimerId, 4000, nullptr);
 
@@ -319,6 +330,12 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
 		Projector::SetInstance(nullptr);
 		g_projector->DestroyAll();
 		g_projector.reset();
+	}
+
+	if (g_interact) {
+		Interact::SetInstance(nullptr);
+		g_interact->DestroyAll();
+		g_interact.reset();
 	}
 
 	if (g_preview) {
