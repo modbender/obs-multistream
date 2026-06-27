@@ -471,6 +471,28 @@ build-green, headless-smoke clean (leaks 2 baseline), and pushed.
   (state dot, profile→canvas, bitrate via byte-delta cache, dropped+%, congestion,
   duration). Build-clean /W4 /WX, selftest verifies the shape, `leaks: 2`. Per-output
   live numbers (bitrate/drops) need a real broadcast to verify (GUI/live-owed).
+- ✅ **Scene linking (non-default canvas ↔ main-scene activation sync) — IMPLEMENTED
+  (build-green + per-task & holistic review; GUI acceptance owed) 2026-06-27.** A
+  non-default canvas scene can *follow* one or more Default (main) scenes: switching
+  the program scene auto-switches every linked canvas to its mapped scene (activation
+  sync, not content mirror; names need not match). Right-click a canvas-dock scene →
+  "Link to ▸" checkable submenu of main scenes; linked rows show a 🔗 badge + tooltip.
+  The pre-existing `CanvasSceneLink` type (uuid-keyed → rename-robust) is now wired
+  end-to-end: new `SceneLinkStore` persists per scene-collection to
+  `scenes/<slug>.scene_links.json` (mirrors `OutputBindingStore`);
+  `ObsBootstrap::ApplyCanvasSceneLinks` + 3 prune helpers; bridge
+  `sceneLink.list/set/clear` + `sceneLink.changed`; hooks on program-scene switch
+  (apply), scene/canvas/canvas-scene delete (prune), and collection-switch + boot
+  (re-apply the restored program scene's links). `ContextMenu` gained one-level
+  checkable flyout submenus (shared component; flat menus unchanged). Spec/plan:
+  `docs/superpowers/{specs,plans}/2026-06-27-scene-linking*` (gitignored). Subagent-driven
+  exec, per-task spec+quality reviews + a holistic final review = SHIP_WITH_MINOR (the
+  one Important finding — links not re-applied on boot/collection-switch — was fixed).
+  **GUI-owed** (headless-undriveable): toggle link/unlink + 🔗 indicator, activation
+  sync on a real switch, persistence across restart, prune on delete. **Known
+  invariant** (documented in the spec): activation sync is hooked only on the bridge
+  program-scene-switch path — there is no scene-switch hotkey in this frontend today,
+  so a future such hotkey must also call `ApplyCanvasSceneLinks`.
 
 **Medium — parity gaps:**
 
