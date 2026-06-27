@@ -2525,6 +2525,103 @@ bool MethodSourcesAddExisting(const json &params, json &result, std::string &err
 	return true;
 }
 
+// Compute a source name not already taken globally: `base`, then "base 2",
+// "base 3", ... Mirrors the dup-name handling in MethodSourcesCreate's collision
+// check (any source of any kind collides) but resolves rather than rejects.
+std::string UniqueSourceName(const std::string &base)
+{
+	OBSSourceAutoRelease taken = obs_get_source_by_name(base.c_str());
+	if (!taken) {
+		return base;
+	}
+	for (int n = 2;; ++n) {
+		std::string candidate = base + " " + std::to_string(n);
+		OBSSourceAutoRelease t = obs_get_source_by_name(candidate.c_str());
+		if (!t) {
+			return candidate;
+		}
+	}
+}
+
+// Duplicate the source of a scene item and add the copy to the SAME scene (powers
+// "Paste Duplicate"). params: {scene?, id, canvas?, name?}. The copy is a normal
+// (non-private) duplicate so it shows in source lists; its transform is copied so
+// it lands in place. Recorded as an Add for undo, exactly like sources.create.
+// Returns {id, source}.
+bool MethodSourcesDuplicate(const json &params, json &result, std::string &error)
+{
+	int64_t id = 0;
+	if (!ItemIdFromParams(params, id, error)) {
+		return false;
+	}
+	obs_source_t *sceneSource = ResolveTargetScene(params); // addref'd
+	if (!sceneSource) {
+		error = "no scene";
+		return false;
+	}
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	obs_sceneitem_t *item = FindSceneItem(scene, id);
+	if (!item) {
+		obs_source_release(sceneSource);
+		error = "no scene item with id " + std::to_string(id);
+		return false;
+	}
+	obs_source_t *src = obs_sceneitem_get_source(item); // borrowed
+	if (!src) {
+		obs_source_release(sceneSource);
+		error = "scene item has no source";
+		return false;
+	}
+
+	// New name: explicit `name` if given, else "<src> copy"; either way uniquified.
+	std::string base = OptString(params, "name");
+	if (base.empty()) {
+		const char *srcName = obs_source_get_name(src);
+		base = std::string(srcName ? srcName : "Source") + " copy";
+	}
+	const std::string uniqueName = UniqueSourceName(base);
+
+	// Capture the original item's transform (top-level geometry keys) so the copy
+	// lands in place, matching native OBS duplicate behavior.
+	const json transform = CaptureTransformState(params, item);
+
+	OBSSourceAutoRelease dup = obs_source_duplicate(src, uniqueName.c_str(), false); // create-ref
+	if (!dup) {
+		obs_source_release(sceneSource);
+		error = "obs_source_duplicate failed";
+		return false;
+	}
+
+	obs_sceneitem_t *newItem = obs_scene_add(scene, dup); // scene takes its own ref
+	const int64_t newId = newItem ? obs_sceneitem_get_id(newItem) : 0;
+
+	// Capture undo state while the scene + item are still held: undo removes by
+	// source uuid, redo re-adds from the snapshot (identical to sources.create).
+	json before, after;
+	if (newItem) {
+		SetItemGeometry(newItem, transform);
+		before = StateBase(params, dup);
+		after = CaptureItemSnapshot(params, sceneSource, newItem);
+	}
+	// `dup`'s create-ref is dropped by OBSSourceAutoRelease at scope exit; the
+	// scene holds its own ref via obs_scene_add.
+
+	EmitSceneItemsChanged(sceneSource, ResolveCanvasTarget(params).uuid);
+	obs_source_release(sceneSource);
+
+	if (!newItem) {
+		error = "obs_scene_add failed";
+		return false;
+	}
+	if (!ResolveCanvasTarget(params).isAdditional) {
+		SceneCollection::Save();
+	}
+	ObsBootstrap::Undo().AddAction("Add " + uniqueName, kRemoveItemBySource, kAddItemFromSnapshot, before.dump(),
+				       after.dump());
+	result = json{{"id", newId}, {"source", uniqueName}};
+	return true;
+}
+
 // Rename a scene item's underlying source by scene-item id (works on both the
 // global and additional-canvas paths via ResolveTargetScene). params:
 // {canvas?, scene?, id, name}. Rejects a clash with a DIFFERENT existing source.
@@ -3426,6 +3523,124 @@ bool MethodFiltersRename(const json &params, json &result, std::string &error)
 
 	SceneCollection::Save();
 	result = json{{"name", newName}};
+	return true;
+}
+
+// Compute a filter name not already used on `parent`: `base`, then "base 2",
+// "base 3", ... Mirrors the auto-suffix loop in MethodFiltersAdd.
+std::string UniqueFilterName(obs_source_t *parent, const std::string &base)
+{
+	OBSSourceAutoRelease existing = obs_source_get_filter_by_name(parent, base.c_str());
+	if (!existing) {
+		return base;
+	}
+	for (int n = 2;; ++n) {
+		std::string candidate = base + " " + std::to_string(n);
+		OBSSourceAutoRelease taken = obs_source_get_filter_by_name(parent, candidate.c_str());
+		if (!taken) {
+			return candidate;
+		}
+	}
+}
+
+// Serialize a source's entire filter chain to a json array, each element
+// {id, name, settings, enabled}, in obs enumeration order (bottom-to-top).
+// Read-only; no mutation, no undo. params: {source}. Returns {filters: [...]}.
+bool MethodFiltersCopyChain(const json &params, json &result, std::string &error)
+{
+	obs_source_t *parent = ResolveFilterParent(params, error);
+	if (!parent) {
+		return false;
+	}
+	json filters = json::array();
+	obs_source_enum_filters(
+		parent,
+		[](obs_source_t *, obs_source_t *child, void *param) {
+			auto *arr = static_cast<json *>(param);
+			const char *id = obs_source_get_id(child);
+			const char *name = obs_source_get_name(child);
+			OBSDataAutoRelease settings = obs_source_get_settings(child); // addref'd
+			const char *jsonStr = settings ? obs_data_get_json(settings) : nullptr;
+			json parsed = json::object();
+			if (jsonStr) {
+				json p = json::parse(jsonStr, nullptr, false);
+				if (!p.is_discarded()) {
+					parsed = std::move(p);
+				}
+			}
+			arr->push_back(json{
+				{"id", id ? json(id) : json()},
+				{"name", name ? json(name) : json()},
+				{"settings", std::move(parsed)},
+				{"enabled", obs_source_enabled(child)},
+			});
+		},
+		&filters);
+	obs_source_release(parent);
+	result = json{{"filters", std::move(filters)}};
+	return true;
+}
+
+// Paste a serialized filter chain onto a target source. params: {source,
+// filters:[{id,name,settings,enabled}]}. Creates each filter (a private source)
+// in array order, uniquifying its name against the target; entries whose `id` is
+// not a loadable filter type are skipped. NOT undoable -- the undo system covers
+// scene-item structure, not filter-chain ops (follow-up). Returns {pasted: count}.
+bool MethodFiltersPasteChain(const json &params, json &result, std::string &error)
+{
+	obs_source_t *parent = ResolveFilterParent(params, error);
+	if (!parent) {
+		return false;
+	}
+	const json *filters = nullptr;
+	if (params.is_object()) {
+		auto it = params.find("filters");
+		if (it != params.end() && it->is_array()) {
+			filters = &*it;
+		}
+	}
+	if (!filters) {
+		obs_source_release(parent);
+		error = "filters.pasteChain requires a 'filters' array";
+		return false;
+	}
+
+	int pasted = 0;
+	for (const json &entry : *filters) {
+		if (!entry.is_object()) {
+			continue;
+		}
+		const std::string id = OptString(entry, "id");
+		if (id.empty()) {
+			continue;
+		}
+		std::string name = OptString(entry, "name");
+		if (name.empty()) {
+			const char *display = obs_source_get_display_name(id.c_str());
+			name = display ? std::string(display) : id;
+		}
+		name = UniqueFilterName(parent, name);
+
+		OBSDataAutoRelease settings;
+		if (auto sit = entry.find("settings"); sit != entry.end() && sit->is_object()) {
+			settings = obs_data_create_from_json(sit->dump().c_str());
+		}
+		// Filters are private sources; null result == unknown/unloadable type -> skip.
+		OBSSourceAutoRelease f = obs_source_create_private(id.c_str(), name.c_str(), settings);
+		if (!f) {
+			continue;
+		}
+		obs_source_filter_add(parent, f);
+		obs_source_set_enabled(f, entry.value("enabled", true));
+		++pasted;
+	}
+	obs_source_release(parent);
+
+	// Mirror the filters.* family: persist via SceneCollection::Save(), no event.
+	if (pasted > 0) {
+		SceneCollection::Save();
+	}
+	result = json{{"pasted", pasted}};
 	return true;
 }
 
@@ -5502,6 +5717,7 @@ void Init()
 		{"sources.create", MethodSourcesCreate},
 		{"sources.listExisting", MethodSourcesListExisting},
 		{"sources.addExisting", MethodSourcesAddExisting},
+		{"sources.duplicate", MethodSourcesDuplicate},
 		{"sources.rename", MethodSourcesRename},
 		{"properties.get", MethodPropertiesGet},
 		{"properties.set", MethodPropertiesSet},
@@ -5514,6 +5730,8 @@ void Init()
 		{"filters.setEnabled", MethodFiltersSetEnabled},
 		{"filters.reorder", MethodFiltersReorder},
 		{"filters.rename", MethodFiltersRename},
+		{"filters.copyChain", MethodFiltersCopyChain},
+		{"filters.pasteChain", MethodFiltersPasteChain},
 		{"settings.getVideo", MethodSettingsGetVideo},
 		{"settings.setVideo", MethodSettingsSetVideo},
 		{"settings.getAudio", MethodSettingsGetAudio},
