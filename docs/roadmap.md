@@ -684,12 +684,22 @@ boot→switch→switch→shutdown, and the while-live / corrupt-index rejection 
 additional-canvas scenes remain global (the pre-existing per-canvas-persistence gap,
 unchanged). Output bindings *are* per-collection.
 
-### Phase 6b — OBS Studio data importer ⏸ DEFERRED (designed 2026-06-26, build deferred)
+### Phase 6b — OBS Studio data importer ✅ COMPLETE 2026-06-28 (as Phase-7 backlog Item 17)
 
 A read-only importer: detect a real OBS Studio install (`%APPDATA%/obs-studio`) and
 recreate its data inside this fork (`%APPDATA%/obs-multistream`), **never modifying the
-original OBS data**. Built on the 6a multi-collection foundation. **Design decisions
-captured (below); deferred before spec/plan — resume from these.**
+original OBS data**. Built on the 6a multi-collection foundation.
+
+> **Shipped on `ui-redesign`** (backend `3738f09a0` `frontend/src/obs_importer.{cpp,hpp}`
+> + `importer.scan`/`import`; wizard `642f237db` `ImporterDialog.svelte` in Settings →
+> General → Importer). Read-only invariant audited clean (every obs-studio access is
+> `obs_data_create_from_json_file` / `config_open(...EXISTING)`; writes only to fork dirs).
+> Per-collection **and** per-scene selection with dependency closure; service / video /
+> audio mapped from the **active per-profile** dir (`user.ini` → `ProfileDir`); live-guard
+> + dedup. Open decision: active-profile-only (a profile picker is an optional follow-up).
+> A real scan/import round-trip is GUI-owed.
+
+**Design decisions (locked with the user 2026-06-26, as built):**
 
 **Decisions (locked with the user 2026-06-26):**
 - **Scope: everything** — scene collections, stream destinations (service + keys),
@@ -797,6 +807,41 @@ the mock's bespoke float/dock system); Studio is a re-skin + re-IA.
   state (no backend per Decision A).
 - 🔭 **7.5 — Orphan homes + polish + holistic review.** Studio "⋯" overflow (projectors),
   remaining Edit/View/Docks menu actions, final fidelity pass, then merge to `master`.
+
+> **Update:** 7.1–7.5 all SHIPPED to `origin/ui-redesign` (commits 7.2 `06a0bd8b4`, 7.3
+> `52d6654ae`, 7.4 `06036fb1d`, 7.5 `7893013`, cleanup `b68467213`) + a GUI-acceptance fix
+> batch (2026-06-27). Still not merged (GUI acceptance owed).
+
+### OBS-parity backlog (Items 0–17) ✅ COMPLETE 2026-06-28
+
+After the redesign, an autonomous backlog closed the OBS feature-parity the CEF rewrite had
+dropped. Items 0–17 (control doc gitignored) shipped on `ui-redesign`; the C++↔JS bridge grew
+to **140 methods**. Each item = backend + frontend waves with per-task and a final holistic
+review (SHIP_WITH_FIXES → all fixed; tip `0b4f22e2e`).
+
+- **0** scale-filter + scene-collection duplicate. **1** Undo/Redo (`UndoManager`, `undo.*`,
+  Ctrl+Z/Y, apply-target-state keyed on source uuid, add/remove snapshot-recreate). **2**
+  source-type picker + add-source. **3** Advanced Audio Properties dialog (vol dB / mono /
+  balance / sync offset / tracks / monitoring). **4** Virtual Camera (`VirtualCamManager`).
+  **5** source Interact window. **6** canvas output-resolution / downscale / fractional FPS.
+  **7** General settings (snapping, projectors, tray, multiview, importer prefs — descriptor
+  table) + list search + scenes grid. **8** Advanced settings (process priority, stream
+  delay, reconnect, bind-IP, etc. — descriptor table). **10** Multiview projector. **11**
+  system tray. **12** browser / custom docks (iframe-based, bridge-persisted). **13** F11
+  fullscreen + scenes grid mode. **14** source extras — missing-file relink, per-source
+  deinterlacing, scene-item color tag + row tint. **15** screenshot (program + per-source,
+  WIC PNG, `%APPDATA%/obs-multistream/screenshots/`, Ctrl+Shift+S, toast). **16** session log
+  writer + Log Viewer + `shell.revealPath`/Open Folder. **17** = **Phase 6b** OBS-Studio
+  importer, read-only (see below).
+
+- ⏸ **Item 9 DEFERRED** — per-binding output overrides (stream delay/reconnect/bind-IP per
+  output) conflict with the encode-once fan-out architecture; revisit as its own design
+  effort. Also still deferred: per-canvas **Studio Mode** (Phase 3 3b), **Auto-Config
+  wizard**, and three visual redesigns (Canvas modal, Appearance tab, Stream tiles).
+
+- **GUI acceptance owed** for the whole backlog (headless can't drive the bridge): undo/redo,
+  virtual cam, interact, screenshots + PNG correctness, deinterlace/color round-trips,
+  missing-file relink, log viewer, and especially a real importer scan/import round-trip.
 
 ---
 
