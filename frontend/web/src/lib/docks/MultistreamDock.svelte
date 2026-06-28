@@ -64,7 +64,7 @@
 
 <div class="dock-body">
   <div class="dock-toolbar">
-    <button class="dock-add" title="Manage destinations (Stream)" onclick={() => setPage("stream")}>＋</button>
+    <button class="dock-add" title="Manage destinations (Canvases)" onclick={() => setPage("canvases")}>＋</button>
   </div>
 
   {#if error}

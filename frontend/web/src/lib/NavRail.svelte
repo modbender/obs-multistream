@@ -14,7 +14,8 @@
   // One entry per nav button; the icon is rendered by the matching {#if} in the
   // markup keyed off this id, so adding a view is a single entry + one icon branch.
   const NAV_ITEMS: { id: Page; label: string; title: string }[] = [
-    { id: "stream", label: "Stream", title: "Destinations" },
+    { id: "canvases", label: "Canvases", title: "Canvases" },
+    { id: "streams", label: "Streams", title: "Stream Profiles" },
     { id: "schedule", label: "Schedule", title: "Schedule" },
     { id: "monitor", label: "Monitor", title: "Monitor" },
     { id: "ai", label: "AI", title: "AI Control" },
@@ -147,7 +148,12 @@
         onclick={() => setPage(item.id)}
       >
         <span class="chev"></span>
-        {#if item.id === "stream"}
+        {#if item.id === "canvases"}
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.5" y="3.5" width="12" height="9" />
+            <rect x="8.5" y="11.5" width="12" height="9" fill="var(--color-rail)" />
+          </svg>
+        {:else if item.id === "streams"}
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
             <circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none" />
             <path d="M8 8.2 a5.4 5.4 0 0 0 0 7.6" />

@@ -3,7 +3,8 @@
   import NavRail from "./lib/NavRail.svelte";
   import { pageStore } from "./lib/pageStore.svelte";
   import StudioPage from "./lib/pages/StudioPage.svelte";
-  import StreamPage from "./lib/pages/StreamPage.svelte";
+  import CanvasesPage from "./lib/pages/CanvasesPage.svelte";
+  import StreamsPage from "./lib/pages/StreamsPage.svelte";
   import SchedulePage from "./lib/pages/SchedulePage.svelte";
   import MonitorPage from "./lib/pages/MonitorPage.svelte";
   import AiPage from "./lib/pages/AiPage.svelte";
@@ -104,8 +105,10 @@
          Dockview workspace + reconciler keep their single onReady lifecycle exactly
          as before — switching pages must not tear down or rebuild the docks. -->
     <StudioPage />
-    {#if pageStore.page === "stream"}
-      <StreamPage />
+    {#if pageStore.page === "canvases"}
+      <CanvasesPage />
+    {:else if pageStore.page === "streams"}
+      <StreamsPage />
     {:else if pageStore.page === "schedule"}
       <SchedulePage />
     {:else if pageStore.page === "monitor"}
