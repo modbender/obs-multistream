@@ -9,7 +9,7 @@
     type CanvasInfo,
     type SceneLinkInfo,
   } from "../bridge";
-  import { openSettings } from "../settingsOpener.svelte";
+  import { setPage } from "../pageStore.svelte";
   import { previewSuspended, suspendPreview } from "../previewGate.svelte";
   import { WINDOW_ID } from "../windowContext";
   import ContextMenu, { type ContextMenuItem } from "../ContextMenu.svelte";
@@ -885,9 +885,7 @@
   <footer class="foot">
     <span class="dot" style:background={STATE_COLOR[liveState]} title={liveState}></span>
     <span class="foot-name">{canvasName}</span>
-    <button class="foot-gear" title="Edit canvas (Settings)" onclick={() => openSettings("canvases", canvasUuid)}
-      >{@render icoGear()}</button
-    >
+    <button class="foot-gear" title="Edit canvas (Canvases)" onclick={() => setPage("canvases")}>{@render icoGear()}</button>
   </footer>
 </div>
 

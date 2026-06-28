@@ -1,6 +1,5 @@
 <script lang="ts">
   import GeneralTab from "../GeneralTab.svelte";
-  import CanvasesTab from "../CanvasesTab.svelte";
   import HotkeysTab from "../HotkeysTab.svelte";
   import AudioTab from "../AudioTab.svelte";
   import BrowserDocksTab from "../BrowserDocksTab.svelte";
@@ -15,7 +14,6 @@
   // there's no OK/Apply/Cancel boundary.
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: "General" },
-    { id: "canvases", label: "Canvases" },
     { id: "audio", label: "Audio" },
     { id: "hotkeys", label: "Hotkeys" },
     { id: "browserDocks", label: "Browser Docks" },
@@ -44,8 +42,6 @@
     <div class="pane">
       {#if settingsNav.tab === "general"}
         <GeneralTab />
-      {:else if settingsNav.tab === "canvases"}
-        <CanvasesTab editCanvas={settingsNav.editCanvas} />
       {:else if settingsNav.tab === "audio"}
         <AudioTab />
       {:else if settingsNav.tab === "hotkeys"}
