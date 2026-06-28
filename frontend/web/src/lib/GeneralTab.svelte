@@ -2,6 +2,7 @@
   import { obs, type GeneralSettings } from "./bridge";
   import { openMissingFiles } from "./missingFilesOpener.svelte";
   import { openLogViewer } from "./logViewerOpener.svelte";
+  import { openImporter } from "./importerOpener.svelte";
 
   // General app settings, live-applied (the page model has no Apply boundary):
   // each control change pushes only its changed key via settings.setGeneral and
@@ -230,6 +231,8 @@
       Prompt to import from other software
     </label>
     <p class="dim note">Used by the OBS Studio importer.</p>
+    <button class="action" onclick={() => openImporter()}>Import from OBS Studio…</button>
+    <p class="dim note">Bring scene collections, stream destinations, and video/audio settings in from an OBS Studio install.</p>
   </section>
 
   <section class="group">

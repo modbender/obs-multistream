@@ -769,6 +769,75 @@ export interface BrowserDock {
   url: string;
 }
 
+// --- OBS Studio importer (read-only, Item 17) --------------------------------
+
+/** One scene collection found in an external OBS Studio install. `file` is the
+ * collection's source filename (the import key); `scenes` lists its scene names. */
+export interface ImporterCollection {
+  name: string;
+  file: string;
+  scenes: string[];
+}
+
+/** Stream destination found in the active OBS Studio profile. */
+export interface ImporterService {
+  present: boolean;
+  label: string;
+}
+
+/** Video pipeline settings read from the active OBS Studio profile. `fps` is the
+ * resolved frames-per-second as a number (e.g. 30, 59.94). */
+export interface ImporterVideo {
+  baseWidth: number;
+  baseHeight: number;
+  outputWidth: number;
+  outputHeight: number;
+  fps: number;
+}
+
+/** Audio settings read from the active OBS Studio profile. */
+export interface ImporterAudio {
+  sampleRate: number;
+  channels: string;
+}
+
+/** Result of scanning an OBS Studio install (`importer.scan`). `found: false` ->
+ * no install at the resolved path (offer Browse). `service`/`video`/`audio` are
+ * null when the active profile lacks that data. */
+export interface ImporterScan {
+  found: boolean;
+  path: string;
+  collections: ImporterCollection[];
+  service: ImporterService | null;
+  video: ImporterVideo | null;
+  audio: ImporterAudio | null;
+}
+
+/** One collection in an `importer.import` request. Omit/empty `scenes` to import
+ * the whole collection; otherwise the listed scenes (+ their dependency closure).
+ * `name` optionally overrides the imported collection name. */
+export interface ImporterImportCollection {
+  file: string;
+  name?: string;
+  scenes?: string[];
+}
+
+/** `importer.import` request payload. */
+export interface ImporterImportRequest {
+  path?: string;
+  collections: ImporterImportCollection[];
+  importService: boolean;
+  importVideo: boolean;
+  importAudio: boolean;
+}
+
+/** Result of an import run (`importer.import`). */
+export interface ImporterImportResult {
+  ok: boolean;
+  imported: { collections: number; service: boolean; video: boolean; audio: boolean };
+  warnings: string[];
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -1024,6 +1093,12 @@ export interface ObsMethods {
   "undo.state": UndoState;
   "undo.undo": Record<string, never>;
   "undo.redo": Record<string, never>;
+  // OBS Studio importer (read-only, Item 17). scan inventories an external OBS
+  // install (omit `path` to auto-detect; found:false -> offer Browse). import
+  // creates NEW fork collections / a stream profile / canvas + audio state from the
+  // selected items; nothing in the source OBS install is modified.
+  "importer.scan": ImporterScan;
+  "importer.import": ImporterImportResult;
 }
 
 /** Known server->client push events and their payload shapes. */
