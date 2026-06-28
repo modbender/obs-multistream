@@ -5519,6 +5519,11 @@ bool MethodSourcesSetDeinterlace(const json &params, json &result, std::string &
 	if (setField) {
 		obs_source_set_deinterlace_field_order(s, fieldOrder);
 	}
+	// Persist now (matching the sibling per-item setters) so the choice survives an
+	// unclean exit rather than only the shutdown save.
+	if (setMode || setField) {
+		SceneCollection::Save();
+	}
 
 	result = BuildDeinterlace(s);
 	return true;
@@ -7008,7 +7013,7 @@ bool CaptureToPng(uint32_t w, uint32_t h, const std::function<void()> &renderFn,
 	gs_stagesurf_t *stage = gs_stagesurface_create(w, h, GS_RGBA);
 
 	bool beginOk = false;
-	if (gs_texrender_begin(texrender, w, h)) {
+	if (texrender && stage && gs_texrender_begin(texrender, w, h)) {
 		beginOk = true;
 
 		vec4 zero;
