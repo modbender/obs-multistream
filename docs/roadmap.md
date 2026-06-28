@@ -843,6 +843,28 @@ review (SHIP_WITH_FIXES → all fixed; tip `0b4f22e2e`).
   virtual cam, interact, screenshots + PNG correctness, deinterlace/color round-trips,
   missing-file relink, log viewer, and especially a real importer scan/import round-trip.
 
+### Nav IA restructure + single Go Live ✅ 2026-06-28
+
+The redesigned nav was reorganized so the three-layer model gets first-class homes, and all
+live control collapsed to one button (spec/plan under `docs/superpowers/`). On `ui-redesign`,
+frontend-only (backend already had `streaming.start`/`stop` = StartAllEnabled/StopAll).
+
+- Nav rail: Studio · **Canvases** · **Streams** · Schedule · Monitor · AI · Settings (was
+  "Stream"/Destinations). **Canvases** = master-detail page (left canvas list; right =
+  `CanvasEditor` extracted from the old Settings→Canvases tab + that canvas's destinations as
+  **toggle-only** rows with read-only live status). **Streams** = the promoted Stream Profiles
+  manager. Settings dropped both tabs (now General/Audio/Hotkeys/Browser Docks/Appearance/
+  Advanced).
+- **Single source of truth for live:** one Go Live button in the Studio bar →
+  `streaming.start`/`stop`; live state from the global `streaming.changed`. Removed ALL
+  per-canvas/per-binding/per-stream start/stop (Studio per-focused loop, Stream page
+  Start/Stop/Retry, Multistream dock Start — now a read-only monitor). Toggles
+  (`outputBinding.setEnabled`) only arm; the canvas renders when ≥1 enabled binding.
+- 5 tasks subagent-driven (super-frontend) + holistic review (super-quality = SHIP, 0
+  Critical/0 Important; 3 Minors fixed). Deleted dead `StreamPage.svelte` + `CanvasesTab.svelte`.
+  Commits `41ef6a6d0`..`2666ced4a`. check 0/0, build EXIT=0, leaks 2. **GUI acceptance owed:**
+  nav switch, canvas edit + destination-toggle persistence, single Go Live starts/stops all.
+
 ---
 
 ## Backlog & deferred decisions ⏸
