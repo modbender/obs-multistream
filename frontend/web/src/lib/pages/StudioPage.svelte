@@ -742,7 +742,7 @@
       <button
         class="golive"
         class:running={anyRunning}
-        disabled={busy || outputs.length === 0}
+        disabled={busy || (!anyRunning && outputs.length === 0)}
         onclick={() => void toggleLive()}
       >
         {anyRunning ? "■  END STREAM" : "●  GO LIVE"}

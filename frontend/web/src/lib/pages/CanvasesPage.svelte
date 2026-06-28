@@ -294,6 +294,7 @@
               canvas={selectedCanvas}
               {videoEncoders}
               {audioEncoders}
+              embedded
               onClose={noop}
               onSaved={() => void loadCanvases()}
             />

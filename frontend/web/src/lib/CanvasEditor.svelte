@@ -16,8 +16,10 @@
     onClose: () => void;
     /** Called after a successful create/update so the parent can refresh + close. */
     onSaved: () => void;
+    /** Hosted inline in a master-detail pane (no modal): hide the inert Cancel. */
+    embedded?: boolean;
   }
-  let { canvas, videoEncoders, audioEncoders, onClose, onSaved }: Props = $props();
+  let { canvas, videoEncoders, audioEncoders, onClose, onSaved, embedded = false }: Props = $props();
 
   // Resolution presets the form offers; custom values still accepted via inputs.
   const resPresets: { label: string; w: number; h: number }[] = [
@@ -334,7 +336,9 @@
   {#if formError}<p class="error">{formError}</p>{/if}
 
   <div class="actions">
-    <button class="btn ghost" onclick={onClose}>Cancel</button>
+    {#if !embedded}
+      <button class="btn ghost" onclick={onClose}>Cancel</button>
+    {/if}
     <button class="btn primary" disabled={!formValid || saving} onclick={() => void save()}>
       {saving ? "Saving…" : canvas ? "Save" : "Create"}
     </button>
