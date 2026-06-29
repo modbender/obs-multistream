@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <system_error>
 #include <vector>
 
 #include <windows.h>
@@ -53,7 +54,9 @@ bool ProtectBytes(const std::string &plain, std::vector<unsigned char> &out)
 	in.pbData = reinterpret_cast<BYTE *>(const_cast<char *>(plain.data()));
 
 	DATA_BLOB blob = {};
-	if (!CryptProtectData(&in, L"obs-multistream oauth", nullptr, nullptr, nullptr, 0, &blob)) {
+	// CRYPTPROTECT_UI_FORBIDDEN: a background-thread Put must never block on a UI prompt.
+	if (!CryptProtectData(&in, L"obs-multistream oauth", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN,
+			      &blob)) {
 		return false;
 	}
 	out.assign(blob.pbData, blob.pbData + blob.cbData);
@@ -147,14 +150,37 @@ void TokenStore::SaveLocked()
 	}
 
 	const std::filesystem::path fsPath = std::filesystem::u8path(path);
+	const std::filesystem::path tmpPath = std::filesystem::u8path(path + ".tmp");
 	os_mkdirs(fsPath.parent_path().u8string().c_str());
 
-	std::ofstream f(fsPath, std::ios::binary | std::ios::trunc);
-	if (!f) {
-		HostLog("[oauth] token store open-for-write failed");
+	// Atomic write: a crash mid-write must never corrupt the live blob (an
+	// undecryptable file would silently drop every linked account). Write the
+	// full blob to a sibling temp file, then atomically replace the real file.
+	{
+		std::ofstream f(tmpPath, std::ios::binary | std::ios::trunc);
+		if (!f) {
+			HostLog("[oauth] token store open-for-write failed");
+			return;
+		}
+		f.write(reinterpret_cast<const char *>(wrapped.data()), static_cast<std::streamsize>(wrapped.size()));
+		f.flush();
+		if (!f) {
+			HostLog("[oauth] token store temp write failed");
+			f.close();
+			std::error_code ec;
+			std::filesystem::remove(tmpPath, ec);
+			return;
+		}
+	}
+
+	// MOVEFILE_REPLACE_EXISTING handles the first-write case too (dst absent ->
+	// plain rename); MOVEFILE_WRITE_THROUGH flushes the metadata to disk.
+	if (!MoveFileExW(tmpPath.c_str(), fsPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		HostLog("[oauth] token store atomic replace failed");
+		std::error_code ec;
+		std::filesystem::remove(tmpPath, ec);
 		return;
 	}
-	f.write(reinterpret_cast<const char *>(wrapped.data()), static_cast<std::streamsize>(wrapped.size()));
 }
 
 std::optional<OAuthAccount> TokenStore::Get(const std::string &profileUuid)
@@ -165,7 +191,9 @@ std::optional<OAuthAccount> TokenStore::Get(const std::string &profileUuid)
 	if (it == accounts_.end()) {
 		return std::nullopt;
 	}
-	return it->second;
+	OAuthAccount acct = it->second;
+	acct.profileUuid = profileUuid; // stamp the store key for store-coherent refresh
+	return acct;
 }
 
 void TokenStore::Put(const std::string &profileUuid, const OAuthAccount &account)
@@ -189,7 +217,11 @@ std::map<std::string, OAuthAccount> TokenStore::All()
 {
 	const std::lock_guard<std::mutex> guard(mutex_);
 	EnsureLoadedLocked();
-	return accounts_;
+	std::map<std::string, OAuthAccount> out = accounts_;
+	for (auto &entry : out) {
+		entry.second.profileUuid = entry.first; // stamp the store key on each record
+	}
+	return out;
 }
 
 TokenStore &Tokens()

@@ -171,7 +171,7 @@ bool TwitchProvider::SendAuthed(OAuthAccount &acct, Http::HttpReq req, Http::Htt
 	// Proactive refresh inside the skew window (best-effort: if it fails the token
 	// may still be valid, so we let the request proceed and rely on the 401 path).
 	std::string freshErr;
-	auth_.ensureFresh(acct, freshErr);
+	auth_.ensureFresh(acct, acct.profileUuid, freshErr);
 
 	const std::string clientId = TwitchClientId();
 	auto stamp = [&](Http::HttpReq &r) {
@@ -349,13 +349,10 @@ bool TwitchProvider::applyMetadata(OAuthAccount &acct, const json &fields, std::
 		}
 	}
 
-	// Tags: validate up-front; reject the whole request on any invalid tag.
+	// Tags: skip empty entries (a stray empty tag must not reject the whole patch);
+	// validate the rest and cap the kept set at 10.
 	if (fields.contains("tags") && fields["tags"].is_array()) {
 		const json &tagsIn = fields["tags"];
-		if (tagsIn.size() > 10) {
-			err = "Twitch allows at most 10 tags";
-			return false;
-		}
 		json tags = json::array();
 		for (const json &t : tagsIn) {
 			if (!t.is_string()) {
@@ -363,12 +360,19 @@ bool TwitchProvider::applyMetadata(OAuthAccount &acct, const json &fields, std::
 				return false;
 			}
 			const std::string tag = t.get<std::string>();
+			if (tag.empty()) {
+				continue;
+			}
 			if (!TagValid(tag)) {
 				err = "invalid tag '" + tag +
 				      "': tags must be lowercase alphanumeric, no spaces, 25 chars max";
 				return false;
 			}
 			tags.push_back(tag);
+		}
+		if (tags.size() > 10) {
+			err = "Twitch allows at most 10 tags";
+			return false;
 		}
 		body["tags"] = std::move(tags);
 	}
@@ -392,9 +396,10 @@ bool TwitchProvider::applyMetadata(OAuthAccount &acct, const json &fields, std::
 			}
 			labels.push_back(json{{"id", lid}, {"is_enabled", enabled}});
 		}
-		if (!labels.empty()) {
-			body["content_classification_labels"] = std::move(labels);
-		}
+		// Always send when the field is present (even an empty array) so the last
+		// remaining label can be cleared; dropping empties would make that
+		// impossible.
+		body["content_classification_labels"] = std::move(labels);
 	}
 
 	if (fields.contains("brandedContent") && fields["brandedContent"].is_boolean()) {

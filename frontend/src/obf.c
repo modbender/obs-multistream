@@ -2,6 +2,9 @@
 
 #include <stdbool.h>
 
+// Keep this a C (.c) file: `xor` is used as a plain identifier below, which is
+// legal only in C. In C++ `xor` is a reserved alternative token for `^`.
+
 #define LOWER_HALFBYTE(x) ((x) & 0xF)
 #define UPPER_HALFBYTE(x) (((x) >> 4) & 0xF)
 

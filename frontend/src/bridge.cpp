@@ -84,6 +84,11 @@ std::unordered_map<std::string, MethodFn> g_methods;
 // no-op via the AsyncTask alive-guard; this stops the loop body too).
 std::atomic<bool> g_oauthRunning{true};
 
+// Per-connect cancel signal: oauth.cancelConnect sets it so an in-flight
+// device-code poll worker bails when the user closes the connect modal. Reset to
+// false when a new oauth.connect starts.
+std::atomic<bool> g_oauthCancel{false};
+
 // All live UI browsers; EmitEvent broadcasts to each. Registered/unregistered on
 // the UI thread; read on the UI thread (EmitEvent posts there first). The mutex
 // guards the registry against the (off-thread) registration paths and snapshots
@@ -7283,10 +7288,15 @@ json BuildOAuthStatusArray()
 	json arr = json::array();
 	for (const auto &entry : OAuth::Tokens().All()) {
 		const OAuth::OAuthAccount &acct = entry.second;
+		// A token issued under an older scope set is unusable until reconnected; an
+		// unregistered provider (e.g. unconfigured) is left as-is, not flagged.
+		OAuth::StreamProvider *provider = OAuth::Registry().Get(acct.providerId);
+		const bool scopeCurrent = !provider || provider->isTokenScopeCurrent(acct);
 		arr.push_back(json{
 			{"profileUuid", entry.first},
 			{"providerId", acct.providerId},
-			{"connected", true},
+			{"connected", scopeCurrent},
+			{"needsReconnect", !scopeCurrent},
 			{"login", acct.login},
 			{"displayName", acct.displayName},
 		});
@@ -7356,13 +7366,14 @@ void RunOAuthConnect(std::string providerId, std::string profileUuid)
 
 	OAuth::OAuthAccount acct;
 	acct.providerId = providerId;
+	acct.profileUuid = profileUuid;
 
 	for (;;) {
-		if (!g_oauthRunning.load(std::memory_order_acquire)) {
-			return; // bridge tore down mid-flow
+		if (!g_oauthRunning.load(std::memory_order_acquire) || g_oauthCancel.load(std::memory_order_acquire)) {
+			return; // bridge tore down, or the user canceled, mid-flow
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(intervalSec));
-		if (!g_oauthRunning.load(std::memory_order_acquire)) {
+		if (!g_oauthRunning.load(std::memory_order_acquire) || g_oauthCancel.load(std::memory_order_acquire)) {
 			return;
 		}
 		if (std::chrono::steady_clock::now() >= deadline) {
@@ -7455,6 +7466,7 @@ bool MethodOAuthConnect(const json &params, json &result, std::string &error)
 
 	// The flow is long-running (user authorizes out-of-band); run it detached and
 	// answer immediately. Progress arrives as oauth.deviceCode/status/connectError.
+	g_oauthCancel.store(false, std::memory_order_release);
 	AsyncTask::RunAsync([providerId, profileUuid] { RunOAuthConnect(providerId, profileUuid); });
 
 	result = json{{"ok", true}, {"pending", true}};
@@ -7477,6 +7489,13 @@ bool MethodOAuthDisconnect(const json &params, json &result, std::string &error)
 bool MethodOAuthStatus(const json & /*params*/, json &result, std::string & /*error*/)
 {
 	result = BuildOAuthStatusArray();
+	return true;
+}
+
+bool MethodOAuthCancelConnect(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	g_oauthCancel.store(true, std::memory_order_release);
+	result = json{{"ok", true}};
 	return true;
 }
 
@@ -7504,6 +7523,10 @@ bool MethodStreamMetaGet(const json &params, json &result, std::string &error)
 	OAuth::StreamProvider *provider = OAuth::Registry().Get(stored->providerId);
 	if (!provider) {
 		error = "unknown provider: " + stored->providerId;
+		return false;
+	}
+	if (!provider->isTokenScopeCurrent(*stored)) {
+		error = "reconnect required: this account was authorized under an older permission set";
 		return false;
 	}
 
@@ -7540,11 +7563,12 @@ bool MethodStreamMetaSearchCategories(const json &params, json &result, std::str
 		return false;
 	}
 
-	// Use any connected account for this provider (search needs a user token).
+	// Use any connected, scope-current account for this provider (search needs a
+	// user token; a behind-scope token must not be used).
 	std::string accountUuid;
 	OAuth::OAuthAccount acct;
 	for (const auto &entry : OAuth::Tokens().All()) {
-		if (entry.second.providerId == providerId) {
+		if (entry.second.providerId == providerId && provider->isTokenScopeCurrent(entry.second)) {
 			accountUuid = entry.first;
 			acct = entry.second;
 			break;
@@ -7588,6 +7612,10 @@ bool MethodStreamMetaSet(const json &params, json &result, std::string &error)
 	OAuth::StreamProvider *provider = OAuth::Registry().Get(stored->providerId);
 	if (!provider) {
 		error = "unknown provider: " + stored->providerId;
+		return false;
+	}
+	if (!provider->isTokenScopeCurrent(*stored)) {
+		error = "reconnect required: this account was authorized under an older permission set";
 		return false;
 	}
 	const json fields = params.is_object() && params.contains("fields") ? params["fields"] : json::object();
@@ -7756,6 +7784,7 @@ void Init()
 		{"log.getCurrent", MethodLogGetCurrent},
 		{"oauth.providers", MethodOAuthProviders},
 		{"oauth.connect", MethodOAuthConnect},
+		{"oauth.cancelConnect", MethodOAuthCancelConnect},
 		{"oauth.disconnect", MethodOAuthDisconnect},
 		{"oauth.status", MethodOAuthStatus},
 		{"streamMeta.get", MethodStreamMetaGet},

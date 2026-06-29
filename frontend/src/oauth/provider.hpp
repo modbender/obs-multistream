@@ -31,6 +31,12 @@ struct OAuthAccount {
 	std::string displayName;
 	int64_t expireTime = 0;
 	int scopeVer = 0;
+
+	// Transient (never serialized): the stream-profile uuid this record is stored
+	// under. The store stamps it on read so a provider's deep call chain can hand
+	// it to ensureFresh for store-coherent single-flight refresh without threading
+	// the uuid through every metadata hook. AccountToJson/FromJson ignore it.
+	std::string profileUuid;
 };
 
 // The device-code grant's first-leg result: show `userCode` to the user, open
@@ -68,9 +74,16 @@ public:
 	virtual bool refresh(OAuthAccount &acct, std::string &err) = 0;
 
 	// Lazily refresh `acct` only when it is within the skew window of expiry,
-	// single-flight per account so concurrent callers don't double-refresh. true
-	// when the token is usable afterward.
-	virtual bool ensureFresh(OAuthAccount &acct, std::string &err) = 0;
+	// single-flight per account so concurrent callers don't double-refresh. When
+	// `profileUuid` is non-empty the refresh is store-coherent: the account is
+	// re-read from the token store inside the flight lock and the rotated token is
+	// written back, so concurrent callers with stale copies never invalidate each
+	// other's one-time-use refresh token. true when the token is usable afterward.
+	virtual bool ensureFresh(OAuthAccount &acct, const std::string &profileUuid, std::string &err) = 0;
+
+	// The scope version this strategy currently requests. Tokens stored with a
+	// lower scopeVer were issued under an older permission set and must reconnect.
+	virtual int scopeVer() const { return 0; }
 };
 
 // One streaming platform. `capabilityJson()` is the descriptor the modal renders
@@ -84,6 +97,16 @@ public:
 	virtual std::string id() const = 0;
 	virtual std::string displayName() const = 0;
 	virtual std::string brandColor() const = 0;
+
+	// The scope version the provider currently requests (mirrors the auth
+	// strategy's scopeVer). Default 0; providers bump it when their scope set
+	// changes so older tokens are treated as needing reconnect.
+	virtual int scopeVer() const { return 0; }
+
+	// True when `acct`'s stored scope version covers the provider's current
+	// scopes. A behind-scope token lacks permissions the app now needs, so the
+	// status path reports it as needing reconnect and metadata calls refuse it.
+	bool isTokenScopeCurrent(const OAuthAccount &acct) const { return acct.scopeVer >= scopeVer(); }
 
 	// The capability descriptor: { id, displayName, brandColor, auth{...},
 	// fields[...] } the Svelte modal renders fields from.

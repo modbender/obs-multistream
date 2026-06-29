@@ -33,7 +33,8 @@ public:
 	bool begin(DeviceCodeStart &out, std::string &err) override;
 	PollResult poll(const std::string &deviceCode, OAuthAccount &acct, std::string &err) override;
 	bool refresh(OAuthAccount &acct, std::string &err) override;
-	bool ensureFresh(OAuthAccount &acct, std::string &err) override;
+	bool ensureFresh(OAuthAccount &acct, const std::string &profileUuid, std::string &err) override;
+	int scopeVer() const override { return config_.scopeVer; }
 
 private:
 	// One mutex per account key, created on demand, so two concurrent ensureFresh

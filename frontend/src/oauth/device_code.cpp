@@ -1,9 +1,11 @@
 #include "device_code.hpp"
 
 #include <ctime>
+#include <optional>
 #include <utility>
 
 #include "../http_client.hpp"
+#include "token_store.hpp"
 
 namespace OAuth {
 
@@ -225,7 +227,7 @@ bool DeviceCodeStrategy::refresh(OAuthAccount &acct, std::string &err)
 	return true;
 }
 
-bool DeviceCodeStrategy::ensureFresh(OAuthAccount &acct, std::string &err)
+bool DeviceCodeStrategy::ensureFresh(OAuthAccount &acct, const std::string &profileUuid, std::string &err)
 {
 	if (acct.refresh.empty()) {
 		err = "no refresh token";
@@ -238,16 +240,38 @@ bool DeviceCodeStrategy::ensureFresh(OAuthAccount &acct, std::string &err)
 	}
 
 	// Single-flight: serialize concurrent refreshes for the same account. Key on
-	// the user id when known, else the provider id (pre-identity accounts).
-	const std::string key = acct.userId.empty() ? acct.providerId : acct.userId;
+	// the stream-profile uuid (the store key) when known, else the user/provider id.
+	const std::string key = !profileUuid.empty() ? profileUuid : (acct.userId.empty() ? acct.providerId : acct.userId);
 	const std::shared_ptr<std::mutex> lock = FlightLock(key);
 	const std::lock_guard<std::mutex> guard(*lock);
 
-	// Re-check after acquiring: a prior holder may have just refreshed this token.
+	// Re-read the authoritative copy from the store inside the lock: a prior holder
+	// may have just refreshed and rotated this account's one-time-use refresh token.
+	// Operating on the caller's stale copy here would refresh the spent token and
+	// kill the account. Without a uuid (the connect flow's not-yet-stored account)
+	// fall back to the caller's copy.
+	if (!profileUuid.empty()) {
+		const std::optional<OAuthAccount> stored = Tokens().Get(profileUuid);
+		if (stored) {
+			acct = *stored;
+		}
+	}
+
+	// Re-check after the store re-read: a prior holder may have just refreshed.
 	if (static_cast<int64_t>(time(nullptr)) <= acct.expireTime - skew) {
 		return true;
 	}
-	return refresh(acct, err);
+
+	if (!refresh(acct, err)) {
+		return false;
+	}
+
+	// Persist the rotated token inside the lock so the next single-flight holder
+	// re-reads the new refresh token, not the spent one.
+	if (!profileUuid.empty()) {
+		Tokens().Put(profileUuid, acct);
+	}
+	return true;
 }
 
 std::shared_ptr<std::mutex> DeviceCodeStrategy::FlightLock(const std::string &key)
