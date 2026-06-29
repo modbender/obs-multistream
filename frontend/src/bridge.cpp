@@ -79,6 +79,19 @@ using MethodFn = std::function<bool(const json &params, json &result, std::strin
 
 std::unordered_map<std::string, MethodFn> g_methods;
 
+// One async method: handed the ref-counted CEF callback to resolve later. The
+// handler runs the work off-thread (see RunAsyncMethod) and answers the callback
+// back on the UI thread, so TID_UI never blocks on the network. Phase 8b.
+using AsyncMethodFn =
+	std::function<void(const json &params, CefRefPtr<CefMessageRouterBrowserSide::Callback> callback)>;
+
+// The deferred-callback async lane: methods registered here are dispatched off the
+// UI thread instead of through the synchronous g_methods/Dispatch path. The same
+// JS `await obs.call(...)` request/response contract holds -- the promise just
+// resolves after the off-thread network work completes. 8c/8d's long platform
+// calls reuse this lane.
+std::unordered_map<std::string, AsyncMethodFn> g_asyncMethods;
+
 // Cleared at Shutdown so an in-flight OAuth device-code poll loop running on a
 // detached worker bails instead of polling on after teardown (its emits already
 // no-op via the AsyncTask alive-guard; this stops the loop body too).
@@ -7499,14 +7512,22 @@ bool MethodOAuthCancelConnect(const json & /*params*/, json &result, std::string
 	return true;
 }
 
-// ---- streamMeta (Phase 8a) -------------------------------------------------
+// ---- streamMeta (Phase 8a; async lane Phase 8b) ----------------------------
 //
 // Platform stream-metadata read/search/write, dispatched through the provider the
-// registry resolves. Coherence: load the account from the store, let the provider
-// refresh it in place (proactive skew + reactive 401), then write it back so a
-// rotated refresh token is always persisted -- no caller operates on a stale copy.
-// These run synchronously on the calling (UI) thread and block on the network; if
-// that proves janky in 8b, convert to the async-with-event shape oauth.connect uses.
+// registry resolves. Coherence: load the account from the store (Get/All stamp the
+// store key onto acct.profileUuid) and let the provider refresh it in place via
+// ensureFresh, which is the SOLE token writer -- it re-reads + writes back rotated
+// tokens under its single-flight lock. The handler bodies must NEVER Put a pre-call
+// snapshot back: with concurrent same-profile calls a non-refreshing caller would
+// clobber a peer's freshly rotated (one-time-use) refresh token, bricking the
+// account. So they read tokens via Get and never write them.
+// These run on the deferred-callback async lane (g_asyncMethods + RunAsyncMethod):
+// each body executes on its own detached worker (one thread per call; a thread pool
+// is a future optimization, not needed now) so libcurl never blocks TID_UI, then the
+// captured CEF callback resolves on the UI thread. The bodies stay shaped as plain
+// MethodFn (params -> result|error); RunAsyncMethod drives them off-thread. The 8a
+// single-flight refresh made the concurrent provider path safe to run off-thread.
 
 bool MethodStreamMetaGet(const json &params, json &result, std::string &error)
 {
@@ -7540,7 +7561,8 @@ bool MethodStreamMetaGet(const json &params, json &result, std::string &error)
 		error = std::string("streamMeta.get failed: ") + e.what();
 		return false;
 	}
-	OAuth::Tokens().Put(profileUuid, acct); // persist any rotated token
+	// No Put: ensureFresh already persisted any rotated token under its lock.
+	// Writing back acct here would clobber a concurrent peer's rotated token.
 	if (!ok) {
 		error = err;
 		return false;
@@ -7588,7 +7610,7 @@ bool MethodStreamMetaSearchCategories(const json &params, json &result, std::str
 		error = std::string("streamMeta.searchCategories failed: ") + e.what();
 		return false;
 	}
-	OAuth::Tokens().Put(accountUuid, acct);
+	// No Put: ensureFresh is the sole token writer (acct carries profileUuid from All()).
 	if (!ok) {
 		error = err;
 		return false;
@@ -7629,7 +7651,8 @@ bool MethodStreamMetaSet(const json &params, json &result, std::string &error)
 		error = std::string("streamMeta.set failed: ") + e.what();
 		return false;
 	}
-	OAuth::Tokens().Put(profileUuid, acct);
+	// No Put: ensureFresh already persisted any rotated token under its lock.
+	// Writing back acct here would clobber a concurrent peer's rotated token.
 	if (!ok) {
 		error = err;
 		return false;
@@ -7637,6 +7660,42 @@ bool MethodStreamMetaSet(const json &params, json &result, std::string &error)
 	EmitEvent("streamMeta.changed", json{{"profileUuid", profileUuid}});
 	result = json{{"ok", true}};
 	return true;
+}
+
+// The async-lane driver: run a plain MethodFn `work` on a detached worker, then
+// resolve the captured CEF `callback` back on the UI thread. Exactly one
+// resolution per query (the only path is the single PostToUi below); a resolve
+// that lands after Bridge::Shutdown is dropped by PostToUi's alive-guard; any
+// exception on the worker becomes a Failure rather than escaping the thread.
+// `work` may call EmitEvent (e.g. streamMeta.set's "streamMeta.changed") -- that
+// self-marshals to TID_UI. This is the shared lane 8c/8d platform calls reuse.
+void RunAsyncMethod(std::string method, const json &params,
+		    CefRefPtr<CefMessageRouterBrowserSide::Callback> callback, MethodFn work)
+{
+	AsyncTask::RunAsync([method = std::move(method), params, callback, work = std::move(work)]() mutable {
+		json result;
+		std::string error;
+		bool ok;
+		try {
+			ok = work(params, result, error);
+		} catch (const std::exception &e) {
+			ok = false;
+			error = std::string("unhandled exception: ") + e.what();
+		} catch (...) {
+			ok = false;
+			error = "unhandled exception";
+		}
+		AsyncTask::PostToUi([method = std::move(method), ok, result = std::move(result),
+				     error = std::move(error), callback]() {
+			if (ok) {
+				callback->Success(result.dump());
+				HostLog("[bridge] " + method + " -> ok (async)");
+			} else {
+				callback->Failure(404, error);
+				HostLog("[bridge] " + method + " -> FAIL (async: " + error + ")");
+			}
+		});
+	});
 }
 
 void Init()
@@ -7787,9 +7846,24 @@ void Init()
 		{"oauth.cancelConnect", MethodOAuthCancelConnect},
 		{"oauth.disconnect", MethodOAuthDisconnect},
 		{"oauth.status", MethodOAuthStatus},
-		{"streamMeta.get", MethodStreamMetaGet},
-		{"streamMeta.searchCategories", MethodStreamMetaSearchCategories},
-		{"streamMeta.set", MethodStreamMetaSet},
+	};
+
+	// streamMeta.* go on the async lane: their provider calls block on libcurl, so
+	// they run off-thread and resolve the CEF callback later (same JS contract).
+	// Each body is the existing MethodFn, driven off-thread by RunAsyncMethod.
+	g_asyncMethods = {
+		{"streamMeta.get",
+		 [](const json &p, CefRefPtr<CefMessageRouterBrowserSide::Callback> cb) {
+			 RunAsyncMethod("streamMeta.get", p, cb, MethodStreamMetaGet);
+		 }},
+		{"streamMeta.searchCategories",
+		 [](const json &p, CefRefPtr<CefMessageRouterBrowserSide::Callback> cb) {
+			 RunAsyncMethod("streamMeta.searchCategories", p, cb, MethodStreamMetaSearchCategories);
+		 }},
+		{"streamMeta.set",
+		 [](const json &p, CefRefPtr<CefMessageRouterBrowserSide::Callback> cb) {
+			 RunAsyncMethod("streamMeta.set", p, cb, MethodStreamMetaSet);
+		 }},
 	};
 
 	// Notify JS whenever the undo stack changes (add/undo/redo/clear) so the UI's
@@ -7797,7 +7871,8 @@ void Init()
 	ObsBootstrap::Undo().onChanged = [] { EmitUndoChanged(); };
 
 	obs_frontend_add_event_callback(OnFrontendEvent, nullptr);
-	HostLog("[bridge] init: " + std::to_string(g_methods.size()) + " methods, obs event forwarding armed");
+	HostLog("[bridge] init: " + std::to_string(g_methods.size()) + " methods, " +
+		std::to_string(g_asyncMethods.size()) + " async methods, obs event forwarding armed");
 }
 
 void Shutdown()
@@ -7813,6 +7888,7 @@ void Shutdown()
 	// loop has returned) doesn't try to emit through a torn-down bridge.
 	ObsBootstrap::Undo().onChanged = nullptr;
 	g_methods.clear();
+	g_asyncMethods.clear();
 	if (g_cpuInfo) {
 		os_cpu_usage_info_destroy(g_cpuInfo);
 		g_cpuInfo = nullptr;
@@ -7863,6 +7939,17 @@ bool Dispatch(const std::string &method, const json &params, json &result, std::
 		return false;
 	}
 	return it->second(params, result, error);
+}
+
+bool DispatchAsync(const std::string &method, const json &params,
+		   CefRefPtr<CefMessageRouterBrowserSide::Callback> callback)
+{
+	auto it = g_asyncMethods.find(method);
+	if (it == g_asyncMethods.end()) {
+		return false;
+	}
+	it->second(params, callback);
+	return true;
 }
 
 void EmitEvent(const std::string &name, const json &payload)
@@ -7963,6 +8050,15 @@ bool ObsQueryHandler::OnQuery(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFr
 
 	const std::string method = envelope["method"].get<std::string>();
 	const json params = envelope.contains("params") ? envelope["params"] : json(nullptr);
+
+	// Async lane first (Phase 8b): if the method blocks on the network it runs
+	// off-thread and resolves `callback` later, on the UI thread. We hand off the
+	// ref-counted callback and return without touching the sync path, so there is
+	// exactly one resolution per query.
+	if (Bridge::DispatchAsync(method, params, callback)) {
+		HostLog("[bridge] " + method + " -> async dispatched");
+		return true;
+	}
 
 	json result;
 	std::string error;

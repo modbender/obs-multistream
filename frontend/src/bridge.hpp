@@ -57,6 +57,15 @@ void RemoveBrowser(CefRefPtr<CefBrowser> browser);
 // UI thread (the message-router callback thread).
 bool Dispatch(const std::string &method, const json &params, json &result, std::string &error);
 
+// Try the deferred-callback async lane (Phase 8b). If `method` is registered as an
+// async method, hand off the ref-counted `callback` to its off-thread handler and
+// return true -- the callback resolves later, on the UI thread, after the network
+// work completes (same request/response contract as Dispatch, just non-blocking).
+// Returns false if `method` is not async, so the caller falls through to the
+// synchronous Dispatch. Runs on the browser UI thread.
+bool DispatchAsync(const std::string &method, const json &params,
+		   CefRefPtr<CefMessageRouterBrowserSide::Callback> callback);
+
 // Fan a server-push event to JS. Thread-safe: posts to TID_UI if not already
 // there. payload is any JSON value (object/array/scalar/null).
 void EmitEvent(const std::string &name, const json &payload);
