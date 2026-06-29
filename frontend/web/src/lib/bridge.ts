@@ -442,6 +442,65 @@ export interface ServiceType {
   name: string;
 }
 
+// --- platform OAuth (Connect Account dual path, Phase 8) ---------------------
+
+/** One field a provider exposes in its capability descriptor. `tier`/`shareable`
+ * drive how the 8b stream-info modal groups/persists the field; 8a only reads the
+ * provider id/displayName, so the rest is carried loosely. */
+export interface OAuthProviderField {
+  key: string;
+  label: string;
+  type: string;
+  tier?: string;
+  shareable?: boolean;
+}
+
+/** A streaming platform that supports account connection (oauth.providers). The
+ * list is empty in a build without the platform's client id, so callers must treat
+ * an absent provider as "stream-key only". */
+export interface OAuthProvider {
+  id: string;
+  displayName: string;
+  brandColor: string;
+  auth: { strategy: string; scopes: string[]; needsSecret: boolean };
+  fields: OAuthProviderField[];
+}
+
+/** Connection state of one stream profile (oauth.status). `connected` gates the
+ * green "linked" panel/chip; `displayName`/`login` name the linked account. */
+export interface OAuthStatus {
+  profileUuid: string;
+  providerId: string;
+  connected: boolean;
+  login: string;
+  displayName: string;
+}
+
+/** Device-code prompt pushed during oauth.connect (oauth.deviceCode). The system
+ * browser is already opened to `verificationUri` by the bridge; the modal shows the
+ * `userCode` for the user to enter and counts down from `expiresSec`. */
+export interface DeviceCodePrompt {
+  profileUuid: string;
+  userCode: string;
+  verificationUri: string;
+  expiresSec: number;
+}
+
+/** A profile's stream metadata (Go Live "Stream Information"). Minimal shape; the
+ * 8b modal fleshes it out. */
+export interface StreamMeta {
+  title: string;
+  categoryId: string;
+  categoryName: string;
+  tags: string[];
+}
+
+/** One category/game match (streamMeta.searchCategories). */
+export interface StreamCategory {
+  id: string;
+  name: string;
+}
+
 // --- output bindings (profile x canvas routing edges, 4.4.3) -----------------
 
 /**
@@ -963,6 +1022,24 @@ export interface ObsMethods {
   "streamProfile.remove": { removed: string };
   "streamProfile.setPrimary": { uuid: string; isPrimary: boolean };
   "serviceTypes.list": ServiceType[];
+  // Platform OAuth (Connect Account dual path, Phase 8). providers enumerates the
+  // platforms that support account connection (empty in a build without a client
+  // id -> stream-key only); connect ({providerId, profileUuid}) kicks off the
+  // device-code flow and returns immediately ({pending:true}) -- the real result
+  // arrives via the oauth.deviceCode / oauth.status / oauth.connectError events;
+  // disconnect ({profileUuid}) clears a profile's linked account (emits oauth.status);
+  // status reports the per-profile link state.
+  "oauth.providers": OAuthProvider[];
+  "oauth.connect": { ok: boolean; pending: boolean };
+  "oauth.disconnect": { ok: boolean };
+  "oauth.status": OAuthStatus[];
+  // Stream metadata (Go Live "Stream Information": title / category / tags). get
+  // loads a profile's current metadata; searchCategories resolves a query to game/
+  // category matches; set persists and echoes the metadata. Fleshed out by the 8b
+  // modal; typed minimally here so the surface is usable without breaking typing.
+  "streamMeta.get": StreamMeta;
+  "streamMeta.searchCategories": StreamCategory[];
+  "streamMeta.set": StreamMeta;
   // Output bindings (profile x canvas routing edges, 4.4.3).
   "outputBinding.list": OutputBindingInfo[];
   "outputBinding.create": { uuid: string };
@@ -1136,6 +1213,16 @@ export interface ObsEvents {
   "settings.advancedChanged": AdvancedSettings;
   "canvas.changed": Record<string, never>;
   "streamProfile.changed": Record<string, never>;
+  // Platform OAuth device-code flow (Phase 8). deviceCode carries the user code +
+  // verification URL to display (the system browser is already opened by the bridge);
+  // status fires whenever any profile's link state changes (re-fetch oauth.status);
+  // connectError reports a failed/aborted connect for one profile.
+  "oauth.deviceCode": DeviceCodePrompt;
+  "oauth.status": OAuthStatus[];
+  "oauth.connectError": { profileUuid: string; error: string };
+  // A profile's stream metadata changed (8b modal apply / external edit); a consumer
+  // re-runs streamMeta.get for that profile.
+  "streamMeta.changed": { profileUuid: string };
   "outputBinding.changed": Record<string, never>;
   // A scene link was created/updated/removed; a consumer re-runs sceneLink.list.
   "sceneLink.changed": Record<string, never>;

@@ -24,6 +24,8 @@
   import { logViewerOpen, closeLogViewer } from "./lib/logViewerOpener.svelte";
   import ImporterDialog from "./lib/ImporterDialog.svelte";
   import { importerOpen, closeImporter } from "./lib/importerOpener.svelte";
+  import OAuthConnectDialog from "./lib/OAuthConnectDialog.svelte";
+  import { oauthConnect, closeOAuthConnect } from "./lib/oauthConnectOpener.svelte";
   import { undoStore } from "./lib/undoStore.svelte";
   import { obs } from "./lib/bridge";
   import { clipboard } from "./lib/clipboardStore.svelte";
@@ -147,6 +149,10 @@
 
 {#if importerOpen.open}
   <ImporterDialog onClose={closeImporter} />
+{/if}
+
+{#if oauthConnect.open && oauthConnect.req}
+  <OAuthConnectDialog req={oauthConnect.req} onClose={closeOAuthConnect} />
 {/if}
 
 <Toast />
