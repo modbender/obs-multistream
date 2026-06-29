@@ -32,6 +32,7 @@
 #include "multistream/SceneLinkStore.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include "multistream/VirtualCamManager.hpp"
+#include "oauth/registry.hpp"
 #include "AdvancedSettings.hpp"
 #include "GeneralSettings.hpp"
 #include "paths.hpp"
@@ -633,6 +634,11 @@ bool ObsBootstrap::Start()
 	Transitions::Init();
 
 	LoadMultistreamModel();
+
+	// Populate the OAuth provider registry (Phase 8a). Empty in Task 3 (framework
+	// only); Task 4 registers the Twitch provider. Done after the model loads so a
+	// provider can read configured credentials.
+	OAuth::BootProviders();
 
 	// Boot reconcile: the global video pipeline was initialized to a fixed default
 	// above (before modules could load), but the persisted Default canvas def is the

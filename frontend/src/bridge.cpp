@@ -1,6 +1,8 @@
 #include "bridge.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <filesystem>
@@ -8,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -55,6 +58,9 @@
 #include "multistream/StorePaths.hpp"
 #include "multistream/StreamProfileStore.hpp"
 #include "multistream/VirtualCamManager.hpp"
+#include "oauth/provider.hpp"
+#include "oauth/registry.hpp"
+#include "oauth/token_store.hpp"
 #include <util/dstr.h>
 #include <util/platform.h>
 #include <graphics/vec2.h>
@@ -71,6 +77,11 @@ namespace {
 using MethodFn = std::function<bool(const json &params, json &result, std::string &error)>;
 
 std::unordered_map<std::string, MethodFn> g_methods;
+
+// Cleared at Shutdown so an in-flight OAuth device-code poll loop running on a
+// detached worker bails instead of polling on after teardown (its emits already
+// no-op via the AsyncTask alive-guard; this stops the loop body too).
+std::atomic<bool> g_oauthRunning{true};
 
 // All live UI browsers; EmitEvent broadcasts to each. Registered/unregistered on
 // the UI thread; read on the UI thread (EmitEvent posts there first). The mutex
@@ -7257,6 +7268,191 @@ bool MethodLogGetCurrent(const json & /*params*/, json &result, std::string & /*
 	return true;
 }
 
+// ---- OAuth (Phase 8a) ------------------------------------------------------
+//
+// Generic, registry-dispatched account-connection surface. The device-code grant
+// runs on a detached worker (blocking HTTP); progress is reported back to JS via
+// EmitEvent (oauth.deviceCode / oauth.status / oauth.connectError), all of which
+// marshal to TID_UI and no-op after teardown. No per-platform branches here --
+// everything routes through the provider the registry resolves by id.
+
+// Per-profile connection state from the token store: one row per stored account.
+json BuildOAuthStatusArray()
+{
+	json arr = json::array();
+	for (const auto &entry : OAuth::Tokens().All()) {
+		const OAuth::OAuthAccount &acct = entry.second;
+		arr.push_back(json{
+			{"profileUuid", entry.first},
+			{"providerId", acct.providerId},
+			{"connected", true},
+			{"login", acct.login},
+			{"displayName", acct.displayName},
+		});
+	}
+	return arr;
+}
+
+void EmitOAuthStatus()
+{
+	AsyncTask::PostToUi([] { EmitEvent("oauth.status", BuildOAuthStatusArray()); });
+}
+
+void EmitOAuthConnectError(const std::string &profileUuid, const std::string &providerId, const std::string &message)
+{
+	AsyncTask::PostToUi([profileUuid, providerId, message] {
+		EmitEvent("oauth.connectError",
+			  json{{"profileUuid", profileUuid}, {"providerId", providerId}, {"error", message}});
+	});
+}
+
+void OpenUrlInBrowser(const std::string &url)
+{
+	if (url.empty()) {
+		return;
+	}
+	ShellExecuteW(nullptr, L"open", Utf8ToWide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// The device-code flow body, run on a detached worker thread. Owns everything by
+// value so it can safely outlive the originating bridge call.
+void RunOAuthConnect(std::string providerId, std::string profileUuid)
+{
+	OAuth::StreamProvider *provider = OAuth::Registry().Get(providerId);
+	if (!provider) {
+		EmitOAuthConnectError(profileUuid, providerId, "unknown provider");
+		return;
+	}
+	OAuth::AuthStrategy *auth = provider->auth();
+	if (!auth) {
+		EmitOAuthConnectError(profileUuid, providerId, "provider has no auth strategy");
+		return;
+	}
+
+	OAuth::DeviceCodeStart start;
+	std::string err;
+	if (!auth->begin(start, err)) {
+		EmitOAuthConnectError(profileUuid, providerId, err);
+		return;
+	}
+
+	// Surface the user code + open the verification page, then poll.
+	const std::string userCode = start.userCode;
+	const std::string verifyUri = start.verificationUri;
+	const int expiresSec = start.expiresSec;
+	AsyncTask::PostToUi([profileUuid, providerId, userCode, verifyUri, expiresSec] {
+		EmitEvent("oauth.deviceCode", json{{"profileUuid", profileUuid},
+						   {"providerId", providerId},
+						   {"userCode", userCode},
+						   {"verificationUri", verifyUri},
+						   {"expiresSec", expiresSec}});
+		OpenUrlInBrowser(verifyUri);
+	});
+
+	int intervalSec = start.intervalSec > 0 ? start.intervalSec : 5;
+	const int lifeSec = start.expiresSec > 0 ? start.expiresSec : 300;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(lifeSec);
+
+	OAuth::OAuthAccount acct;
+	acct.providerId = providerId;
+
+	for (;;) {
+		if (!g_oauthRunning.load(std::memory_order_acquire)) {
+			return; // bridge tore down mid-flow
+		}
+		std::this_thread::sleep_for(std::chrono::seconds(intervalSec));
+		if (!g_oauthRunning.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (std::chrono::steady_clock::now() >= deadline) {
+			EmitOAuthConnectError(profileUuid, providerId, "device code expired before authorization");
+			return;
+		}
+
+		std::string pollErr;
+		const OAuth::AuthStrategy::PollResult result = auth->poll(start.deviceCode, acct, pollErr);
+		if (result == OAuth::AuthStrategy::PollResult::Pending) {
+			continue;
+		}
+		if (result == OAuth::AuthStrategy::PollResult::SlowDown) {
+			intervalSec += 5;
+			continue;
+		}
+		if (result == OAuth::AuthStrategy::PollResult::Expired) {
+			EmitOAuthConnectError(profileUuid, providerId, "device code expired before authorization");
+			return;
+		}
+		if (result == OAuth::AuthStrategy::PollResult::Error) {
+			EmitOAuthConnectError(profileUuid, providerId, pollErr);
+			return;
+		}
+		break; // Success
+	}
+
+	// Tokens are in hand. Fetch identity (best-effort: keep the precious one-time
+	// device-flow tokens even if the identity call fails), then persist + notify.
+	std::string idErr;
+	if (!provider->fetchIdentity(acct, idErr)) {
+		HostLog("[oauth] fetchIdentity failed for " + providerId + ": " + idErr);
+	}
+	OAuth::Tokens().Put(profileUuid, acct);
+	EmitOAuthStatus();
+}
+
+bool MethodOAuthProviders(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (OAuth::StreamProvider *provider : OAuth::Registry().All()) {
+		try {
+			arr.push_back(provider->capabilityJson());
+		} catch (const std::exception &e) {
+			HostLog(std::string("[oauth] capabilityJson failed: ") + e.what());
+		}
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodOAuthConnect(const json &params, json &result, std::string &error)
+{
+	const std::string providerId = OptString(params, "providerId");
+	const std::string profileUuid = OptString(params, "profileUuid");
+	if (providerId.empty() || profileUuid.empty()) {
+		error = "oauth.connect requires non-empty 'providerId' and 'profileUuid'";
+		return false;
+	}
+	if (!OAuth::Registry().Get(providerId)) {
+		error = "unknown provider: " + providerId;
+		return false;
+	}
+
+	// The flow is long-running (user authorizes out-of-band); run it detached and
+	// answer immediately. Progress arrives as oauth.deviceCode/status/connectError.
+	AsyncTask::RunAsync([providerId, profileUuid] { RunOAuthConnect(providerId, profileUuid); });
+
+	result = json{{"ok", true}, {"pending", true}};
+	return true;
+}
+
+bool MethodOAuthDisconnect(const json &params, json &result, std::string &error)
+{
+	const std::string profileUuid = OptString(params, "profileUuid");
+	if (profileUuid.empty()) {
+		error = "oauth.disconnect requires a non-empty 'profileUuid'";
+		return false;
+	}
+	OAuth::Tokens().Remove(profileUuid);
+	EmitEvent("oauth.status", BuildOAuthStatusArray());
+	result = json{{"ok", true}};
+	return true;
+}
+
+bool MethodOAuthStatus(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	result = BuildOAuthStatusArray();
+	return true;
+}
+
 void Init()
 {
 	g_methods = {
@@ -7400,6 +7596,10 @@ void Init()
 		{"browserDocks.list", MethodBrowserDocksList},
 		{"browserDocks.set", MethodBrowserDocksSet},
 		{"log.getCurrent", MethodLogGetCurrent},
+		{"oauth.providers", MethodOAuthProviders},
+		{"oauth.connect", MethodOAuthConnect},
+		{"oauth.disconnect", MethodOAuthDisconnect},
+		{"oauth.status", MethodOAuthStatus},
 	};
 
 	// Notify JS whenever the undo stack changes (add/undo/redo/clear) so the UI's
@@ -7416,6 +7616,8 @@ void Shutdown()
 	// has already returned by the time Stop() reaches here, so a late marshal must
 	// no-op rather than touch CEF.
 	AsyncTask::SetAlive(false);
+	// Stop any in-flight OAuth poll loop on a detached worker from spinning on.
+	g_oauthRunning.store(false, std::memory_order_release);
 	obs_frontend_remove_event_callback(OnFrontendEvent, nullptr);
 	// Drop the undo->event hook so the g_undo.Clear() later in Stop() (after the CEF
 	// loop has returned) doesn't try to emit through a torn-down bridge.

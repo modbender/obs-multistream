@@ -99,6 +99,17 @@ target_sources(
     src/obf.h
     src/provider_creds.cpp
     src/provider_creds.hpp
+    # Phase 8a OAuth foundation: provider registry + capability descriptors, the
+    # device-code auth strategy, and a DPAPI-wrapped per-stream-profile token
+    # store. provider.hpp is the interface set the registry + bridge dispatch
+    # through; concrete providers (Twitch) plug in at Task 4.
+    src/oauth/provider.hpp
+    src/oauth/device_code.cpp
+    src/oauth/device_code.hpp
+    src/oauth/token_store.cpp
+    src/oauth/token_store.hpp
+    src/oauth/registry.cpp
+    src/oauth/registry.hpp
     api-impl/frontend_callbacks.cpp
     api-impl/frontend_callbacks.hpp
     # Phase 4.4.0 native-multistream data model. These five model files are
@@ -207,6 +218,8 @@ target_link_libraries(
     ole32
     shell32
     shlwapi
+    # DPAPI (CryptProtectData/CryptUnprotectData) wraps the OAuth token store.
+    crypt32
     # The embedded MCP server's HttpServer uses Winsock.
     ws2_32
 )
