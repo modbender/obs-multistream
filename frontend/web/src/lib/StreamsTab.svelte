@@ -110,9 +110,16 @@
     return statuses.find((s) => s.profileUuid === uuid && s.connected) ?? null;
   }
 
+  // A token whose scopes are stale: reports connected:false but needsReconnect:true.
+  // Distinct from "never linked" (no row / both false) so the UI can prompt a relink.
+  function needsReconnectFor(uuid: string): OAuthStatus | null {
+    return statuses.find((s) => s.profileUuid === uuid && s.needsReconnect && !s.connected) ?? null;
+  }
+
   // The provider + connection state for the profile in the open edit form.
   const editingProvider = $derived(editingProfile ? providerForProfile(editingProfile) : null);
   const connectedStatus = $derived(editingUuid ? connectedStatusFor(editingUuid) : null);
+  const needsReconnectStatus = $derived(editingUuid ? needsReconnectFor(editingUuid) : null);
 
   function openAdd() {
     editingUuid = null;
@@ -129,9 +136,10 @@
     editingProfile = p;
     fLabel = p.label;
     fService = p.service || serviceTypes[0]?.id || "rtmp_common";
-    // Default to Connect only when an account is already linked; otherwise (incl. no
-    // provider) start on the stream-key path.
-    connMode = providerForProfile(p) && connectedStatusFor(p.uuid) ? "connect" : "key";
+    // Default to Connect when an account is linked OR needs a relink (so the warn
+    // panel shows); otherwise (incl. no provider) start on the stream-key path.
+    connMode =
+      providerForProfile(p) && (connectedStatusFor(p.uuid) || needsReconnectFor(p.uuid)) ? "connect" : "key";
     formError = null;
     formOpen = true;
   }
@@ -242,6 +250,8 @@
                   {#if providerForProfile(p)}
                     {#if connectedStatusFor(p.uuid)}
                       <span class="chip ok">✓ linked</span>
+                    {:else if needsReconnectFor(p.uuid)}
+                      <span class="chip warn">⚠ Reconnect</span>
                     {:else}
                       <span class="chip key">key only</span>
                     {/if}
@@ -317,6 +327,15 @@
                   </span>
                   <button class="lnk" onclick={() => void disconnect()}>Disconnect</button>
                 </div>
+              {:else if needsReconnectStatus}
+                <div class="conn warn">
+                  <span class="dot warn">⚠</span>
+                  <span class="who">
+                    <b>Reconnect needed</b>
+                    <small>Your authorization is out of date — reconnect to keep editing stream info.</small>
+                  </span>
+                </div>
+                <button class="btn connect" onclick={connect}>Reconnect {editingProvider.displayName} ▸</button>
               {:else}
                 <button class="btn connect" onclick={connect}>Connect {editingProvider.displayName} ▸</button>
               {/if}
@@ -420,6 +439,10 @@
   .chip.ok {
     color: var(--color-ok);
     border-color: var(--color-ok-bg);
+  }
+  .chip.warn {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
   }
   .chip.key {
     color: var(--color-muted);
@@ -561,6 +584,13 @@
   }
   .conn .dot {
     color: var(--color-ok);
+  }
+  .conn.warn {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  }
+  .conn.warn .dot {
+    color: var(--color-accent);
   }
   .conn .who {
     flex: 1;

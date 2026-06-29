@@ -25,6 +25,9 @@
     provider: OAuthProvider | null;
     status: OAuthStatus | null;
     connected: boolean;
+    // Token scopes are stale: the backend refuses streamMeta, so this card is shown
+    // muted (like key-only) and excluded from the push — it still goes live via key.
+    needsReconnect: boolean;
   }
 
   let providers = $state<OAuthProvider[]>([]);
@@ -137,10 +140,20 @@
       seen.add(b.profileUuid);
       const status = statuses.find((s) => s.profileUuid === b.profileUuid) ?? null;
       const provider = resolveProvider(profile, status);
-      out.push({ profileUuid: b.profileUuid, profile, provider, status, connected: !!(provider && status?.connected) });
+      out.push({
+        profileUuid: b.profileUuid,
+        profile,
+        provider,
+        status,
+        connected: !!(provider && status?.connected),
+        needsReconnect: !!(provider && status?.needsReconnect && !status?.connected),
+      });
     }
     return out;
   });
+  // Only fully-connected destinations are pushed to (prefill get + confirm set). A
+  // needsReconnect destination is connected:false, so it is excluded from BOTH loops
+  // here and still goes live via its stream key.
   const connectedDests = $derived(armed.filter((d) => d.connected));
 
   // Shared-defaults descriptor: the UNION of every shareable field across connected
@@ -255,12 +268,21 @@
     const results = await Promise.allSettled(
       targets.map((d) => obs.call("streamMeta.set", { profileUuid: d.profileUuid, fields: effectiveFields(d) })),
     );
-    results.forEach((r, i) => {
-      if (r.status === "rejected") {
-        const name = targets[i].profile.label || targets[i].provider?.displayName || "destination";
-        showToast("Stream info failed: " + name, (r.reason as Error)?.message ?? "metadata push failed");
-      }
-    });
+    // Partial-failure tolerance: a failed metadata push never blocks going live. One
+    // aggregate toast (showToast replaces, so per-destination toasts would clobber
+    // each other) names the platform(s) in human terms, not raw API strings.
+    const failed = results
+      .map((r, i) => (r.status === "rejected" ? { dest: targets[i], reason: r.reason as Error } : null))
+      .filter((x): x is { dest: Dest; reason: Error } => x !== null);
+    const goingLive = goLiveModal.mode === "golive";
+    const tail = goingLive ? " — going live anyway" : "";
+    if (failed.length === 1) {
+      const name = failed[0].dest.provider?.displayName || failed[0].dest.profile.label || "this platform";
+      showToast("Couldn't update " + name + " stream info" + tail, failed[0].reason?.message ?? "metadata push failed");
+    } else if (failed.length > 1) {
+      const names = failed.map((f) => f.dest.provider?.displayName || f.dest.profile.label).join(", ");
+      showToast("Couldn't update stream info for " + failed.length + " destinations" + tail, names);
+    }
     if (goLiveModal.mode === "golive") {
       try {
         await obs.call("streaming.start");
@@ -412,15 +434,22 @@
                 </div>
               </div>
             {:else}
-              <!-- Key-only / unconnected: muted card, no fields. -->
+              <!-- Key-only / unconnected / stale-token: muted card, no fields. -->
               <div class="dest keyonly">
                 <div class="dh">
-                  <span class="pdot" style:background="var(--color-muted)"></span>
-                  <span class="pname">{d.profile.platform || d.profile.label}</span>
+                  <span class="pdot" style:background={d.needsReconnect ? "var(--color-accent)" : "var(--color-muted)"}
+                  ></span>
+                  <span class="pname">{d.provider?.displayName || d.profile.platform || d.profile.label}</span>
                   <span class="pacct">· {d.profile.label}</span>
                 </div>
                 <div class="body">
-                  <p class="note">Key-only profile — no metadata API. Streams as-is.</p>
+                  {#if d.needsReconnect}
+                    <p class="note warn">
+                      ⚠ Authorization expired — reconnect in Streams to edit metadata. Streams as-is.
+                    </p>
+                  {:else}
+                    <p class="note">Key-only profile — no metadata API. Streams as-is.</p>
+                  {/if}
                 </div>
               </div>
             {/if}
@@ -456,9 +485,14 @@
             {:else}
               <div class="simple-dest keyonly">
                 <div class="sd-head">
-                  <span class="pdot" style:background="var(--color-muted)"></span>
-                  <span class="pname">{d.profile.platform || d.profile.label}</span>
-                  <span class="pacct">· {d.profile.label} — key-only, streams as-is</span>
+                  <span class="pdot" style:background={d.needsReconnect ? "var(--color-accent)" : "var(--color-muted)"}
+                  ></span>
+                  <span class="pname">{d.provider?.displayName || d.profile.platform || d.profile.label}</span>
+                  {#if d.needsReconnect}
+                    <span class="pacct">· {d.profile.label} — ⚠ reconnect in Streams to edit metadata, streams as-is</span>
+                  {:else}
+                    <span class="pacct">· {d.profile.label} — key-only, streams as-is</span>
+                  {/if}
                 </div>
               </div>
             {/if}
@@ -673,6 +707,9 @@
     font-size: 11px;
     color: var(--color-muted);
     margin: 0;
+  }
+  .note.warn {
+    color: var(--color-accent);
   }
   .mf {
     display: flex;

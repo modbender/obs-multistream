@@ -471,11 +471,16 @@ export interface OAuthProvider {
 }
 
 /** Connection state of one stream profile (oauth.status). `connected` gates the
- * green "linked" panel/chip; `displayName`/`login` name the linked account. */
+ * green "linked" panel/chip; `displayName`/`login` name the linked account.
+ * `needsReconnect` flags a token issued under an older scope set: it reports
+ * `connected:false` but is distinct from "never linked" — the backend refuses
+ * streamMeta for it, so the UI shows a warn "reconnect" state instead of a plain
+ * key-only state. */
 export interface OAuthStatus {
   profileUuid: string;
   providerId: string;
   connected: boolean;
+  needsReconnect: boolean;
   login: string;
   displayName: string;
 }

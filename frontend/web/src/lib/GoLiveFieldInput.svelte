@@ -45,6 +45,22 @@
     onChange(arr.includes(v) ? arr.filter((o) => o !== v) : [...arr, v]);
   }
 
+  // Render a local OS path as a CEF-loadable URL: normalize Windows backslashes to
+  // forward slashes, ensure a leading slash, and encode spaces/specials. Windows
+  // "C:\a b.png" -> file:///C:/a%20b.png; POSIX "/home/x.png" -> file:///home/x.png.
+  function toFileUrl(p: string): string {
+    const norm = p.replace(/\\/g, "/");
+    return encodeURI("file://" + (norm.startsWith("/") ? norm : "/" + norm));
+  }
+
+  // Reset the load-failure flag whenever a different path is selected so a new pick
+  // re-attempts the preview after a prior file failed to load.
+  let imgError = $state(false);
+  $effect(() => {
+    void str;
+    imgError = false;
+  });
+
   async function pickImage(): Promise<void> {
     try {
       const r = await obs.call("dialog.openFile", { mode: "open", filter: "Image Files (*.png *.jpg *.jpeg *.bmp)" });
@@ -53,6 +69,24 @@
       }
     } catch {
       // Cancelled or unavailable: leave the field as-is.
+    }
+  }
+
+  function clearImage(e: MouseEvent): void {
+    e.stopPropagation();
+    // Empty string -> isEmptyVal() true in the modal, so the field is omitted from
+    // the streamMeta push rather than sent as a blank thumbnail.
+    onChange("");
+  }
+
+  function onDrop(e: DragEvent): void {
+    e.preventDefault();
+    // CEF exposes the OS path on dropped files via the non-standard File.path. If it
+    // is absent (sandboxed / plain browser), drag-drop is a no-op and click-to-pick
+    // remains the path; we can't synthesize a local path from a sandboxed File.
+    const f = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined;
+    if (f?.path) {
+      onChange(f.path);
     }
   }
 </script>
@@ -73,9 +107,27 @@
     oninput={(e) => onChange(e.currentTarget.value)}
   ></textarea>
 {:else if field.type === "image"}
-  <button class="thumb" onclick={() => void pickImage()}>
-    {str ? basename(str) : "drop / pick"}
-  </button>
+  {#if str}
+    <div class="thumb has">
+      {#if imgError}
+        <span class="fname">{basename(str)}</span>
+      {:else}
+        <img class="preview" src={toFileUrl(str)} alt={basename(str)} onerror={() => (imgError = true)} />
+      {/if}
+      <button class="thumb-x" title="Remove" aria-label="Remove image" onclick={clearImage}>×</button>
+    </div>
+    <div class="thumb-meta">{basename(str)} · PNG/JPG, ≤2 MB</div>
+  {:else}
+    <button
+      class="thumb"
+      ondragover={(e) => e.preventDefault()}
+      ondrop={onDrop}
+      onclick={() => void pickImage()}
+    >
+      <span>drop / pick</span>
+      <small>PNG/JPG, ≤2 MB</small>
+    </button>
+  {/if}
 {:else if field.type === "enum"}
   <select class="inp" class:narrow value={str} onchange={(e) => onChange(e.currentTarget.value)}>
     <option value="">—</option>
@@ -187,8 +239,10 @@
     color: var(--color-muted);
     font-size: 10px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 2px;
     background: var(--color-base);
     cursor: pointer;
     overflow: hidden;
@@ -196,8 +250,54 @@
     padding: 4px;
     word-break: break-all;
   }
-  .thumb:hover {
+  .thumb small {
+    font-size: 9px;
+    color: var(--color-muted);
+  }
+  button.thumb:hover {
     border-color: var(--color-accent);
     color: var(--color-accent);
+  }
+  .thumb.has {
+    position: relative;
+    border-style: solid;
+    padding: 0;
+    cursor: default;
+  }
+  .preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .fname {
+    font-size: 10px;
+    color: var(--color-muted);
+    padding: 4px;
+  }
+  .thumb-x {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    padding: 0;
+    font-size: 14px;
+    background: var(--color-base);
+    color: var(--color-text);
+    border: none;
+    border-left: var(--border-weight) solid var(--color-border);
+    border-bottom: var(--border-weight) solid var(--color-border);
+    cursor: pointer;
+  }
+  .thumb-x:hover {
+    color: var(--color-accent);
+  }
+  .thumb-meta {
+    font-size: 9px;
+    color: var(--color-muted);
+    margin-top: 3px;
+    word-break: break-all;
   }
 </style>
