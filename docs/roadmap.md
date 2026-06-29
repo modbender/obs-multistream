@@ -1032,6 +1032,43 @@ this phase.
 
 ---
 
+## Phase 9 — Creator engagement layer: multichat, viewer count, alerts & widgets 🔭 PLANNED
+
+**Goal:** the Streamlabs/StreamElements-style live layer the fork lacks — unified **multichat**
+(read+send across every connected platform in one pane), **aggregate viewer count** (sum of live
+viewers across destinations), and the broader **alerts / events / overlay widgets** family
+(follows, subs, donations, chat-as-a-source, viewer goals). This is the natural payoff of the
+Phase 8 OAuth foundation: the same provider registry + per-profile accounts now also carry the
+**chat + events** scopes (Kick `chat:write`/`events:subscribe`, Twitch chat/EventSub, YouTube
+liveChat), so engagement features ride the existing connection rather than a new auth stack.
+
+**Why it builds on Phase 8 cleanly:** the `StreamProvider` registry is already the extensibility
+seam. Phase 9 adds, per provider, optional **chat** + **event** capability hooks (connect to the
+platform's chat transport, normalize messages/events to a common shape) — adding a platform's chat
+stays ~one module, mirroring how metadata providers slot in. Enable the extra OAuth scopes now
+(Kick form: Write to Chat feed + Subscribe to events; Twitch: chat scopes; YouTube: youtube
+scope already covers liveChat) so accounts connected today are forward-compatible.
+
+**Candidate sub-features (to brainstorm/sequence later):**
+- **Multichat dock** — one merged, platform-tagged feed; send-to-all or per-platform; moderation
+  actions where scoped. Per-platform chat transports: Twitch IRC/EventSub, Kick (chat:write +
+  events:subscribe / Pusher), YouTube liveChatMessages.
+- **Aggregate viewer count** — poll/subscribe each live destination's viewer count; show total +
+  per-platform breakdown (a Monitor-page card + a Studio bar chip).
+- **Alerts / events feed** — follows / subs / gifts / (Kick) Kicks / (YT) superchat → a normalized
+  event stream driving on-screen alert widgets + a Studio events ticker.
+- **Overlay widgets as browser sources** — alert box, chat box, viewer-goal, recent-events — local
+  widget pages the user adds as browser sources (and/or a built-in overlay compositor on a canvas).
+- **Chat as a source** — render the merged chat into a scene (browser source or native).
+
+**Open questions for the Phase 9 brainstorm:** widget hosting (local HTTP server for browser-source
+widget pages vs native overlay render); event transport per platform (poll vs websocket/EventSub);
+whether to compose overlays on a dedicated canvas; donation/tip integrations (likely third-party,
+e.g. StreamElements/Streamlabs tip APIs) and whether those are in scope. Formalize after Phase 8
+ships and the platform accounts/scopes are proven.
+
+---
+
 ## Backlog & deferred decisions ⏸
 
 - ⏸ **GoLive / Multitrack Video** — currently dormant. It's Twitch Enhanced
