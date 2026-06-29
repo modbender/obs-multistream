@@ -867,7 +867,7 @@ frontend-only (backend already had `streaming.start`/`stop` = StartAllEnabled/St
 
 ---
 
-## Phase 8 — Platform integration: OAuth + stream metadata + Go Live modal 🔭 PLANNED
+## Phase 8 — Platform integration: OAuth + stream metadata + Go Live modal 🚧 8a DONE
 
 **Goal:** A "Stream Information" modal that opens when the single **Go Live** button is clicked
 (classic-OBS style), letting the user set per-destination **title / category / tags / thumbnail**
@@ -977,11 +977,26 @@ this phase.
 
 ### Proposed phasing
 
-- **8a — OAuth foundation + first platform (Twitch).** Bridge OAuth (device-code flow), token
-  store, "Connect account" UI, `streamMeta` set/category-search; Twitch `PATCH /helix/channels`.
-  Fastest end-to-end proof (no secret, no verification, single PATCH).
+- **8a — OAuth foundation + first platform (Twitch). ✅ DONE 2026-06-29** (commits
+  `6b0c72464`..`e613f3130`, branch `ui-redesign`). Bridge OAuth (device-code flow, no secret),
+  DPAPI-wrapped per-profile token store, provider registry + `StreamProvider`/`AuthStrategy`
+  interfaces, reusable `DeviceCodeStrategy`, `TwitchProvider` (Helix users/channels/search +
+  `PATCH /helix/channels`, reactive-401, stream-key autofill), Streams **Connect Account / Use
+  Stream Key** dual path + device-code connect modal, `streamMeta` get/set/category-search,
+  `oauth.*` bridge methods. 5 tasks subagent-driven + holistic review (super-quality =
+  SHIP_WITH_FIXES, 0 Critical); the 3 foundation Important items fixed (atomic token write,
+  scopeVer enforcement, single-flight refresh coherence) + minors. check 0/0, build EXIT=0, smoke
+  148 methods / leaks 2 / clean shutdown. **Acceptance owed (needs a real Twitch client id + GUI):**
+  live connect round-trip, scopeVer-refusal, concurrent-refresh coherence, DPAPI write/read — all
+  compile-clean + logic-reviewed but unexercised in portable smoke (`provider registry booted: 0`).
 - **8b — Go Live modal.** Wire the single Go Live button to open the modal; platform-conditional
-  fields; Twitch metadata pushed on confirm → then start.
+  fields; Twitch metadata pushed on confirm → then start. **LOCKED first task: convert
+  `streamMeta.get/set/searchCategories` from synchronous (UI-thread-blocking up to the 30 s HTTP
+  timeout) to the async `RunAsync`+event shape `oauth.connect` already uses** — deferred from 8a
+  because those methods had zero callers there; the modal is their first consumer, and 8a's
+  single-flight refresh fix already makes the concurrent path safe. Modal = Simple/Advanced toggle
+  (Simple = shared fields; Advanced = per-destination full + platform-unique, empty inherits from
+  shared) per the approved mocks in `docs/superpowers/specs/2026-06-28-phase8-mocks/`.
 - **8c — Kick.** Auth-code+PKCE with embedded (obfuscated) secret; `PATCH /public/v1/channels`.
 - **8d — YouTube.** PKCE loopback; broadcast lifecycle (create/bind/transition) + category/tags +
   privacy + `thumbnails.set`. **Start Google app-verification paperwork in parallel from 8a.**
