@@ -212,7 +212,29 @@ target_include_directories(
 # default to the environment so CI/.env feed the credential without a -D flag.
 # TWITCH_HASH must default to 0 (not empty) so the "0x@TWITCH_HASH@" template
 # expands to a valid "0x0" literal on the no-credential path.
-set(TWITCH_CLIENTID "$ENV{TWITCH_CLIENTID}" CACHE STRING "Twitch OAuth client id (public; device-code flow)")
+# Local dev convenience: auto-load credentials from a gitignored repo-root .env
+# (KEY=VALUE lines, CR-tolerant) into the environment so `cmake --preset` picks
+# them up with no manual export. CI provides these as real env vars / secrets and
+# has no .env, so this is a no-op there.
+set(_env_file "${CMAKE_SOURCE_DIR}/.env")
+if(EXISTS "${_env_file}")
+  file(STRINGS "${_env_file}" _env_lines)
+  foreach(_line IN LISTS _env_lines)
+    string(STRIP "${_line}" _line)
+    if(_line MATCHES "^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+      set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
+    endif()
+  endforeach()
+  message(STATUS "Loaded build credentials from ${_env_file}")
+endif()
+
+# Env input names match .env / CI secrets (TWITCH_CLIENT_ID); the cache var keeps
+# the no-underscore name the ui-config template uses. FORCE-when-present so a
+# re-configure with the credential exported overrides a stale empty cache value.
+set(TWITCH_CLIENTID "$ENV{TWITCH_CLIENT_ID}" CACHE STRING "Twitch OAuth client id (public; device-code flow)")
+if(DEFINED ENV{TWITCH_CLIENT_ID})
+  set(TWITCH_CLIENTID "$ENV{TWITCH_CLIENT_ID}" CACHE STRING "Twitch OAuth client id (public; device-code flow)" FORCE)
+endif()
 set(TWITCH_HASH "$ENV{TWITCH_HASH}" CACHE STRING "Obfuscation key for TWITCH_CLIENTID; 0 means plaintext")
 if(NOT TWITCH_HASH)
   set(TWITCH_HASH "0")
@@ -224,9 +246,16 @@ include(cmake/feature-twitch.cmake)
 # is a confidential client: auth-code + PKCE still requires the secret on token
 # calls). Each has its own obfuscation hash defaulting to 0 (plaintext) so the
 # "0x@..._HASH@" template expands to a valid literal on the no-credential path.
-set(KICK_CLIENTID "$ENV{KICK_CLIENTID}" CACHE STRING "Kick OAuth client id (public; PKCE-loopback flow)")
+# Env input names match .env / CI secrets (KICK_CLIENT_ID / KICK_CLIENT_SECRET).
+set(KICK_CLIENTID "$ENV{KICK_CLIENT_ID}" CACHE STRING "Kick OAuth client id (public; PKCE-loopback flow)")
+if(DEFINED ENV{KICK_CLIENT_ID})
+  set(KICK_CLIENTID "$ENV{KICK_CLIENT_ID}" CACHE STRING "Kick OAuth client id (public; PKCE-loopback flow)" FORCE)
+endif()
 set(KICK_HASH "$ENV{KICK_HASH}" CACHE STRING "Obfuscation key for KICK_CLIENTID; 0 means plaintext")
-set(KICK_SECRET "$ENV{KICK_SECRET}" CACHE STRING "Kick OAuth client secret (confidential)")
+set(KICK_SECRET "$ENV{KICK_CLIENT_SECRET}" CACHE STRING "Kick OAuth client secret (confidential)")
+if(DEFINED ENV{KICK_CLIENT_SECRET})
+  set(KICK_SECRET "$ENV{KICK_CLIENT_SECRET}" CACHE STRING "Kick OAuth client secret (confidential)" FORCE)
+endif()
 set(KICK_SECRET_HASH "$ENV{KICK_SECRET_HASH}" CACHE STRING "Obfuscation key for KICK_SECRET; 0 means plaintext")
 if(NOT KICK_HASH)
   set(KICK_HASH "0")
@@ -242,9 +271,16 @@ include(cmake/feature-kick.cmake)
 # (Google desktop clients ship a non-confidential one sent only when present). Each
 # has its own obfuscation hash defaulting to 0 (plaintext) so the "0x@..._HASH@"
 # template expands to a valid literal on the no-credential path.
-set(YOUTUBE_CLIENTID "$ENV{YOUTUBE_CLIENTID}" CACHE STRING "YouTube OAuth client id (public; PKCE-loopback flow)")
+# Env input names match .env / CI secrets (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+set(YOUTUBE_CLIENTID "$ENV{GOOGLE_CLIENT_ID}" CACHE STRING "YouTube OAuth client id (public; PKCE-loopback flow)")
+if(DEFINED ENV{GOOGLE_CLIENT_ID})
+  set(YOUTUBE_CLIENTID "$ENV{GOOGLE_CLIENT_ID}" CACHE STRING "YouTube OAuth client id (public; PKCE-loopback flow)" FORCE)
+endif()
 set(YOUTUBE_HASH "$ENV{YOUTUBE_HASH}" CACHE STRING "Obfuscation key for YOUTUBE_CLIENTID; 0 means plaintext")
-set(YOUTUBE_SECRET "$ENV{YOUTUBE_SECRET}" CACHE STRING "YouTube OAuth client secret (optional)")
+set(YOUTUBE_SECRET "$ENV{GOOGLE_CLIENT_SECRET}" CACHE STRING "YouTube OAuth client secret (optional)")
+if(DEFINED ENV{GOOGLE_CLIENT_SECRET})
+  set(YOUTUBE_SECRET "$ENV{GOOGLE_CLIENT_SECRET}" CACHE STRING "YouTube OAuth client secret (optional)" FORCE)
+endif()
 set(YOUTUBE_SECRET_HASH "$ENV{YOUTUBE_SECRET_HASH}" CACHE STRING "Obfuscation key for YOUTUBE_SECRET; 0 means plaintext")
 if(NOT YOUTUBE_HASH)
   set(YOUTUBE_HASH "0")
