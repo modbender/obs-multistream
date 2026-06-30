@@ -401,6 +401,11 @@ bool TwitchChat::connect(const Chat::ChatContext &ctx, OAuthAccount &acct, const
 				if (m.command == "001") {
 					ready_.store(true);
 					backoff.reset();
+					// A successful connect proves the (refreshed) token worked, so
+					// re-arm the reauth budget: each genuine ~4h token expiry then
+					// gets its one force-refresh retry, while a no-connect auth-fail
+					// loop (never reaching 001) stays bounded.
+					reauthAttempts = 0;
 					ctx.emit(json{{"event", "chat.state"},
 						      {"platform", "twitch"},
 						      {"connected", true}});

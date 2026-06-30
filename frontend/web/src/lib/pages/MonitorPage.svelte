@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { obs, type Stats, type OutputStat } from "../bridge";
+  import { obs, type Stats, type OutputStat, type ViewerCounts, type ChatPlatform } from "../bridge";
 
   // Live performance view. stats.get has no push, so this page owns a 1s poll; it
   // unmounts when off-page (App renders it conditionally), which clears the timer.
@@ -73,6 +73,36 @@
     const pad = (n: number): string => String(n).padStart(2, "0");
     return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
+
+  // Aggregate viewer count (Phase 9.0), pushed via viewers.changed while live.
+  const PLATFORM_COLOR: Record<ChatPlatform, string> = {
+    twitch: "#a970ff",
+    youtube: "#ff4e45",
+    kick: "#53fc18",
+  };
+  const PLATFORM_LABEL: Record<ChatPlatform, string> = { twitch: "TWITCH", youtube: "YOUTUBE", kick: "KICK" };
+  let viewers = $state<ViewerCounts | null>(null);
+  // viewers.changed only pushes while live and never sends a final zero, so clear
+  // on stream-stop; otherwise the TOTAL + per-platform cards (live-only) keep the
+  // last counts until navigation. Mirrors StudioPage's streaming.changed clear.
+  $effect(() => {
+    const offViewers = obs.on("viewers.changed", (p) => (viewers = p));
+    const offStreaming = obs.on("streaming.changed", (s) => {
+      if (!s.active) viewers = null;
+    });
+    return () => {
+      offViewers();
+      offStreaming();
+    };
+  });
+
+  // One per-platform card for each platform reporting a count (stable order).
+  let viewerCards = $derived.by<{ p: ChatPlatform; label: string; color: string; v: number }[]>(() => {
+    const per = viewers?.perPlatform ?? {};
+    return (["twitch", "youtube", "kick"] as ChatPlatform[])
+      .filter((p) => per[p] !== undefined)
+      .map((p) => ({ p, label: PLATFORM_LABEL[p], color: PLATFORM_COLOR[p], v: per[p] ?? 0 }));
+  });
 </script>
 
 <div class="page">
@@ -88,6 +118,23 @@
           <span class="metric-k">{c.k}</span>
           <span class="metric-v" style:color={c.c}>{c.v}</span>
           <span class="metric-u">{c.u}</span>
+        </div>
+      {/each}
+    </div>
+
+    <h2 class="section-title">AGGREGATE VIEWERS</h2>
+
+    <div class="vcards">
+      <div class="metric">
+        <span class="metric-k">TOTAL</span>
+        <span class="metric-v">{viewers ? viewers.total.toLocaleString() : "—"}</span>
+        <span class="metric-u">concurrent · live only</span>
+      </div>
+      {#each viewerCards as c (c.p)}
+        <div class="metric">
+          <span class="metric-k">{c.label}</span>
+          <span class="metric-v" style:color={c.color}>{c.v.toLocaleString()}</span>
+          <span class="metric-u">viewers</span>
         </div>
       {/each}
     </div>
@@ -168,6 +215,15 @@
   .cards {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
+    gap: 1px;
+    background: var(--color-border);
+    border: 1px solid var(--color-border);
+  }
+  /* Viewer cards: same hairline grid as .cards but auto-fit so the TOTAL + only
+     the reporting platforms show without forcing six columns. */
+  .vcards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 1px;
     background: var(--color-border);
     border: 1px solid var(--color-border);

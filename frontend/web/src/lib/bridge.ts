@@ -919,6 +919,62 @@ export interface ImporterImportResult {
   warnings: string[];
 }
 
+// --- multichat + aggregate viewer count (creator engagement, Phase 9.0) ------
+
+/** A streaming platform that participates in multichat / the viewer count. */
+export type ChatPlatform = "twitch" | "youtube" | "kick";
+
+/** One badge on a chat author. `kind` is the platform's badge id (e.g.
+ * "subscriber", "moderator", "broadcaster"); `url` is the badge image when the
+ * platform supplies one (render a short `kind` label when absent). */
+export interface ChatBadge {
+  kind: string;
+  url?: string;
+}
+
+/** A chat author, normalized across platforms. `color` is the author's chosen
+ * name color (hex "#RRGGBB"; "" when unset -> fall back to a platform color). */
+export interface ChatAuthor {
+  name: string;
+  color: string;
+  badges: ChatBadge[];
+}
+
+/** One piece of a message body: plain text (rendered as text, never HTML) or an
+ * inline emote image (rendered as an <img> from the provided url only). */
+export type ChatFragment =
+  | { type: "text"; text: string }
+  | { type: "emote"; code: string; url: string };
+
+/** One normalized chat message (the `chat.message` event). `id` is the platform
+ * message id (dedupe/list key); `ts` is epoch ms; `channelId` is the platform
+ * channel it arrived on. */
+export interface ChatMessage {
+  platform: ChatPlatform;
+  channelId: string;
+  id: string;
+  ts: number;
+  author: ChatAuthor;
+  fragments: ChatFragment[];
+}
+
+/** Per-platform chat connection state. The `chat.state` METHOD returns the full
+ * array (one row per active transport); the `chat.state` EVENT carries a SINGLE
+ * platform's row (merge it into the local set by `platform`). An empty method
+ * result means nothing is connected (not live). */
+export interface ChatState {
+  platform: ChatPlatform;
+  connected: boolean;
+  error?: string;
+}
+
+/** Aggregate viewer count (the `viewers.changed` event). `perPlatform` maps a
+ * platform to its current concurrent viewers; `total` is the sum. */
+export interface ViewerCounts {
+  perPlatform: Partial<Record<ChatPlatform, number>>;
+  total: number;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -1202,6 +1258,14 @@ export interface ObsMethods {
   // selected items; nothing in the source OBS install is modified.
   "importer.scan": ImporterScan;
   "importer.import": ImporterImportResult;
+  // Multichat (creator engagement, Phase 9.0). send posts `text` to the given
+  // platforms (empty array = every connected platform) and returns {ok:true}
+  // immediately (the per-transport send runs on a worker; a failure surfaces as a
+  // chat.state error event). state returns the current per-platform connection
+  // status array (empty when nothing is connected / not live). Chat transports are
+  // started by the host on go-live and stopped on stop -- there is no connect method.
+  "chat.send": { ok: boolean };
+  "chat.state": ChatState[];
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -1290,6 +1354,15 @@ export interface ObsEvents {
   // A screenshot was saved (program or source); the app-root toast surfaces the
   // path. Fires on every successful capture.
   "screenshot.saved": { path: string };
+  // Multichat (Phase 9.0). message = one normalized chat message appended to the
+  // merged scrollback. state = a SINGLE platform's connection row (NOT the full
+  // array -- the method returns the array; the event reports one platform at a
+  // time, so a consumer merges it by `platform`). Chat is only active while live.
+  "chat.message": ChatMessage;
+  "chat.state": ChatState;
+  // Aggregate viewer count (perPlatform + total), pushed by the host's viewer
+  // poller while live; the Multichat dock / Monitor card / Studio chip render off it.
+  "viewers.changed": ViewerCounts;
 }
 
 export interface BridgeError extends Error {

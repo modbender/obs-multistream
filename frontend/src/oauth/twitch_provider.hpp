@@ -38,6 +38,7 @@ public:
 	bool searchCategories(OAuthAccount &acct, const std::string &query, json &out, std::string &err) override;
 	bool applyMetadata(OAuthAccount &acct, const json &fields, std::string &err) override;
 	bool fetchStreamKey(OAuthAccount &acct, std::string &key, std::string &err) override;
+	bool viewerCount(OAuthAccount &acct, int &out, std::string &err) override;
 
 private:
 	// Send an authenticated Helix request: ensureFresh proactively, stamp the

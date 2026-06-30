@@ -54,6 +54,10 @@
   let vcamCanvas = $state("");
   let vcamMenuPos = $state<{ x: number; y: number } | null>(null);
 
+  // Aggregate viewer count (Phase 9.0), fed by the host's viewers.changed push
+  // while live; null when offline so the chip stays hidden off-stream.
+  let viewerTotal = $state<number | null>(null);
+
   // CANVASES-bar "⋯" overflow: anchor position (viewport coords) when open, the
   // runtime monitor list for the per-monitor projector entries, and the dock-lock
   // flag. Monitors load once on mount; the set rarely changes.
@@ -278,8 +282,14 @@
       .catch(() => {});
     const offCanvas = obs.on("canvas.changed", loadCanvases);
     const offMulti = obs.on("multistream.changed", (p) => (outputs = p.outputs));
-    const offStreaming = obs.on("streaming.changed", (p) => (anyRunning = p.active));
+    const offStreaming = obs.on("streaming.changed", (p) => {
+      anyRunning = p.active;
+      // The viewer poller stops on stream-stop without a final zero push; clear the
+      // chip so a stale count never lingers after going offline.
+      if (!p.active) viewerTotal = null;
+    });
     const offBindings = obs.on("outputBinding.changed", loadStatus);
+    const offViewers = obs.on("viewers.changed", (p) => (viewerTotal = p.total));
     const offVcam = obs.on("virtualCam.changed", (s) => {
       vcamActive = s.active;
       vcamCanvas = s.canvas;
@@ -293,6 +303,7 @@
       offMulti();
       offStreaming();
       offBindings();
+      offViewers();
       offVcam();
       offGeneral();
     };
@@ -723,6 +734,15 @@
       {#if liveState === "live"}
         <span class="badge live">● LIVE&nbsp;&nbsp;{fmtDuration(liveDurationMs)}</span>
       {/if}
+      {#if anyRunning && viewerTotal !== null}
+        <span class="viewers" title="Aggregate viewers across connected platforms">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z" />
+            <circle cx="12" cy="12" r="2.4" />
+          </svg>
+          {viewerTotal.toLocaleString()}
+        </span>
+      {/if}
     </div>
 
     <div class="cluster right">
@@ -969,6 +989,18 @@
     padding: 3px 9px;
     border: var(--border-weight) solid var(--color-live);
     background: color-mix(in srgb, var(--color-live) 10%, transparent);
+  }
+  .viewers {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text);
+    padding: 3px 9px;
+    border: var(--border-weight) solid var(--color-border);
+    background: var(--color-surface-2);
   }
   .perf {
     display: flex;

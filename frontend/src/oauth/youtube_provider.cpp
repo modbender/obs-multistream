@@ -165,6 +165,13 @@ std::string YouTubeProvider::chatChannelRef(const OAuthAccount &acct)
 	return liveChatId_;
 }
 
+void YouTubeProvider::clearActiveBroadcast()
+{
+	const std::lock_guard<std::mutex> guard(liveChatMutex_);
+	liveChatId_.clear();
+	broadcastId_.clear();
+}
+
 json YouTubeProvider::capabilityJson() const
 {
 	json scopes = json::array();
@@ -388,11 +395,13 @@ bool YouTubeProvider::applyMetadata(OAuthAccount &acct, const json &fields, std:
 		return false;
 	}
 
-	// Invalidate any prior broadcast's chat: a new go-live attempt supersedes it, and
-	// the new liveChatId is committed only once this apply fully succeeds (below).
+	// Invalidate any prior broadcast's chat + viewer-count target: a new go-live
+	// attempt supersedes it, and the new ids are committed only once this apply fully
+	// succeeds (below).
 	{
 		const std::lock_guard<std::mutex> guard(liveChatMutex_);
 		liveChatId_.clear();
+		broadcastId_.clear();
 	}
 
 	// Read every field up front (tolerant defaults; YouTube rejects empties on the
@@ -605,11 +614,57 @@ bool YouTubeProvider::applyMetadata(OAuthAccount &acct, const json &fields, std:
 		return false;
 	}
 
-	// Go-live setup fully succeeded: publish the broadcast's liveChatId so the chat
-	// transport (started right after by streaming.start) knows which chat to poll.
+	// Go-live setup fully succeeded: publish the broadcast's liveChatId (so the chat
+	// transport knows which chat to poll) and broadcastId (so the viewer poller can
+	// read its concurrentViewers), both started right after by streaming.start.
 	{
 		const std::lock_guard<std::mutex> guard(liveChatMutex_);
 		liveChatId_ = liveChatId;
+		broadcastId_ = broadcastId;
+	}
+	return true;
+}
+
+bool YouTubeProvider::viewerCount(OAuthAccount &acct, int &out, std::string &err)
+{
+	out = 0;
+
+	std::string broadcastId;
+	{
+		const std::lock_guard<std::mutex> guard(liveChatMutex_);
+		broadcastId = broadcastId_;
+	}
+	if (broadcastId.empty()) {
+		// No active broadcast -> not live; the poller omits YouTube this cycle.
+		err.clear();
+		return false;
+	}
+
+	Http::HttpReq req;
+	req.method = "GET";
+	req.url = std::string(kVideosUrl) + "?part=liveStreamingDetails&id=" + Http::UrlEncode(broadcastId);
+
+	Http::HttpResponse resp;
+	if (!SendAuthed(acct, req, resp, err)) {
+		return false;
+	}
+	if (resp.status < 200 || resp.status >= 300) {
+		err = "YouTube videos request failed (HTTP " + std::to_string(resp.status) + "): " + resp.body;
+		return false;
+	}
+
+	const json item = FirstItem(ParseJson(resp.body));
+	if (item.is_object() && item.contains("liveStreamingDetails") && item["liveStreamingDetails"].is_object()) {
+		// concurrentViewers is a STRING in the API ("absent" before/after the live
+		// window). Parse tolerantly; absent/garbage -> 0.
+		const std::string cv = Str(item["liveStreamingDetails"], "concurrentViewers");
+		if (!cv.empty()) {
+			try {
+				out = std::stoi(cv);
+			} catch (const std::exception &) {
+				out = 0;
+			}
+		}
 	}
 	return true;
 }

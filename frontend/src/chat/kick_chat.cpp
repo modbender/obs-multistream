@@ -37,8 +37,12 @@ constexpr const char *kBrowserUserAgent =
 	"Chrome/126.0.0.0 Safari/537.36";
 
 // Bounded so a connect-time chatroom-id fetch cannot stall teardown for long (the
-// fetch is a blocking sync HTTP call that can't observe the cancel flag).
-constexpr int kChatroomLookupTimeoutSec = 10;
+// fetch is a blocking sync HTTP call that can't observe the cancel flag). Kept
+// short so a detached worker lingers only briefly past Stop()/Shutdown while the
+// function-local-static singletons are still alive. Proper future fix: a cancel
+// token on Http::HttpRequest so the call aborts on the cancel flag rather than
+// merely timing out.
+constexpr int kChatroomLookupTimeoutSec = 5;
 
 long long NowMs()
 {

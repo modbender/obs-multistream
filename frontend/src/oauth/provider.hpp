@@ -165,12 +165,32 @@ public:
 	// needs no override.
 	virtual Chat::ChatTransport *chat() { return nullptr; }
 
+	// Report the platform's current concurrent viewer count for `acct` into `out`
+	// (Phase 9.0 aggregate viewer poller). `acct` is non-const so a reactive token
+	// refresh propagates back. Returns true with `out` set (0 when the channel is
+	// offline) on a usable read; false when unsupported or not currently live -- the
+	// poller then omits this platform from the aggregate. Default: unsupported.
+	virtual bool viewerCount(OAuthAccount &acct, int &out, std::string &err)
+	{
+		(void)acct;
+		(void)out;
+		(void)err;
+		return false;
+	}
+
 	// The platform-specific channel reference the hub passes into chat()->connect for
 	// `acct`: the channel login/slug for Twitch IRC / Kick Pusher, the per-broadcast
 	// liveChatId for YouTube. Default = the account login; providers whose chat keys
 	// off something else override it, keeping the hub free of per-platform
 	// channel-resolution branches.
 	virtual std::string chatChannelRef(const OAuthAccount &acct) { return acct.login; }
+
+	// Drop any active-broadcast chat/viewer-count target on stream stop (Phase 9.0).
+	// Providers that edit a persistent channel (Twitch/Kick) have nothing to clear;
+	// YouTube creates a per-go-live broadcast and overrides this to zero its cached
+	// liveChatId/broadcastId so a subsequent go-live without a fresh applyMetadata
+	// cannot poll a stale, ended broadcast. Default: no-op.
+	virtual void clearActiveBroadcast() {}
 };
 
 } // namespace OAuth

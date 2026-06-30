@@ -140,6 +140,11 @@ target_sources(
     # owned by KickProvider; HTTP + WS only, no obs.h.
     src/chat/kick_chat.cpp
     src/chat/kick_chat.hpp
+    # Phase 9.0 Task 6: aggregate viewer-count poller. One worker polls each
+    # connected provider's viewerCount() while live and emits viewers.changed;
+    # HTTP only via the providers, no obs.h.
+    src/chat/viewer_poller.cpp
+    src/chat/viewer_poller.hpp
     # Phase 8d: generic ingest-key writeback (marshals an RTMP server+key into a
     # stream profile on TID_UI; includes obs.h -> in the /wd4201 set below).
     src/ingest_writeback.cpp

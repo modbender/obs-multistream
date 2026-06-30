@@ -52,6 +52,11 @@ public:
 	bool searchCategories(OAuthAccount &acct, const std::string &query, json &out, std::string &err) override;
 	bool applyMetadata(OAuthAccount &acct, const json &fields, std::string &err) override;
 
+	// Report the active broadcast's concurrent viewer count (Phase 9.0). Returns
+	// false (not live) when no broadcast is currently live; otherwise reads
+	// videos.list liveStreamingDetails.concurrentViewers (absent -> 0).
+	bool viewerCount(OAuthAccount &acct, int &out, std::string &err) override;
+
 	// The YouTube live-chat transport, active only while a broadcast is live.
 	Chat::ChatTransport *chat() override;
 
@@ -59,6 +64,10 @@ public:
 	// not the account login -- so override the default channel-ref resolution. Empty
 	// when no broadcast is currently live, which the hub/transport treat as no chat.
 	std::string chatChannelRef(const OAuthAccount &acct) override;
+
+	// Zero the cached liveChatId/broadcastId (mutex-guarded) so a stream stop drops
+	// the active-broadcast chat + viewer-count target. Called from streaming.stop.
+	void clearActiveBroadcast() override;
 
 private:
 	// YouTubeChat reaches back through this provider for SendAuthed (token coherence)
@@ -76,12 +85,14 @@ private:
 
 	std::unique_ptr<Chat::YouTubeChat> chat_;
 
-	// The active broadcast's liveChatId, set on a successful applyMetadata (the only
-	// place a broadcast is created) and read by the chat transport. Guarded because
-	// applyMetadata runs on a worker thread while chatChannelRef is read from the
-	// ChatHub's start path. Empty when no broadcast is live.
+	// The active broadcast's liveChatId + broadcast/video id, set on a successful
+	// applyMetadata (the only place a broadcast is created) and read by the chat
+	// transport (liveChatId_) and the viewer poller (broadcastId_). Guarded by the
+	// same mutex because applyMetadata runs on a worker thread while chatChannelRef
+	// and viewerCount are read from other threads. Empty when no broadcast is live.
 	std::mutex liveChatMutex_;
 	std::string liveChatId_;
+	std::string broadcastId_;
 
 	// The assignable videoCategories list, fetched once per process and reused
 	// (it is static content). Guarded because searchCategories runs on worker

@@ -36,6 +36,7 @@ public:
 	bool getMetadata(OAuthAccount &acct, json &out, std::string &err) override;
 	bool searchCategories(OAuthAccount &acct, const std::string &query, json &out, std::string &err) override;
 	bool applyMetadata(OAuthAccount &acct, const json &fields, std::string &err) override;
+	bool viewerCount(OAuthAccount &acct, int &out, std::string &err) override;
 
 	// The Kick chat transport (Phase 9.0): Pusher read + REST send. Owned here,
 	// run by the ChatHub on a worker thread between go-live and stop. The default

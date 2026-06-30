@@ -4,6 +4,7 @@ import PreviewDock from "../docks/PreviewDock.svelte";
 import ScenesDock from "../docks/ScenesDock.svelte";
 import SourcesDock from "../docks/SourcesDock.svelte";
 import MultistreamDock from "../docks/MultistreamDock.svelte";
+import MultichatDock from "../docks/MultichatDock.svelte";
 import AudioMixerDock from "../docks/AudioMixerDock.svelte";
 import TransitionsDock from "../docks/TransitionsDock.svelte";
 import StatsDock from "../docks/StatsDock.svelte";
@@ -36,6 +37,10 @@ export const DOCKS: DockDef[] = [
   { id: "mixer", title: "Audio Mixer", component: AudioMixerDock, params: {} },
   { id: "transitions", title: "Transitions", component: TransitionsDock, params: {} },
   { id: "multistream", title: "Multistream", component: MultistreamDock, params: {}, accent: true },
+  // Merged read+send chat across every connected platform (Phase 9.0). Like
+  // Multistream/Transitions it is NOT in the default layout -- it opens from the
+  // CANVASES-bar restore chip -- but stays registered so it is addable/restorable.
+  { id: "multichat", title: "Multichat", component: MultichatDock, params: {}, accent: true },
   { id: "stats", title: "Stats", component: StatsDock, params: {} },
 ];
 

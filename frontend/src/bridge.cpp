@@ -34,6 +34,7 @@
 #include "async_task.hpp"
 #include "audio/AudioMonitor.hpp"
 #include "chat/chat_hub.hpp"
+#include "chat/viewer_poller.hpp"
 #include "chat/ws_client.hpp"
 #include "log.hpp"
 #include "mcp/McpServer.hpp"
@@ -244,19 +245,26 @@ bool MethodStreamingStart(const json & /*params*/, json &result, std::string & /
 	const bool active = ObsBootstrap::Multistream().AnyLive();
 	result = json{{"active", active}};
 	EmitEvent("streaming.changed", result);
-	// Phase 9.0: spin up chat transports + (T6) the viewer poller now that we are
-	// live. Start() is idempotent and finds nothing to run until a platform
-	// transport exists, so this is inert in Task 2.
+	// Phase 9.0: spin up chat transports + the viewer poller now that we are live.
+	// Both Start()s are idempotent.
 	if (active) {
 		Chat::Hub().Start();
+		Chat::Viewers().Start();
 	}
 	return true;
 }
 
 bool MethodStreamingStop(const json & /*params*/, json &result, std::string & /*error*/)
 {
-	// Stop chat transports first so their loops stop before the outputs tear down.
+	// Stop chat transports + the viewer poller first so their loops stop before the
+	// outputs tear down.
 	Chat::Hub().Stop();
+	Chat::Viewers().Stop();
+	// Drop each provider's active-broadcast target so a subsequent go-live without a
+	// fresh applyMetadata can't poll a stale, ended broadcast (no-op except YouTube).
+	for (OAuth::StreamProvider *provider : OAuth::Registry().All()) {
+		provider->clearActiveBroadcast();
+	}
 	ObsBootstrap::Multistream().StopAll();
 	result = json{{"active", false}};
 	EmitEvent("streaming.changed", result);
@@ -7932,10 +7940,11 @@ void Init()
 
 void Shutdown()
 {
-	// Phase 9.0: stop the chat hub BEFORE the alive-guard flips, so every transport
-	// read loop is signaled + disconnected and its emits are still routed cleanly
-	// (rather than silently dropped) as the loops unwind.
+	// Phase 9.0: stop the chat hub + viewer poller BEFORE the alive-guard flips, so
+	// every transport/poll loop is signaled + disconnected and its emits are still
+	// routed cleanly (rather than silently dropped) as the loops unwind.
 	Chat::Hub().Stop();
+	Chat::Viewers().Stop();
 	// Block any further off-thread PostToUi from a detached worker: the CEF loop
 	// has already returned by the time Stop() reaches here, so a late marshal must
 	// no-op rather than touch CEF.

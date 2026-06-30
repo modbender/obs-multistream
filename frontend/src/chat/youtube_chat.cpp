@@ -247,7 +247,9 @@ bool YouTubeChat::connect(const ChatContext &ctx, OAuth::OAuthAccount &acct, con
 	}
 
 	emitState(false, "");
-	return true;
+	// Match Twitch/Kick: connect() returns false on a clean cancel/end (err stays
+	// empty, so the hub logs nothing). Contract parity across transports.
+	return false;
 }
 
 bool YouTubeChat::send(OAuth::OAuthAccount &acct, const std::string &text, std::string &err)

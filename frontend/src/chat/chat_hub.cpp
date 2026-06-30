@@ -96,6 +96,28 @@ void ChatHub::Start()
 					}
 				}
 				json p = payload;
+				// Single fan-out point for every transport: synthesize a unique
+				// fallback id for any chat.message lacking one, so the frontend's
+				// keyed list never throws each_key_duplicate. Real ids are left
+				// untouched (dedupe relies on them); the monotonic seq guarantees
+				// uniqueness even within a single frame.
+				auto pev = p.find("event");
+				if (pev != p.end() && pev->is_string() &&
+				    pev->get<std::string>() == "chat.message") {
+					auto id = p.find("id");
+					const bool missing = id == p.end() || !id->is_string() ||
+							     id->get<std::string>().empty();
+					if (missing) {
+						const std::string platform = p.value("platform", std::string());
+						std::string tsStr = "0";
+						auto tsIt = p.find("ts");
+						if (tsIt != p.end() && tsIt->is_number()) {
+							tsStr = std::to_string(tsIt->get<long long>());
+						}
+						const uint64_t seq = idSeq_.fetch_add(1, std::memory_order_relaxed);
+						p["id"] = platform + ":" + tsStr + ":" + std::to_string(seq);
+					}
+				}
 				AsyncTask::PostToUi([p = std::move(p)] { RouteEmit(p); });
 			};
 

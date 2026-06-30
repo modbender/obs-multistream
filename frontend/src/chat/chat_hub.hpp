@@ -2,6 +2,7 @@
 #define OBS_MULTISTREAM_FRONTEND_CHAT_CHAT_HUB_HPP_
 
 #include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -62,6 +63,12 @@ private:
 	std::mutex mutex_;
 	std::map<std::string, Active> active_;    // keyed by profileUuid
 	std::shared_ptr<std::atomic<bool>> stop_; // current generation's cancel flag
+
+	// Monotonic sequence for synthesizing unique fallback message ids when a
+	// transport emits a chat.message with an empty/missing id (Kick's payload may
+	// lack one; Twitch's id tag is "" if tags are dropped). Guarantees the keyed
+	// frontend list never sees a duplicate/empty key.
+	std::atomic<uint64_t> idSeq_{0};
 };
 
 // Process-wide chat hub accessor (function-local-static singleton, mirroring the

@@ -478,4 +478,36 @@ bool TwitchProvider::fetchStreamKey(OAuthAccount &acct, std::string &key, std::s
 	return true;
 }
 
+bool TwitchProvider::viewerCount(OAuthAccount &acct, int &out, std::string &err)
+{
+	out = 0;
+	if (acct.userId.empty()) {
+		err = "Twitch account identity missing; reconnect the account";
+		return false;
+	}
+
+	Http::HttpReq req;
+	req.method = "GET";
+	req.url = std::string(kHelixBase) + "streams?user_id=" + Http::UrlEncode(acct.userId);
+
+	Http::HttpResponse resp;
+	if (!SendAuthed(acct, req, resp, err)) {
+		return false;
+	}
+	if (resp.status < 200 || resp.status >= 300) {
+		err = "Twitch streams request failed (HTTP " + std::to_string(resp.status) + "): " + resp.body;
+		return false;
+	}
+
+	// No data row -> the channel is offline, which is a usable read of 0 viewers.
+	const json row = FirstDataRow(ParseJson(resp.body));
+	if (row.is_object()) {
+		auto it = row.find("viewer_count");
+		if (it != row.end() && it->is_number()) {
+			out = it->get<int>();
+		}
+	}
+	return true;
+}
+
 } // namespace OAuth

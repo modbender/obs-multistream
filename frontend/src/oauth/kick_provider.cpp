@@ -366,4 +366,35 @@ bool KickProvider::applyMetadata(OAuthAccount &acct, const json &fields, std::st
 	return true;
 }
 
+bool KickProvider::viewerCount(OAuthAccount &acct, int &out, std::string &err)
+{
+	out = 0;
+
+	// The channels lookup keys on the user_id, so ensure identity is resolved first.
+	if (acct.userId.empty() && !fetchIdentity(acct, err)) {
+		return false;
+	}
+
+	Http::HttpReq req;
+	req.method = "GET";
+	req.url = std::string(kKickApiBase) + "/public/v1/channels?broadcaster_user_id[]=" + Http::UrlEncode(acct.userId);
+
+	Http::HttpResponse resp;
+	if (!SendAuthed(acct, req, resp, err)) {
+		return false;
+	}
+	if (resp.status < 200 || resp.status >= 300) {
+		err = "Kick channels request failed (HTTP " + std::to_string(resp.status) + "): " + resp.body;
+		return false;
+	}
+
+	// stream.viewer_count carries the live count; when the channel is offline the
+	// stream object is absent -> a usable read of 0 viewers.
+	const json row = FirstDataRow(ParseJson(resp.body));
+	if (row.is_object() && row.contains("stream") && row["stream"].is_object()) {
+		out = Int(row["stream"], "viewer_count");
+	}
+	return true;
+}
+
 } // namespace OAuth
