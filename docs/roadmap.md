@@ -1083,8 +1083,17 @@ acceptance owed** (headless can't drive real chat): per-platform connect/read/se
 esp. the reverse-engineered Kick Pusher path (app key/`/api/v2` chatroom id/slug casing) + a >4h
 Twitch session (reauth) + an empty-id message. NOT merged to master.
 
+**9.1 (Third-party emotes — Twitch) ✅ DONE 2026-07-01** (`ui-redesign`). 7TV + BetterTTV +
+FrankerFaceZ emotes in the Twitch multichat feed, host-side only (the dock already renders
+emote fragments). On connect the channel's numeric id is resolved via Helix, then six
+best-effort GETs load each provider's global + channel sets into one code→url map (channel
+over global; 7TV > BTTV > FFZ); a post-pass over `BuildFragments` swaps whole-word
+case-sensitive matches in text fragments for emote fragments, leaving native Twitch emotes
+untouched. Fetches are non-fatal, poll the cancel token before each request (5s timeout), and
+resolve only https URLs. Runtime substitution owed a live-session check.
+
 **Remaining Phase 9 (planned):** moderation · alerts/events feed · overlay widgets (local HTTP
-server + widget pages) · chat-as-source · third-party emotes (BTTV/FFZ/7TV) · pre-live chat.
+server + widget pages) · chat-as-source · third-party emotes for Kick/YouTube · pre-live chat.
 
 **Goal:** the Streamlabs/StreamElements-style live layer the fork lacks — unified **multichat**
 (read+send across every connected platform in one pane), **aggregate viewer count** (sum of live
