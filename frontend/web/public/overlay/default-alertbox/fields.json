@@ -6,5 +6,8 @@
   { "key": "msgFollow", "type": "text", "label": "Follow message", "default": "{name} just followed!", "value": "{name} just followed!" },
   { "key": "msgSub", "type": "text", "label": "Sub message", "default": "{name} subscribed!", "value": "{name} subscribed!" },
   { "key": "msgCheer", "type": "text", "label": "Cheer message", "default": "{name} cheered {amount} bits!", "value": "{name} cheered {amount} bits!" },
-  { "key": "msgRaid", "type": "text", "label": "Raid message", "default": "{name} raided with {amount}!", "value": "{name} raided with {amount}!" }
+  { "key": "msgRaid", "type": "text", "label": "Raid message", "default": "{name} raided with {amount}!", "value": "{name} raided with {amount}!" },
+  { "key": "msgSuperchat", "type": "text", "label": "Super Chat message", "default": "{name} sent {amount}!", "value": "{name} sent {amount}!" },
+  { "key": "msgSupersticker", "type": "text", "label": "Super Sticker message", "default": "{name} sent a sticker!", "value": "{name} sent a sticker!" },
+  { "key": "msgMember", "type": "text", "label": "Member message", "default": "{name} is now a member!", "value": "{name} is now a member!" }
 ]

@@ -19,6 +19,10 @@
 
   let host: HTMLDivElement;
   let view: EditorView | undefined;
+  // True only while we programmatically re-seed the doc on a widget switch, so the
+  // updateListener can skip that synthetic docChange -- otherwise a freshly-loaded
+  // widget would save itself back ~500ms later. Only user keystrokes schedule a save.
+  let seeding = false;
 
   const langExt = () => (lang === "html" ? html() : lang === "css" ? css() : javascript());
 
@@ -32,7 +36,7 @@
           langExt(),
           oneDark,
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) {
+            if (u.docChanged && !seeding) {
               onChange(u.state.doc.toString());
             }
           }),
@@ -47,7 +51,12 @@
   // Guard against feeding our own keystrokes back in (value === current doc).
   $effect(() => {
     if (view && value !== view.state.doc.toString()) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+      seeding = true;
+      try {
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+      } finally {
+        seeding = false;
+      }
     }
   });
 </script>

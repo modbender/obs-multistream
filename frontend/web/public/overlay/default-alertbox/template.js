@@ -11,6 +11,9 @@ const TEMPLATE_KEY = {
   subgift: "msgSub",
   cheer: "msgCheer",
   raid: "msgRaid",
+  superchat: "msgSuperchat",
+  supersticker: "msgSupersticker",
+  member: "msgMember",
 };
 
 let fields = {};

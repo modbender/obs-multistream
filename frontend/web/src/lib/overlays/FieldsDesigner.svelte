@@ -39,6 +39,22 @@
   let uploading = $state<number | null>(null);
   let uploadError = $state<string | null>(null);
 
+  // Two fields sharing a key silently collide in fieldData (last-wins). Flag the
+  // offending rows so the user notices; no hard block (they may be mid-rename).
+  const dupKeys = $derived.by<Set<string>>(() => {
+    const counts = new Map<string, number>();
+    for (const f of fields) {
+      counts.set(f.key, (counts.get(f.key) ?? 0) + 1);
+    }
+    const dups = new Set<string>();
+    for (const [k, n] of counts) {
+      if (n > 1 && k) {
+        dups.add(k);
+      }
+    }
+    return dups;
+  });
+
   function commit(next: OverlayField[]): void {
     onChange(next);
   }
@@ -163,8 +179,13 @@
         <div class="design-row">
           <div class="drow-top">
             <div class="col">
-              <span class="mini">Key</span>
-              <input class="in" value={f.key} oninput={(e) => setField(i, { key: e.currentTarget.value })} />
+              <span class="mini">Key{#if dupKeys.has(f.key)}<span class="dup-hint"> · duplicate</span>{/if}</span>
+              <input
+                class="in"
+                class:dup={dupKeys.has(f.key)}
+                value={f.key}
+                oninput={(e) => setField(i, { key: e.currentTarget.value })}
+              />
             </div>
             <div class="col">
               <span class="mini">Label</span>
@@ -416,6 +437,12 @@
   .in:focus {
     outline: none;
     border-color: var(--color-accent);
+  }
+  .in.dup {
+    border-color: var(--color-live);
+  }
+  .dup-hint {
+    color: var(--color-live);
   }
   .in.color {
     padding: 2px;

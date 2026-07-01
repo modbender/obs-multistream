@@ -19,6 +19,7 @@
   let tab = $state<"code" | "fields" | "preview">("code");
   let reloadKey = $state(0);
   let portChanged = $state(false);
+  let serverDown = $state(false);
   let loaded = $state(false);
   let error = $state<string | null>(null);
   let copiedId = $state<string | null>(null);
@@ -132,6 +133,9 @@
   }
 
   async function remove(id: string): Promise<void> {
+    // Cancel any pending debounced save so we don't PATCH a just-deleted id
+    // (which would surface a spurious "no such overlay" error banner).
+    clearTimeout(saveTimer);
     try {
       await obs.call("overlays.delete", { id });
       if (selectedId === id) {
@@ -199,7 +203,10 @@
     refresh();
     obs
       .call("overlays.serverInfo")
-      .then((s) => (portChanged = !!s?.portChanged))
+      .then((s) => {
+        portChanged = !!s?.portChanged;
+        serverDown = s ? !s.listening : false;
+      })
       .catch(() => {});
     return obs.on("overlays.changed", refresh);
   });
@@ -216,6 +223,9 @@
     <span class="sub">loopback widgets · copy a URL into a browser source</span>
   </header>
 
+  {#if serverDown}
+    <div class="banner down">Overlay server isn't running — widget URLs won't load in a Browser Source.</div>
+  {/if}
   {#if portChanged}
     <div class="banner">
       Overlay port changed since last run — re-copy your widget URLs into their Browser Sources.
@@ -354,6 +364,10 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--color-text);
+  }
+  .banner.down {
+    background: color-mix(in srgb, var(--color-live) 14%, transparent);
+    color: var(--color-live);
   }
   .body {
     flex: 1;
