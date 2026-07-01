@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <ctime>
 
+#include "../events/event_hub.hpp"   // Events::Hub().Ingest for monetization/membership events
+#include "../events/event_model.hpp" // Events::NormalizedEvent
 #include "../http_client.hpp"
 #include "../oauth/youtube_provider.hpp"
 #include "ws_client.hpp" // CancelableSleep / Backoff
@@ -45,6 +47,42 @@ bool Bool(const json &j, const char *key)
 	}
 	auto it = j.find(key);
 	return it != j.end() && it->is_boolean() && it->get<bool>();
+}
+
+// Read an integer field that YouTube may serialize either as a JSON number or, for
+// 64-bit quantities like amountMicros, as a numeric string. Missing/garbage -> 0.
+int64_t NumLoose(const json &j, const char *key)
+{
+	if (!j.is_object()) {
+		return 0;
+	}
+	auto it = j.find(key);
+	if (it == j.end()) {
+		return 0;
+	}
+	if (it->is_number()) {
+		return it->get<int64_t>();
+	}
+	if (it->is_string()) {
+		try {
+			return std::stoll(it->get<std::string>());
+		} catch (const std::exception &) {
+			return 0;
+		}
+	}
+	return 0;
+}
+
+// Return a reference to `j[key]` when `j` is an object holding it, else a shared null
+// json -- lets the nested-detail accessors chain without intermediate null checks.
+const json &Obj(const json &j, const char *key)
+{
+	static const json kNull = json(nullptr);
+	if (!j.is_object()) {
+		return kNull;
+	}
+	auto it = j.find(key);
+	return it == j.end() ? kNull : *it;
 }
 
 // Parse an RFC3339 / ISO-8601 UTC instant ("2024-01-02T03:04:05.678Z") into epoch
@@ -137,11 +175,86 @@ json NormalizeItem(const json &item, const std::string &liveChatId)
 	};
 }
 
+// Recognize the monetization/membership live-chat item types and fill `ev` with the
+// normalized event. Returns false for plain chat (textMessageEvent) and any unhandled
+// type. A Super Chat is shown in BOTH the chat feed and the events feed, so the caller
+// runs this IN ADDITION to the normal chat emit -- it never suppresses a chat line.
+// Super Chat / Sticker ids are content-derived (Events::YouTubeMoneyEventId), matching
+// the REST superChatEvents.list path so the same purchase seen by both surfaces (which
+// assign different resource ids) collapses in the store. Membership ids stay keyed on the
+// resource id (single-path, no cross-surface duplicate).
+bool BuildEventFromChat(const json &item, Events::NormalizedEvent &ev)
+{
+	if (!item.is_object()) {
+		return false;
+	}
+	const json &snippet = Obj(item, "snippet");
+	const std::string type = Str(snippet, "type");
+	const std::string itemId = Str(item, "id");
+	if (itemId.empty()) {
+		return false; // no id -> undedupable
+	}
+	const json &authorDetails = Obj(item, "authorDetails");
+	const std::string actor = Str(authorDetails, "displayName");
+	const std::string channelId = Str(authorDetails, "channelId");
+	const int64_t ts = static_cast<int64_t>(Rfc3339ToEpochMs(Str(snippet, "publishedAt")));
+
+	ev.platform = "youtube";
+	ev.actorName = actor;
+	ev.ts = ts;
+
+	if (type == "superChatEvent") {
+		const json &d = Obj(snippet, "superChatDetails");
+		const int64_t micros = NumLoose(d, "amountMicros");
+		ev.type = "superchat";
+		// Content-derived id, identical to the REST superChatEvents.list key, so the same
+		// purchase seen by both surfaces (which assign different resource ids) collapses in
+		// the store. Fall back to the message id when the supporter channel is absent (rare).
+		ev.id = channelId.empty() ? ("youtube:superchat:" + itemId)
+					  : Events::YouTubeMoneyEventId("superchat", channelId, micros, ts / 1000);
+		ev.amount = micros / 10000; // micros -> minor units (cents)
+		ev.currency = Str(d, "currency");
+		ev.message = Str(d, "userComment");
+		return true;
+	}
+	if (type == "superStickerEvent") {
+		const json &d = Obj(snippet, "superStickerDetails");
+		const int64_t micros = NumLoose(d, "amountMicros");
+		ev.type = "supersticker";
+		ev.id = channelId.empty() ? ("youtube:supersticker:" + itemId)
+					  : Events::YouTubeMoneyEventId("supersticker", channelId, micros, ts / 1000);
+		ev.amount = micros / 10000;
+		ev.currency = Str(d, "currency");
+		return true;
+	}
+	if (type == "newSponsorEvent") {
+		const json &d = Obj(snippet, "newSponsorDetails");
+		ev.type = "member";
+		ev.id = "youtube:member:" + itemId;
+		ev.tier = Str(d, "memberLevelName");
+		return true;
+	}
+	if (type == "memberMilestoneChatEvent") {
+		const json &d = Obj(snippet, "memberMilestoneChatDetails");
+		ev.type = "member";
+		ev.id = "youtube:member:" + itemId;
+		ev.months = static_cast<int>(NumLoose(d, "memberMonth"));
+		ev.tier = Str(d, "memberLevelName");
+		ev.message = Str(d, "userComment");
+		return true;
+	}
+	return false; // textMessageEvent / unhandled -> chat only
+}
+
 } // namespace
 
 bool YouTubeChat::connect(const ChatContext &ctx, OAuth::OAuthAccount &acct, const std::string &channelRef,
 			  std::string &err)
 {
+	// Defensive: clear the live-chat-active flag up front so it can never survive on a
+	// fragile invariant (e.g. a prior run that exited before the RAII guard armed).
+	owner_.SetLiveChatActive(false);
+
 	// No active broadcast -> nothing to poll. Clean no-op (empty err = the hub logs
 	// nothing); chat.state stays connected=false for this platform via the hub.
 	if (channelRef.empty()) {
@@ -150,6 +263,16 @@ bool YouTubeChat::connect(const ChatContext &ctx, OAuth::OAuthAccount &acct, con
 	}
 	const std::string liveChatId = channelRef;
 	stop_.store(false, std::memory_order_release);
+
+	// Guarantee the provider's live-chat-active flag is cleared on EVERY exit from this
+	// function -- the normal post-loop return, a reconnect give-up, and the unrecoverable
+	// 401 that returns from inside the loop -- so the REST event transport resumes
+	// supplying Super Chat history the moment this loop stops. It is set true below only
+	// once a poll succeeds; the guard's clear is idempotent, so an early exit is safe.
+	struct ActiveGuard {
+		OAuth::YouTubeProvider &p;
+		~ActiveGuard() { p.SetLiveChatActive(false); }
+	} activeGuard{owner_};
 
 	auto canceled = [&] { return stop_.load(std::memory_order_acquire) || (ctx.canceled && ctx.canceled()); };
 	auto emitState = [&](bool connected, const std::string &stateErr) {
@@ -223,6 +346,9 @@ bool YouTubeChat::connect(const ChatContext &ctx, OAuth::OAuthAccount &acct, con
 		if (!announced) {
 			emitState(true, "");
 			announced = true;
+			// The live chat is confirmed polling this broadcast: from here the chat forward
+			// is the authoritative Super Chat source, so the REST transport backs off.
+			owner_.SetLiveChatActive(true);
 		}
 
 		// First response is backlog: keep only the cursor, emit nothing, so the user
@@ -234,9 +360,19 @@ bool YouTubeChat::connect(const ChatContext &ctx, OAuth::OAuthAccount &acct, con
 				if (canceled()) {
 					break;
 				}
+				// Chat first, exactly as before: a plain message emits a chat line; a
+				// Super Chat / membership item still emits its chat line (it carries text).
 				const json msg = NormalizeItem(item, liveChatId);
 				if (msg.is_object()) {
 					ctx.emit(msg);
+				}
+				// Then, IN ADDITION, forward monetization/membership types into the events
+				// feed. YouTube has no real-time event socket, so this live-chat sink is the
+				// only push source for Super Chats/memberships (the REST transport covers
+				// pre-live history). The store dedupes against backfill/poll.
+				Events::NormalizedEvent ev;
+				if (BuildEventFromChat(item, ev)) {
+					Events::Hub().Ingest(ev);
 				}
 			}
 		}

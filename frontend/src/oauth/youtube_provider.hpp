@@ -1,12 +1,14 @@
 #ifndef OBS_MULTISTREAM_FRONTEND_OAUTH_YOUTUBE_PROVIDER_HPP_
 #define OBS_MULTISTREAM_FRONTEND_OAUTH_YOUTUBE_PROVIDER_HPP_
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "../events/youtube_events.hpp"
 #include "../http_client.hpp"
 #include "pkce_loopback.hpp"
 #include "provider.hpp"
@@ -60,6 +62,10 @@ public:
 	// The YouTube live-chat transport, active only while a broadcast is live.
 	Chat::ChatTransport *chat() override;
 
+	// The YouTube REST event transport (Phase 9.2c): Super Chats / subscribers, run by
+	// the EventHub on the account-connect lifecycle (real-time events arrive via chat).
+	Events::EventTransport *events() override { return &events_; }
+
 	// YouTube chat keys off the per-broadcast liveChatId (resolved in applyMetadata),
 	// not the account login -- so override the default channel-ref resolution. Empty
 	// when no broadcast is currently live, which the hub/transport treat as no chat.
@@ -69,10 +75,23 @@ public:
 	// the active-broadcast chat + viewer-count target. Called from streaming.stop.
 	void clearActiveBroadcast() override;
 
+	// True while YouTubeChat is actively polling a live broadcast's chat. During that
+	// window the chat forward is the authoritative, real-time source of Super Chats, so
+	// the REST event transport skips its superChatEvents.list query to avoid emitting a
+	// second copy under a different id (the liveChatMessage id and superChatEvent id do
+	// not match, so id-dedupe cannot collapse the pair). Set by YouTubeChat around its
+	// poll loop; read by YouTubeEvents::collect. Atomic: written and read from different
+	// worker threads with no other invariant to guard.
+	void SetLiveChatActive(bool active) { liveChatActive_.store(active, std::memory_order_release); }
+	bool LiveChatActive() const { return liveChatActive_.load(std::memory_order_acquire); }
+
 private:
 	// YouTubeChat reaches back through this provider for SendAuthed (token coherence)
 	// and chatChannelRef (the active liveChatId), so it needs access to both.
 	friend class Chat::YouTubeChat;
+
+	// YouTubeEvents reuses SendAuthed for its Data API GETs (same refresh/401 path).
+	friend class Events::YouTubeEvents;
 
 	// Send an authenticated YouTube request: ensureFresh proactively, stamp the
 	// bearer header, and on a 401 force one refresh + retry with the new token.
@@ -84,6 +103,12 @@ private:
 	PkceLoopbackStrategy auth_;
 
 	std::unique_ptr<Chat::YouTubeChat> chat_;
+
+	// The REST event transport. Value member (unlike chat_'s unique_ptr) because
+	// youtube_events.hpp forward-declares this provider and only stores the pointer, so
+	// including it creates no header cycle. It captures `this` at construction but only
+	// stashes the pointer, so passing a not-yet-fully-constructed provider is safe.
+	Events::YouTubeEvents events_{this};
 
 	// The active broadcast's liveChatId + broadcast/video id, set on a successful
 	// applyMetadata (the only place a broadcast is created) and read by the chat
@@ -99,6 +124,12 @@ private:
 	// threads. Empty until the first successful fetch.
 	std::mutex categoriesMutex_;
 	std::vector<std::pair<std::string, std::string>> categories_; // {id, name}
+
+	// See SetLiveChatActive: true only while the live-chat poll loop is running. This is
+	// per-provider-singleton, which fits the current single-YouTube-account model; if
+	// multi-account YouTube is ever enabled, one account going live would suppress REST
+	// Super Chats for all YouTube accounts (revisit as a per-account flag then).
+	std::atomic<bool> liveChatActive_{false};
 };
 
 } // namespace OAuth

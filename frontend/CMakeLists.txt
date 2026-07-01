@@ -165,6 +165,12 @@ target_sources(
     # gift/cheer/raid), owned by TwitchProvider. HTTP + WS only, no obs.h.
     src/events/twitch_events.cpp
     src/events/twitch_events.hpp
+    # Phase 9.2c: YouTube REST event transport (Super Chats / Super Stickers via
+    # superChatEvents.list + recent subscribers via subscriptions.myRecentSubscribers),
+    # owned by YouTubeProvider. Real-time monetization/membership events arrive via the
+    # live-chat sink (youtube_chat forwards them to Events::Hub().Ingest). HTTP only.
+    src/events/youtube_events.cpp
+    src/events/youtube_events.hpp
     # Phase 8d: generic ingest-key writeback (marshals an RTMP server+key into a
     # stream profile on TID_UI; includes obs.h -> in the /wd4201 set below).
     src/ingest_writeback.cpp

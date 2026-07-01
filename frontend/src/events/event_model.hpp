@@ -67,6 +67,23 @@ struct NormalizedEvent {
 	}
 };
 
+// Content-derived dedupe id for YouTube Super Chat / Super Sticker events. YouTube
+// hands the SAME purchase two different resource ids depending on the API surface: the
+// liveChatMessage id (the live-chat forward) versus the superChatEvent id (the REST
+// superChatEvents.list). Keying on the resource id would double-count a purchase seen by
+// both paths (concurrently, or the REST poll re-fetching it after the stream ends). So
+// both paths derive their id from the purchase CONTENT instead -- supporter channel +
+// amount (micros) + creation second -- which is identical across the two surfaces and
+// collapses the pair in the store. `type` is "superchat" or "supersticker";
+// `createdAtEpochSeconds` is floored to the second so two genuine purchases from the same
+// supporter still differ while the live/REST pair for one purchase coincides.
+inline std::string YouTubeMoneyEventId(const std::string &type, const std::string &supporterChannelId,
+				       int64_t amountMicros, int64_t createdAtEpochSeconds)
+{
+	return "youtube:" + type + ":" + supporterChannelId + ":" + std::to_string(amountMicros) + ":" +
+	       std::to_string(createdAtEpochSeconds);
+}
+
 } // namespace Events
 
 #endif // OBS_MULTISTREAM_FRONTEND_EVENTS_EVENT_MODEL_HPP_
