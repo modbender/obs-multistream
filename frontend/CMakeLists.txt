@@ -161,6 +161,10 @@ target_sources(
     src/events/event_store.hpp
     src/events/event_hub.cpp
     src/events/event_hub.hpp
+    # Phase 9.2b: Twitch EventSub-over-WebSocket event transport (follow/sub/resub/
+    # gift/cheer/raid), owned by TwitchProvider. HTTP + WS only, no obs.h.
+    src/events/twitch_events.cpp
+    src/events/twitch_events.hpp
     # Phase 8d: generic ingest-key writeback (marshals an RTMP server+key into a
     # stream profile on TID_UI; includes obs.h -> in the /wd4201 set below).
     src/ingest_writeback.cpp

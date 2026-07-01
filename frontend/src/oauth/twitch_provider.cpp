@@ -16,11 +16,14 @@ const char *kHelixBase = "https://api.twitch.tv/helix/";
 // User identity (GET /helix/users) needs no special scope. chat:read + chat:edit
 // back the Phase 9.0 multichat IRC-over-WebSocket read + send. user:read:chat +
 // user:write:chat are requested now (unused yet) so the future EventSub-receive +
-// Helix-send migration doesn't force a second re-auth. Verified against
-// dev.twitch.tv (2026-06).
-const std::array<const char *, 6> kTwitchScopes = {"channel:read:stream_key", "channel:manage:broadcast",
-						   "chat:read",               "chat:edit",
-						   "user:read:chat",          "user:write:chat"};
+// Helix-send migration doesn't force a second re-auth. moderator:read:followers,
+// channel:read:subscriptions, and bits:read back the Phase 9.2b EventSub feed
+// (follower backfill + follow/sub/resub/gift + cheer notifications; channel.raid
+// needs no scope). Verified against dev.twitch.tv (2026-07).
+const std::array<const char *, 9> kTwitchScopes = {
+	"channel:read:stream_key", "channel:manage:broadcast",   "chat:read",
+	"chat:edit",               "user:read:chat",             "user:write:chat",
+	"moderator:read:followers", "channel:read:subscriptions", "bits:read"};
 
 // Twitch's settable content-classification label ids (the PATCH-writable set;
 // "MatureGame" is auto-derived from the game rating and is NOT settable here).

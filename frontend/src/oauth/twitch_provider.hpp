@@ -4,6 +4,7 @@
 #include <string>
 
 #include "../chat/twitch_chat.hpp"
+#include "../events/twitch_events.hpp"
 #include "../http_client.hpp"
 #include "device_code.hpp"
 #include "provider.hpp"
@@ -17,7 +18,9 @@ namespace OAuth {
 
 // Bumped whenever the requested scope set changes, so installs holding tokens
 // issued under an older scope set are forced to re-auth (see OAuthAccount::scopeVer).
-constexpr int TWITCH_SCOPE_VERSION = 2;
+// v3 adds the EventSub read scopes (moderator:read:followers, channel:read:subscriptions,
+// bits:read) for the Phase 9.2b events feed.
+constexpr int TWITCH_SCOPE_VERSION = 3;
 
 class TwitchProvider : public StreamProvider {
 public:
@@ -32,6 +35,7 @@ public:
 
 	AuthStrategy *auth() override { return &auth_; }
 	Chat::ChatTransport *chat() override { return &chat_; }
+	Events::EventTransport *events() override { return &events_; }
 
 	bool fetchIdentity(OAuthAccount &acct, std::string &err) override;
 	bool getMetadata(OAuthAccount &acct, json &out, std::string &err) override;
@@ -41,6 +45,10 @@ public:
 	bool viewerCount(OAuthAccount &acct, int &out, std::string &err) override;
 
 private:
+	// The event transport reuses SendAuthed for its EventSub subscribe POSTs and the
+	// followers backfill GET (same proactive-refresh + reactive-401 path as metadata).
+	friend class Events::TwitchEvents;
+
 	// Send an authenticated Helix request: ensureFresh proactively, stamp the
 	// Client-Id + bearer headers, and on a 401 force one refresh + retry. `req` is
 	// taken by value so headers are re-applied cleanly on the retry (the bearer
@@ -53,6 +61,10 @@ private:
 	// Declared after auth_ so it is constructed second -- chat_ captures &auth_ for a
 	// reactive token refresh, so auth_ must already exist.
 	TwitchChat chat_{&auth_};
+	// The EventSub transport captures the provider (this) so it can reuse SendAuthed for
+	// its authed Helix calls. It only stores the pointer at construction, so passing a
+	// not-yet-fully-constructed `this` is safe.
+	Events::TwitchEvents events_{this};
 };
 
 } // namespace OAuth
