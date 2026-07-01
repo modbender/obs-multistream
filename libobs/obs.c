@@ -946,8 +946,13 @@ static void stop_audio(void)
 static void obs_free_audio(void)
 {
 	struct obs_core_audio *audio = &obs->audio;
-	if (audio->audio)
+	if (audio->audio) {
 		audio_output_close(audio->audio);
+		/* null it (like stop_audio) so a source pushing audio during an
+		 * obs_reset_audio teardown reads NULL and drops the buffer rather
+		 * than dereferencing the freed mix. */
+		audio->audio = NULL;
+	}
 
 	deque_free(&audio->buffered_timestamps);
 	da_free(audio->render_order);

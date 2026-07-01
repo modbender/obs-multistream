@@ -3995,6 +3995,13 @@ static void process_audio(obs_source_t *source, const struct obs_source_audio *a
 	uint32_t frames = audio->frames;
 	bool mono_output;
 
+	/* obs_reset_audio can tear down + rebuild the global mix while a source
+	 * pushes audio on the audio thread; copy_audio_data reads obs->audio.audio
+	 * unguarded, so drop the buffer if the mix is momentarily gone. */
+	if (!obs->audio.audio) {
+		return;
+	}
+
 	if (source->sample_info.samples_per_sec != audio->samples_per_sec ||
 	    source->sample_info.format != audio->format || source->sample_info.speakers != audio->speakers)
 		reset_resampler(source, audio);
