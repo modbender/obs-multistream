@@ -132,6 +132,10 @@ target_sources(
     # owned by TwitchProvider; WS only, no obs.h.
     src/chat/twitch_chat.cpp
     src/chat/twitch_chat.hpp
+    # Phase 9: third-party emote resolver (7TV/BTTV/FFZ) merged into Twitch chat
+    # fragments; HTTP only, no obs.h.
+    src/chat/third_party_emotes.cpp
+    src/chat/third_party_emotes.hpp
     # Phase 9.0 Task 4: YouTube live-chat transport (liveChatMessages.list long-poll
     # + .insert send), owned by the YouTube provider; HTTP only, no obs.h.
     src/chat/youtube_chat.cpp

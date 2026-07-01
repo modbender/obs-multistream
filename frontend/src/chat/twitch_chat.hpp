@@ -4,6 +4,7 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "chat_transport.hpp"
 #include "ws_client.hpp"
@@ -42,6 +43,11 @@ private:
 	std::atomic<bool> stopped_{false}; // set by disconnect(); secondary to ctx.canceled()
 	std::atomic<bool> ready_{false};   // true between JOIN and drop -- gates send()
 	std::string channel_;       // joined channel (lowercased); guarded by wsMutex_
+
+	// Third-party (7TV/BTTV/FFZ) emote code -> image URL, built once at the top of
+	// connect() and only READ by the read loop on that same worker thread, so it
+	// needs no lock. send() runs on a different worker but never touches it.
+	std::unordered_map<std::string, std::string> thirdPartyEmotes_;
 };
 
 } // namespace OAuth
