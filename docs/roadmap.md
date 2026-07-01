@@ -1092,8 +1092,25 @@ case-sensitive matches in text fragments for emote fragments, leaving native Twi
 untouched. Fetches are non-fatal, poll the cancel token before each request (5s timeout), and
 resolve only https URLs. Runtime substitution owed a live-session check.
 
-**Remaining Phase 9 (planned):** moderation · alerts/events feed · overlay widgets (local HTTP
-server + widget pages) · chat-as-source · third-party emotes for Kick/YouTube · pre-live chat.
+**9.2 (Alerts / Events feed) ✅ DONE 2026-07-01** (`ui-redesign`; spec + plan under
+`docs/superpowers/`). A persisted, de-duplicated, cross-platform live-events feed on the
+account-connect lifecycle (always-on, not go-live-gated) with an Events dock. `EventHub` mirrors
+the chat layer (worker per account, generation-flag cancel, alive-guarded emit, boot sweep for
+already-connected accounts); `EventStore` persists a capped per-id-deduped ring to `events.json`;
+`events()` provider hook; bridge `events.list`/`events.clear` + `events.new`/`events.backfill`
+(full store snapshot, newest-first, at UI-dispatch time). Transports: **Twitch** EventSub WS
+(follow/sub/resub/gift/cheer/raid; graceful per-sub scope degradation; scope bump v2→v3 needs a
+one-time re-auth; followers backfill; revocation re-subscribes), **YouTube** REST backfill+90s
+poll (Super Chats/Stickers + recent subscribers) with a live-state gate + content-derived id so
+the live chat forward and REST never double-count, **Kick** best-effort reverse-engineered Pusher
+(sub/gift/host; nameless follows dropped) sharing `kick_pusher` with chat. EventsDock: per-type
+icons/colors, summary registry, Intl currency formatting, platform filter. Each subphase
+per-phase-reviewed (super-quality, all Critical/Important fixed). **Live acceptance owed** across
+all three (headless can't drive real follows/subs/cheers/superchats) + the reverse-engineered Kick
+names may drift.
+
+**Remaining Phase 9 (planned):** moderation · overlay widgets (local HTTP server + widget pages) ·
+chat-as-source · third-party emotes for Kick/YouTube · pre-live chat.
 
 **Goal:** the Streamlabs/StreamElements-style live layer the fork lacks — unified **multichat**
 (read+send across every connected platform in one pane), **aggregate viewer count** (sum of live
