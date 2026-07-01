@@ -180,6 +180,16 @@ target_sources(
     # (shared config in src/chat/kick_pusher); HTTP + WS only, no obs.h.
     src/events/kick_events.cpp
     src/events/kick_events.hpp
+    # Phase 9.3 overlay widgets: loopback HTTP + SSE server (winsock-only, no obs.h)
+    # and the widget store (obs_data persistence -> /wd4201 set). The server serves an
+    # assembled widget document + the OBSOverlay runtime + user assets off the web bundle.
+    src/overlay/overlay_server.cpp
+    src/overlay/overlay_server.hpp
+    src/overlay/overlay_store.cpp
+    src/overlay/overlay_store.hpp
+    # Overlay self-test: real loopback CLIENT sockets, so winsock-only (no obs.h) and
+    # kept out of obs_bootstrap.cpp to dodge the winsock2/windows.h include-order clash.
+    src/overlay/overlay_selftest.cpp
     # Phase 8d: generic ingest-key writeback (marshals an RTMP server+key into a
     # stream profile on TID_UI; includes obs.h -> in the /wd4201 set below).
     src/ingest_writeback.cpp
@@ -402,6 +412,7 @@ set_source_files_properties(
   utility/OutputBinding.cpp
   utility/StreamProfile.cpp
   src/events/event_store.cpp
+  src/overlay/overlay_store.cpp
   src/multistream/CanvasStore.cpp
   src/multistream/StreamProfileStore.cpp
   src/multistream/OutputBindingStore.cpp

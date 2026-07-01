@@ -38,6 +38,8 @@
 #include "multistream/StreamProfileStore.hpp"
 #include "multistream/VirtualCamManager.hpp"
 #include "oauth/registry.hpp"
+#include "overlay/overlay_server.hpp"
+#include "overlay/overlay_store.hpp"
 #include "AdvancedSettings.hpp"
 #include "GeneralSettings.hpp"
 #include "paths.hpp"
@@ -656,6 +658,11 @@ bool ObsBootstrap::Start()
 	// that the registry + token store are ready; inert until a provider's events()
 	// transport is non-null (9.2b+).
 	Events::Hub().StartConnectedAccounts();
+
+	// Phase 9.3: bring up the overlay-widget loopback server (127.0.0.1). Started
+	// after the model + providers so a widget URL is immediately servable; stopped in
+	// Bridge::Shutdown before CEF teardown (alongside the chat/events transports).
+	Overlay::Server().Start();
 
 	// Boot reconcile: the global video pipeline was initialized to a fixed default
 	// above (before modules could load), but the persisted Default canvas def is the

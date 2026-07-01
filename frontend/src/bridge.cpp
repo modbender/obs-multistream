@@ -66,6 +66,8 @@
 #include "oauth/provider.hpp"
 #include "oauth/registry.hpp"
 #include "oauth/token_store.hpp"
+#include "overlay/overlay_server.hpp"
+#include "overlay/overlay_store.hpp"
 #include <util/dstr.h>
 #include <util/platform.h>
 #include <graphics/vec2.h>
@@ -7989,6 +7991,10 @@ void Shutdown()
 	Chat::Hub().Stop();
 	Chat::Viewers().Stop();
 	Events::Hub().StopAll();
+	// Phase 9.3: stop the overlay loopback server (closes every SSE socket + joins its
+	// threads) after the event transports are down, so no in-flight Broadcast races the
+	// teardown, and before CEF shutdown so no dangling send hits a torn-down host.
+	Overlay::Server().Stop();
 	// Block any further off-thread PostToUi from a detached worker: the CEF loop
 	// has already returned by the time Stop() reaches here, so a late marshal must
 	// no-op rather than touch CEF.
