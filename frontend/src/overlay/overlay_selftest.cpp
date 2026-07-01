@@ -190,6 +190,9 @@ void ObsBootstrap::RunOverlaySelfTest()
 	HostLog(std::string("[selftest] overlay auth -> ") + (authOk ? "OK" : "MISMATCH"));
 
 	server.Stop();
+	// Leave the shared singleton clean: the real boot Server() must not serve this
+	// injected test widget after the smoke run.
+	Overlay::Store().RemoveForTest("selftest-widget");
 	HostLog("[selftest] overlay cleanup -> server stopped");
 
 	if (docOk && sseHeaderOk && deliveryOk && authOk) {

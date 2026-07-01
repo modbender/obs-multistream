@@ -3,6 +3,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <windows.h> // Sleep (winsock2.h already set _WINSOCKAPI_, so no winsock v1)
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -26,9 +28,14 @@ using json = nlohmann::json;
 
 constexpr size_t kMaxHeaderBytes = 16 * 1024;      // 16 KB header block (mirrors mcp)
 constexpr size_t kMaxAssetBytes = 8 * 1024 * 1024; // asset response cap (spec)
-constexpr int kPreferredPort = 43000;
-constexpr int kPortScanEnd = 43019;
-constexpr DWORD kSseRecvTimeoutMs = 15000; // keepalive cadence
+constexpr int kPreferredPort = 43000;              // persisted default; tried first for stable URLs
+// Scattered scan bands (base, +kBandSize each): a single OS-reserved block (Hyper-V/
+// WSL/Docker reserve large contiguous ranges) can't kill the feature. 5 x 50 = 250.
+constexpr int kBandSize = 50;
+constexpr std::array<int, 5> kScanBands = {43000, 47000, 51000, 55000, 59000};
+constexpr DWORD kSseRecvTimeoutMs = 15000;   // keepalive cadence
+constexpr DWORD kSseSendTimeoutMs = 3000;    // I3: bounded send so a stuck reader can't hold sseMutex_
+constexpr DWORD kHeaderRecvTimeoutMs = 10000; // I1: backstop so a silent client can't park a thread
 
 struct ReasonPhrase {
 	int status;
@@ -189,6 +196,10 @@ std::string AssembleDocument(const Widget &w, int port)
 
 // ---- Broadcast --------------------------------------------------------------
 
+// A failed send drops the socket from the registry and shutdown()s it (NOT close): the
+// owning RunSse is the sole closer of its fd, so shutdown unblocks that thread's recv
+// without freeing the fd -- the OS can't recycle the fd value onto a NEW connection and
+// have this thread later close the wrong socket (the fd-reuse hazard). caller holds sseMutex_.
 void OverlayServer::Broadcast(const Events::NormalizedEvent &ev)
 {
 	const std::string frame = "data: " + ev.ToJson().dump() + "\n\n";
@@ -202,8 +213,14 @@ void OverlayServer::Broadcast(const Events::NormalizedEvent &ev)
 		}
 	}
 	for (auto &[wid, s] : dead) {
-		sockets_[wid].erase(s);
-		closesocket((SOCKET)s);
+		auto it = sockets_.find(wid);
+		if (it != sockets_.end()) {
+			it->second.erase(s);
+			if (it->second.empty()) {
+				sockets_.erase(it);
+			}
+		}
+		shutdown((SOCKET)s, SD_BOTH);
 	}
 }
 
@@ -222,8 +239,11 @@ void OverlayServer::BroadcastTo(const std::string &widgetId, const Events::Norma
 		}
 	}
 	for (uintptr_t s : dead) {
-		it->second.erase(s);
-		closesocket((SOCKET)s);
+		it->second.erase(s); // `it` stays valid: erasing set elements, not map entries
+		shutdown((SOCKET)s, SD_BOTH);
+	}
+	if (it->second.empty()) {
+		sockets_.erase(it);
 	}
 }
 
@@ -284,12 +304,13 @@ bool OverlayServer::Start()
 	}
 	wsaUp_ = true;
 
-	const int preferred = Store().Port();
-	bool bound = false;
-	if (preferred > 0 && BindOn(preferred)) {
-		bound = true;
-	} else {
-		for (int p = kPreferredPort; p <= kPortScanEnd; ++p) {
+	// Persist-first for stable URLs: reuse the previously-bound port if it still binds,
+	// else scan the scattered bands so a reserved block can't kill the feature.
+	const int preferred = Store().Port() > 0 ? Store().Port() : kPreferredPort;
+	bool bound = BindOn(preferred);
+	for (int base = 0; !bound && base < (int)kScanBands.size(); ++base) {
+		for (int off = 0; off < kBandSize; ++off) {
+			const int p = kScanBands[base] + off;
 			if (p == preferred) {
 				continue; // already tried above
 			}
@@ -300,14 +321,14 @@ bool OverlayServer::Start()
 		}
 	}
 	if (!bound) {
-		lastError_ = "no free port in 43000..43019";
-		HostLog("[overlay] no free port in 43000..43019");
+		lastError_ = "no free port in any scan band (43000/47000/51000/55000/59000, 50 each)";
+		HostLog("[overlay] " + lastError_);
 		WSACleanup();
 		wsaUp_ = false;
 		return false;
 	}
 
-	portChanged_ = (port_ != Store().Port());
+	portChanged_ = (port_ != preferred);
 	Store().SetPort(port_);
 	running_.store(true);
 	acceptThread_ = std::thread(&OverlayServer::AcceptLoop, this);
@@ -377,21 +398,21 @@ void OverlayServer::Stop()
 		closesocket((SOCKET)listenSocket_);
 		listenSocket_ = ~uintptr_t(0);
 	}
-	// Close every open SSE socket to unblock its recv loop, then forget them. Each
-	// RunSse's DropSocket then no-ops (erase returns 0), so nothing double-closes.
-	{
-		std::lock_guard<std::mutex> lock(sseMutex_);
-		for (auto &[wid, socks] : sockets_) {
-			for (uintptr_t s : socks) {
-				closesocket((SOCKET)s);
-			}
-		}
-		sockets_.clear();
-	}
+	// Join the accept thread first so it can spawn no more connections and every
+	// accepted fd is already registered in clientSockets_ (inserted synchronously there).
 	if (acceptThread_.joinable()) {
 		acceptThread_.join();
 	}
-	// The accept thread has exited, so no more Conn threads are spawned; join them all.
+	// shutdown() (NOT close) every live client socket: this unblocks each owner thread's
+	// parked recv/send without freeing the fd, so the owner remains the sole closer and
+	// no fd is recycled mid-teardown. Each thread then closes its own fd on the way out.
+	{
+		std::lock_guard<std::mutex> lock(clientsMutex_);
+		for (uintptr_t s : clientSockets_) {
+			shutdown((SOCKET)s, SD_BOTH);
+		}
+	}
+	// Join the connection threads (each closed its own fd + deregistered as it unwound).
 	{
 		std::lock_guard<std::mutex> lock(threadsMutex_);
 		for (auto &c : threads_) {
@@ -434,7 +455,14 @@ void OverlayServer::AcceptLoop()
 			if (!running_.load()) {
 				break;
 			}
+			Sleep(10); // avoid a 100% busy-loop if accept keeps failing (e.g. WSAEMFILE)
 			continue;
+		}
+		// Register the fd synchronously (before spawning) so a Stop() after this thread
+		// joins can shutdown() every accepted connection.
+		{
+			std::lock_guard<std::mutex> lock(clientsMutex_);
+			clientSockets_.insert((uintptr_t)client);
 		}
 		auto done = std::make_shared<std::atomic<bool>>(false);
 		std::thread t([this, client, done]() {
@@ -450,6 +478,11 @@ void OverlayServer::HandleConnection(uintptr_t clientSocket)
 {
 	const SOCKET sock = (SOCKET)clientSocket;
 
+	// Bounded header read: a client that connects but never sends a full "\r\n\r\n" would
+	// otherwise park this thread forever and hang Stop()'s join. Stop() also shutdown()s
+	// the fd, but the timeout is the standalone backstop.
+	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&kHeaderRecvTimeoutMs, sizeof(kHeaderRecvTimeoutMs));
+
 	// Read the header block until "\r\n\r\n", capping total size.
 	std::string buffer;
 	char temp[4096];
@@ -457,7 +490,7 @@ void OverlayServer::HandleConnection(uintptr_t clientSocket)
 	while (true) {
 		const int n = recv(sock, temp, (int)sizeof(temp), 0);
 		if (n <= 0) {
-			closesocket(sock);
+			CloseClient(clientSocket);
 			return;
 		}
 		buffer.append(temp, (size_t)n);
@@ -467,7 +500,7 @@ void OverlayServer::HandleConnection(uintptr_t clientSocket)
 		}
 		if (buffer.size() > kMaxHeaderBytes) {
 			WriteResponse(sock, 413, "text/plain", "header too large");
-			closesocket(sock);
+			CloseClient(clientSocket);
 			return;
 		}
 	}
@@ -480,14 +513,14 @@ void OverlayServer::HandleConnection(uintptr_t clientSocket)
 	const size_t sp2 = sp1 == std::string::npos ? std::string::npos : requestLine.find(' ', sp1 + 1);
 	if (sp1 == std::string::npos || sp2 == std::string::npos) {
 		WriteResponse(sock, 405, "text/plain", "malformed request");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	const std::string method = requestLine.substr(0, sp1);
 	const std::string target = requestLine.substr(sp1 + 1, sp2 - sp1 - 1);
 	if (method != "GET") {
 		WriteResponse(sock, 405, "text/plain", "method not allowed");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 
@@ -514,7 +547,7 @@ void OverlayServer::HandleConnection(uintptr_t clientSocket)
 		}
 	}
 	WriteResponse(sock, 404, "text/plain", "not found");
-	closesocket(sock);
+	CloseClient(clientSocket);
 }
 
 void OverlayServer::ServeRuntime(uintptr_t clientSocket, const std::string &, const std::string &token)
@@ -532,18 +565,18 @@ void OverlayServer::ServeRuntime(uintptr_t clientSocket, const std::string &, co
 	}
 	if (!ok) {
 		WriteResponse(sock, 403, "text/plain", "forbidden");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	std::string body;
 	std::string ctype;
 	if (!ReadFileGuarded(BundleRoot() + "/overlay", "runtime.js", body, ctype)) {
 		WriteResponse(sock, 404, "text/plain", "runtime not found");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	WriteResponse(sock, 200, ctype, body);
-	closesocket(sock);
+	CloseClient(clientSocket);
 }
 
 void OverlayServer::ServeWidget(uintptr_t clientSocket, const std::string &path, const std::string &token)
@@ -555,29 +588,29 @@ void OverlayServer::ServeWidget(uintptr_t clientSocket, const std::string &path,
 	const std::string action = slash == std::string::npos ? std::string() : rest.substr(slash);
 	if (id.empty()) {
 		WriteResponse(sock, 404, "text/plain", "not found");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 
 	std::optional<Widget> w = Store().Get(id);
 	if (!w) {
 		WriteResponse(sock, 404, "text/plain", "no such overlay");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	if (token != w->token) {
 		WriteResponse(sock, 403, "text/plain", "forbidden");
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 
 	if (action.empty() || action == "/") {
 		WriteResponse(sock, 200, "text/html", AssembleDocument(*w, port_));
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	if (action == "/events") {
-		RunSse(clientSocket, id); // owns the socket; no close here
+		RunSse(clientSocket, id); // owns the socket; closes it itself on the way out
 		return;
 	}
 	if (action.rfind("/assets/", 0) == 0) {
@@ -586,32 +619,36 @@ void OverlayServer::ServeWidget(uintptr_t clientSocket, const std::string &path,
 		std::string ctype;
 		if (!ReadFileGuarded(Store().AssetsDir(id), file, body, ctype)) {
 			WriteResponse(sock, 404, "text/plain", "asset not found");
-			closesocket(sock);
+			CloseClient(clientSocket);
 			return;
 		}
 		if (body.size() > kMaxAssetBytes) {
 			WriteResponse(sock, 413, "text/plain", "asset too large");
-			closesocket(sock);
+			CloseClient(clientSocket);
 			return;
 		}
 		WriteResponse(sock, 200, ctype, body);
-		closesocket(sock);
+		CloseClient(clientSocket);
 		return;
 	}
 	WriteResponse(sock, 404, "text/plain", "not found");
-	closesocket(sock);
+	CloseClient(clientSocket);
 }
 
 void OverlayServer::RunSse(uintptr_t clientSocket, const std::string &widgetId)
 {
 	const SOCKET sock = (SOCKET)clientSocket;
+	// Bounded send so a stuck reader (full send buffer) can't hold sseMutex_ in
+	// Broadcast; a timed-out send is treated as a failed send -> the socket is dropped.
+	setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&kSseSendTimeoutMs, sizeof(kSseSendTimeoutMs));
+
 	{
 		std::lock_guard<std::mutex> lock(sseMutex_);
 		const char *head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
 				   "Cache-Control: no-cache\r\nConnection: keep-alive\r\n"
 				   "Access-Control-Allow-Origin: *\r\n\r\n";
 		if (send(sock, head, (int)strlen(head), 0) <= 0) {
-			closesocket(sock);
+			CloseClient(clientSocket); // not yet registered in sockets_; just close+deregister
 			return;
 		}
 		// Initial comment so EventSource fires onopen promptly.
@@ -632,32 +669,45 @@ void OverlayServer::RunSse(uintptr_t clientSocket, const std::string &widgetId)
 				std::lock_guard<std::mutex> lock(sseMutex_);
 				auto it = sockets_.find(widgetId);
 				if (it == sockets_.end() || !it->second.count(clientSocket)) {
-					break; // dropped by Broadcast/Stop
+					break; // dropped by Broadcast/Stop (shutdown will also break recv)
 				}
 				if (send(sock, ": ping\n\n", 8, 0) <= 0) {
 					break;
 				}
 				continue;
 			}
-			break; // real error / socket closed by Stop/Broadcast
+			break; // real error / shutdown() by Stop/Broadcast
 		}
 		// Ignore any client->server bytes.
 	}
-	DropSocket(widgetId, clientSocket);
+	// This thread owns the fd: deregister from the SSE registry, then close it exactly
+	// once. Broadcast/Stop only ever shutdown() it, so no other thread closes this fd.
+	UnregisterSse(widgetId, clientSocket);
+	CloseClient(clientSocket);
 }
 
-void OverlayServer::DropSocket(const std::string &widgetId, uintptr_t sock)
+void OverlayServer::UnregisterSse(const std::string &widgetId, uintptr_t sock)
 {
 	std::lock_guard<std::mutex> lock(sseMutex_);
 	auto it = sockets_.find(widgetId);
 	if (it == sockets_.end()) {
 		return;
 	}
-	if (it->second.erase(sock) > 0) {
-		closesocket((SOCKET)sock); // single close: only whoever erases from the set closes
-	}
+	it->second.erase(sock);
 	if (it->second.empty()) {
 		sockets_.erase(it);
+	}
+}
+
+void OverlayServer::CloseClient(uintptr_t sock)
+{
+	bool present = false;
+	{
+		std::lock_guard<std::mutex> lock(clientsMutex_);
+		present = clientSockets_.erase(sock) > 0;
+	}
+	if (present) {
+		closesocket((SOCKET)sock); // erase-guard => this fd is closed exactly once
 	}
 }
 

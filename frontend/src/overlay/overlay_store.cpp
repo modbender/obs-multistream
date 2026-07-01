@@ -5,6 +5,8 @@
 #include <obs.hpp>
 #include <util/platform.h>
 
+#include <algorithm>
+
 namespace Overlay {
 
 json Widget::ToJson() const
@@ -90,6 +92,14 @@ void OverlayStore::InjectForTest(const Widget &w)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	widgets_.push_back(w);
+}
+
+void OverlayStore::RemoveForTest(const std::string &id)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	widgets_.erase(std::remove_if(widgets_.begin(), widgets_.end(),
+				      [&](const Widget &w) { return w.id == id; }),
+		       widgets_.end());
 }
 
 // Group 2: read overlays.json (port + widgets) via obs_data_create_from_json_file_safe.

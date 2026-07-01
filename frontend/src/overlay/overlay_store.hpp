@@ -52,6 +52,8 @@ public:
 
 	// Test-only: inject a widget into the in-memory set without persisting (self-test).
 	void InjectForTest(const Widget &w);
+	// Test-only: undo an InjectForTest so the shared singleton is left clean after a run.
+	void RemoveForTest(const std::string &id);
 
 private:
 	void Load();

@@ -54,8 +54,9 @@ private:
 	void ServeRuntime(uintptr_t sock, const std::string &path, const std::string &token);
 	void ServeWidget(uintptr_t sock, const std::string &path, const std::string &token);
 	void RunSse(uintptr_t sock, const std::string &widgetId); // owns the socket for its lifetime
-	void DropSocket(const std::string &widgetId, uintptr_t sock); // erase+close, idempotent
-	void ReapFinishedThreads();                                   // join+erase threads whose done flag is set
+	void UnregisterSse(const std::string &widgetId, uintptr_t sock); // erase from SSE registry; NEVER closes
+	void CloseClient(uintptr_t sock); // the OWNING thread's sole close point: erase from clientSockets_ + close
+	void ReapFinishedThreads();       // join+erase threads whose done flag is set
 
 	bool BindOn(int port); // low-level bind+listen helper; sets listenSocket_ + port_
 
@@ -69,6 +70,13 @@ private:
 
 	std::mutex sseMutex_;                                 // guards sockets_ + every socket write
 	std::map<std::string, std::set<uintptr_t>> sockets_; // widgetId -> SSE sockets
+
+	// Every accepted client fd (SSE and plain), so Stop() can shutdown() them all to
+	// unblock parked recv/send loops without closing (the owning thread closes). The
+	// fd is inserted synchronously in AcceptLoop (before its thread spawns) so a Stop()
+	// after the accept thread joins sees every live connection.
+	std::mutex clientsMutex_;
+	std::set<uintptr_t> clientSockets_;
 
 	struct Conn {
 		std::thread thread;
