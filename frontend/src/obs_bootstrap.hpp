@@ -233,6 +233,13 @@ void RunStatsSelfTest();
 // executes). Touches no config file (StartForTest does not Save). Gated by the
 // caller to the smoke path.
 void RunMcpSelfTest();
+// Headless proof for the Phase 9.2a events foundation: Ingest three synthetic
+// NormalizedEvents through EventHub -> EventStore -> emit, assert events.list returns
+// them newest-first, that a re-Ingest is deduped (count stays 3), and that a fresh
+// store round-trips them from events.json. Snapshots + restores the user's real
+// events.json (+ .bak) so the smoke run leaves it exactly as found. Gated by the
+// caller to the smoke path.
+void RunEventSelfTest();
 void Stop();
 } // namespace ObsBootstrap
 

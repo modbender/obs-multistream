@@ -15,6 +15,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -23,6 +26,8 @@
 #include "bridge.hpp"
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
+#include "events/event_hub.hpp"
+#include "events/event_store.hpp"
 #include "multistream/CanvasRuntime.hpp"
 #include "multistream/CanvasStore.hpp"
 #include "multistream/Hotkeys.hpp"
@@ -645,6 +650,12 @@ bool ObsBootstrap::Start()
 	// only); Task 4 registers the Twitch provider. Done after the model loads so a
 	// provider can read configured credentials.
 	OAuth::BootProviders();
+
+	// Phase 9.2a: resume the live-events feed for accounts connected in a prior
+	// session (the events feed is account-lifecycle, always-on). Run once here now
+	// that the registry + token store are ready; inert until a provider's events()
+	// transport is non-null (9.2b+).
+	Events::Hub().StartConnectedAccounts();
 
 	// Boot reconcile: the global video pipeline was initialized to a fixed default
 	// above (before modules could load), but the persisted Default canvas def is the
@@ -2337,6 +2348,80 @@ void ObsBootstrap::RunMcpSelfTest()
 	}
 
 	server.Stop();
+}
+
+void ObsBootstrap::RunEventSelfTest()
+{
+	// Snapshot the user's real events.json (+ its .bak) so the synthetic ingests below
+	// can exercise the persist / dedupe / round-trip path without clobbering real
+	// history; restored verbatim at the end (mirrors the model self-test discipline).
+	auto snapshot = [](const std::string &p) -> std::optional<std::string> {
+		std::ifstream in(std::filesystem::u8path(p), std::ios::binary);
+		if (!in) {
+			return std::nullopt;
+		}
+		return std::optional<std::string>(std::in_place, std::istreambuf_iterator<char>(in),
+						  std::istreambuf_iterator<char>());
+	};
+	auto restore = [](const std::string &p, const std::optional<std::string> &data) {
+		if (data) {
+			std::ofstream out(std::filesystem::u8path(p), std::ios::binary | std::ios::trunc);
+			out.write(data->data(), static_cast<std::streamsize>(data->size()));
+		} else {
+			std::error_code ec;
+			std::filesystem::remove(std::filesystem::u8path(p), ec);
+		}
+	};
+
+	const std::string path = Events::EventStore::FilePath();
+	const std::string bakPath = path + ".bak";
+	const std::optional<std::string> origMain = snapshot(path);
+	const std::optional<std::string> origBak = snapshot(bakPath);
+
+	// Start from a known-empty store so the counts below are deterministic regardless
+	// of any pre-existing history.
+	Events::Store().Clear();
+
+	auto makeEvent = [](const std::string &id, const std::string &type, int64_t ts) {
+		Events::NormalizedEvent ev;
+		ev.id = id;
+		ev.platform = "twitch";
+		ev.type = type;
+		ev.ts = ts;
+		ev.actorName = "selftest-" + id;
+		return ev;
+	};
+
+	// Ingest three synthetic events (distinct ids) through the hub -> store -> emit path.
+	Events::Hub().Ingest(makeEvent("selftest-ev-1", "follow", 1000));
+	Events::Hub().Ingest(makeEvent("selftest-ev-2", "cheer", 2000));
+	Events::Hub().Ingest(makeEvent("selftest-ev-3", "raid", 3000));
+
+	const std::vector<Events::NormalizedEvent> list = Events::Store().List();
+	const bool orderOk = list.size() == 3 && list.front().id == "selftest-ev-3" &&
+			     list.back().id == "selftest-ev-1";
+	HostLog(std::string("[selftest] events ingest -> ") + std::to_string(list.size()) +
+		" (expect 3, newest-first " + (orderOk ? "OK" : "MISMATCH") + ")");
+
+	// Dedupe: re-Ingest an existing id -> count must stay 3.
+	Events::Hub().Ingest(makeEvent("selftest-ev-2", "cheer", 2000));
+	const size_t afterDup = Events::Store().List().size();
+	HostLog(std::string("[selftest] events dedupe -> ") + std::to_string(afterDup) +
+		(afterDup == 3 ? " (OK, duplicate id rejected)" : " (BUG, duplicate stored)"));
+
+	// Persistence round-trip: a fresh store loads the just-saved events.json.
+	Events::EventStore reloaded;
+	const size_t reloadedCount = reloaded.List().size();
+	HostLog(std::string("[selftest] events round-trip -> reloaded ") + std::to_string(reloadedCount) +
+		(reloadedCount == 3 ? " (OK)" : " (MISMATCH)"));
+
+	// Restore: wipe the synthetic history from memory, then put the user's original
+	// files back byte-for-byte (or remove them if there were none).
+	Events::Store().Clear();
+	restore(path, origMain);
+	restore(bakPath, origBak);
+	HostLog(std::string("[selftest] events cleanup -> restored user events.json ") +
+		(origMain ? "(original contents)" : "(removed test file)"));
 }
 
 void ObsBootstrap::Stop()

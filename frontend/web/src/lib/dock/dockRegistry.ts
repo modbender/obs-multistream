@@ -5,6 +5,7 @@ import ScenesDock from "../docks/ScenesDock.svelte";
 import SourcesDock from "../docks/SourcesDock.svelte";
 import MultistreamDock from "../docks/MultistreamDock.svelte";
 import MultichatDock from "../docks/MultichatDock.svelte";
+import EventsDock from "../docks/EventsDock.svelte";
 import AudioMixerDock from "../docks/AudioMixerDock.svelte";
 import TransitionsDock from "../docks/TransitionsDock.svelte";
 import StatsDock from "../docks/StatsDock.svelte";
@@ -41,6 +42,10 @@ export const DOCKS: DockDef[] = [
   // Multistream/Transitions it is NOT in the default layout -- it opens from the
   // CANVASES-bar restore chip -- but stays registered so it is addable/restorable.
   { id: "multichat", title: "Multichat", component: MultichatDock, params: {}, accent: true },
+  // Live cross-platform events feed (follows/subs/gifts/cheers/raids/superchats,
+  // Phase 9.2). Like Multichat it is NOT in the default layout -- it opens from the
+  // CANVASES-bar restore chip -- but stays registered so it is addable/restorable.
+  { id: "events", title: "Events", component: EventsDock, params: {}, accent: true },
   { id: "stats", title: "Stats", component: StatsDock, params: {} },
 ];
 

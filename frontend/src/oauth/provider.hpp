@@ -16,11 +16,15 @@
 // `oauth.*` / `streamMeta.*` methods through the registry -- no per-platform
 // branches in the bridge surface.
 
-// Forward declaration: a provider optionally owns a chat transport (Phase 9.0).
-// The full interface lives in chat/chat_transport.hpp, which includes THIS header
+// Forward declaration: a provider optionally owns a chat transport (Phase 9.0) and
+// an event transport (Phase 9.2a). The full interfaces live in
+// chat/chat_transport.hpp and events/event_transport.hpp, which include THIS header
 // for OAuthAccount -- so we only forward-declare here to avoid a header cycle.
 namespace Chat {
 class ChatTransport;
+}
+namespace Events {
+class EventTransport;
 }
 
 namespace OAuth {
@@ -164,6 +168,12 @@ public:
 	// worker thread between go-live and stop. Default null so a provider without chat
 	// needs no override.
 	virtual Chat::ChatTransport *chat() { return nullptr; }
+
+	// The provider's event transport (Phase 9.2a), or nullptr when the provider has
+	// no live-events source. Owned by the provider (like chat()); the EventHub runs
+	// it on the account-connect lifecycle. Default null so a provider without events
+	// needs no override. No provider returns non-null until later 9.2 tasks.
+	virtual Events::EventTransport *events() { return nullptr; }
 
 	// Report the platform's current concurrent viewer count for `acct` into `out`
 	// (Phase 9.0 aggregate viewer poller). `acct` is non-const so a reactive token

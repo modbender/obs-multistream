@@ -149,6 +149,18 @@ target_sources(
     # HTTP only via the providers, no obs.h.
     src/chat/viewer_poller.cpp
     src/chat/viewer_poller.hpp
+    # Phase 9.2a events-feed foundation: the normalized cross-platform event model +
+    # transport interface, a persisted/de-duplicated store, and the EventHub that runs
+    # live event transports on the account-connect lifecycle. Per-platform transports
+    # (Twitch EventSub / YouTube REST / Kick Pusher) land in later 9.2 tasks. Only
+    # event_store.cpp includes obs.h (obs_data safe-JSON persistence) -> /wd4201 set;
+    # event_hub.cpp is obs-free like chat_hub.
+    src/events/event_model.hpp
+    src/events/event_transport.hpp
+    src/events/event_store.cpp
+    src/events/event_store.hpp
+    src/events/event_hub.cpp
+    src/events/event_hub.hpp
     # Phase 8d: generic ingest-key writeback (marshals an RTMP server+key into a
     # stream profile on TID_UI; includes obs.h -> in the /wd4201 set below).
     src/ingest_writeback.cpp
@@ -370,6 +382,7 @@ set_source_files_properties(
   utility/CanvasSceneLink.cpp
   utility/OutputBinding.cpp
   utility/StreamProfile.cpp
+  src/events/event_store.cpp
   src/multistream/CanvasStore.cpp
   src/multistream/StreamProfileStore.cpp
   src/multistream/OutputBindingStore.cpp

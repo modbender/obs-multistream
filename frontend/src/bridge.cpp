@@ -36,6 +36,7 @@
 #include "chat/chat_hub.hpp"
 #include "chat/viewer_poller.hpp"
 #include "chat/ws_client.hpp"
+#include "events/event_hub.hpp"
 #include "log.hpp"
 #include "mcp/McpServer.hpp"
 #include "interact_window.hpp"
@@ -7436,6 +7437,11 @@ try {
 	OAuth::Tokens().Put(profileUuid, acct);
 	EmitOAuthStatus();
 
+	// Phase 9.2a: start the account's live-events transport now that it is connected
+	// (the events feed is account-lifecycle, not go-live). No-op until a provider
+	// returns a non-null events() transport.
+	Events::Hub().StartAccount(providerId, acct);
+
 	if (haveKey) {
 		AsyncTask::PostToUi([profileUuid, streamKey] {
 			StreamProfile *p = ObsBootstrap::StreamProfiles().Find(profileUuid);
@@ -7506,7 +7512,16 @@ bool MethodOAuthDisconnect(const json &params, json &result, std::string &error)
 		error = "oauth.disconnect requires a non-empty 'profileUuid'";
 		return false;
 	}
+	// Resolve the providerId before removing the record so we can stop its live-events
+	// transport (the EventHub is keyed by providerId, Phase 9.2a).
+	std::string providerId;
+	if (std::optional<OAuth::OAuthAccount> stored = OAuth::Tokens().Get(profileUuid)) {
+		providerId = stored->providerId;
+	}
 	OAuth::Tokens().Remove(profileUuid);
+	if (!providerId.empty()) {
+		Events::Hub().StopAccount(providerId);
+	}
 	EmitEvent("oauth.status", BuildOAuthStatusArray());
 	result = json{{"ok", true}};
 	return true;
@@ -7715,6 +7730,32 @@ bool MethodChatState(const json & /*params*/, json &result, std::string & /*erro
 	return true;
 }
 
+// ---- events (Phase 9.2a) ---------------------------------------------------
+//
+// The persisted, de-duplicated live-events feed. events.list returns the stored
+// history newest-first; events.clear wipes it and pushes an empty events.backfill so
+// the dock resets. Real-time pushes arrive as events.new (one event) / events.backfill
+// (an array) from the EventHub, started on account connect and stopped on disconnect /
+// shutdown -- account-lifecycle, not go-live.
+
+bool MethodEventsList(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	json arr = json::array();
+	for (const Events::NormalizedEvent &ev : Events::Store().List()) {
+		arr.push_back(ev.ToJson());
+	}
+	result = std::move(arr);
+	return true;
+}
+
+bool MethodEventsClear(const json & /*params*/, json &result, std::string & /*error*/)
+{
+	Events::Store().Clear();
+	EmitEvent("events.backfill", json::array());
+	result = json{{"ok", true}};
+	return true;
+}
+
 // The async-lane driver: run a plain MethodFn `work` on a detached worker, then
 // resolve the captured CEF `callback` back on the UI thread. Exactly one
 // resolution per query (the only path is the single PostToUi below); a resolve
@@ -7900,6 +7941,8 @@ void Init()
 		{"oauth.disconnect", MethodOAuthDisconnect},
 		{"oauth.status", MethodOAuthStatus},
 		{"chat.state", MethodChatState},
+		{"events.list", MethodEventsList},
+		{"events.clear", MethodEventsClear},
 	};
 
 	// streamMeta.* go on the async lane: their provider calls block on libcurl, so
@@ -7945,6 +7988,7 @@ void Shutdown()
 	// routed cleanly (rather than silently dropped) as the loops unwind.
 	Chat::Hub().Stop();
 	Chat::Viewers().Stop();
+	Events::Hub().StopAll();
 	// Block any further off-thread PostToUi from a detached worker: the CEF loop
 	// has already returned by the time Stop() reaches here, so a late marshal must
 	// no-op rather than touch CEF.

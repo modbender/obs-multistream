@@ -975,6 +975,38 @@ export interface ViewerCounts {
   total: number;
 }
 
+/** The kind of platform event surfaced in the cross-platform events feed. */
+export type EventType =
+  | "follow"
+  | "sub"
+  | "resub"
+  | "subgift"
+  | "cheer"
+  | "raid"
+  | "superchat"
+  | "supersticker"
+  | "member";
+
+/** One normalized platform event (the `events.new` event; the `events.list`
+ * method and `events.backfill` event carry arrays of these, newest-first).
+ * Optional fields are omitted by the host when empty/zero: `amount` is cheer
+ * bits / superchat minor units / raid viewers; `actorColor` falls back to a
+ * platform color when absent; `message` is rendered as plain text, never HTML. */
+export interface NormalizedEvent {
+  id: string;
+  platform: ChatPlatform;
+  type: EventType;
+  ts: number;
+  actorName: string;
+  actorColor?: string;
+  amount?: number;
+  currency?: string;
+  tier?: string;
+  months?: number;
+  count?: number;
+  message?: string;
+}
+
 /** Known bridge methods. Extend as the C++ Bridge gains methods. */
 export interface ObsMethods {
   getVersion: string;
@@ -1266,6 +1298,12 @@ export interface ObsMethods {
   // started by the host on go-live and stopped on stop -- there is no connect method.
   "chat.send": { ok: boolean };
   "chat.state": ChatState[];
+  // Cross-platform events feed (creator engagement, Phase 9.2). list returns the
+  // retained events newest-first; clear empties the host store (the host then
+  // emits an empty events.backfill so consumers reset their feed). New events
+  // arrive via the events.new / events.backfill push events.
+  "events.list": NormalizedEvent[];
+  "events.clear": { ok: boolean };
 }
 
 /** Known server->client push events and their payload shapes. */
@@ -1363,6 +1401,14 @@ export interface ObsEvents {
   // Aggregate viewer count (perPlatform + total), pushed by the host's viewer
   // poller while live; the Multichat dock / Monitor card / Studio chip render off it.
   "viewers.changed": ViewerCounts;
+  // Cross-platform events feed (Phase 9.2). new = one normalized event appended to
+  // the feed. backfill = a batch of events (newest-first) that REPLACES the feed;
+  // it is also fired empty after events.clear, so treat it as "set the feed to
+  // this array". Events run on the account-connect lifecycle (always-on for
+  // connected accounts) -- they are NOT gated on Go Live and can arrive before or
+  // after a broadcast.
+  "events.new": NormalizedEvent;
+  "events.backfill": NormalizedEvent[];
 }
 
 export interface BridgeError extends Error {
