@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && bun build src/overlay/runtime.ts --outfile dist/overlay/runtime.js --target browser --format iife --minify",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },

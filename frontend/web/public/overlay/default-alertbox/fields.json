@@ -1,0 +1,10 @@
+[
+  { "key": "accent", "type": "color", "label": "Accent Color", "default": "#9147ff", "value": "#9147ff" },
+  { "key": "font", "type": "font", "label": "Font", "default": "Inter, system-ui, sans-serif", "value": "Inter, system-ui, sans-serif" },
+  { "key": "duration", "type": "slider", "label": "Alert Duration (s)", "min": 2, "max": 15, "step": 1, "default": 5, "value": 5 },
+  { "key": "sound", "type": "sound-upload", "label": "Alert Sound", "default": "", "value": "" },
+  { "key": "msgFollow", "type": "text", "label": "Follow message", "default": "{name} just followed!", "value": "{name} just followed!" },
+  { "key": "msgSub", "type": "text", "label": "Sub message", "default": "{name} subscribed!", "value": "{name} subscribed!" },
+  { "key": "msgCheer", "type": "text", "label": "Cheer message", "default": "{name} cheered {amount} bits!", "value": "{name} cheered {amount} bits!" },
+  { "key": "msgRaid", "type": "text", "label": "Raid message", "default": "{name} raided with {amount}!", "value": "{name} raided with {amount}!" }
+]

@@ -1,0 +1,15 @@
+:root { --accent: #9147ff; }
+* { box-sizing: border-box; }
+body { margin: 0; background: transparent; overflow: hidden; font-family: var(--ov-font, system-ui, sans-serif); }
+.alert {
+  position: fixed; left: 50%; top: 40%; transform: translate(-50%, 20px);
+  display: flex; align-items: center; gap: 16px; min-width: 360px; max-width: 80vw;
+  padding: 18px 24px; background: rgba(18, 18, 22, 0.92);
+  border-left: 4px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  opacity: 0; transition: opacity 320ms ease, transform 320ms ease;
+}
+.alert.show { opacity: 1; transform: translate(-50%, 0); }
+.alert-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.alert-name { color: var(--accent); font-weight: 700; font-size: 22px; line-height: 1.15; }
+.alert-msg { color: #f2f2f5; font-size: 16px; margin-top: 2px; }
