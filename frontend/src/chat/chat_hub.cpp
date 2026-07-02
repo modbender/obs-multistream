@@ -10,6 +10,8 @@
 #include "../oauth/provider.hpp"
 #include "../oauth/registry.hpp"
 #include "../oauth/token_store.hpp"
+#include "../overlay/overlay_server.hpp" // OverlayServer::BroadcastChat
+#include "../overlay/overlay_store.hpp"  // Overlay::Server()
 #include "chat_transport.hpp"
 
 namespace Chat {
@@ -28,6 +30,11 @@ void RouteEmit(const json &payload)
 	if (it != body.end() && it->is_string()) {
 		event = it->get<std::string>();
 		body.erase(it);
+	}
+	// Fan chat messages (never connection-state frames) to overlay widgets as a named
+	// `chat` SSE event, alongside the bridge emit the multichat dock consumes.
+	if (event == "chat.message") {
+		Overlay::Server().BroadcastChat(body);
 	}
 	Bridge::EmitEvent(event, body);
 }

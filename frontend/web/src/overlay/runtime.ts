@@ -26,9 +26,25 @@ interface NormalizedEvent {
   message?: string;
 }
 
+// Live multichat message, delivered on the SAME EventSource as a NAMED "chat" SSE
+// event (so it never hits onmessage and leaves alert-box widgets untouched). Mirrors
+// bridge.ts ChatMessage; kept local so the runtime bundles standalone.
+interface ChatMessage {
+  platform: "twitch" | "youtube" | "kick";
+  id: string;
+  ts: number;
+  author: {
+    name: string;
+    color?: string;
+    badges?: { kind: string; url?: string }[];
+  };
+  fragments: { type: string; text?: string; code?: string; url?: string }[];
+}
+
 type LoadCtx = { fields: Record<string, unknown> };
 type LoadHandler = (ctx: LoadCtx) => void;
 type EventHandler = (e: NormalizedEvent) => void;
+type ChatHandler = (m: ChatMessage) => void;
 
 const boot: OverlayBootstrap = (window as unknown as { __OVERLAY__: OverlayBootstrap }).__OVERLAY__ ?? {
   id: "",
@@ -39,6 +55,7 @@ const boot: OverlayBootstrap = (window as unknown as { __OVERLAY__: OverlayBoots
 
 const loadHandlers: LoadHandler[] = [];
 const eventHandlers: EventHandler[] = [];
+const chatHandlers: ChatHandler[] = [];
 
 const OBSOverlay = {
   fields: boot.fields,
@@ -47,6 +64,9 @@ const OBSOverlay = {
   },
   onEvent(fn: EventHandler) {
     eventHandlers.push(fn);
+  },
+  onChat(fn: ChatHandler) {
+    chatHandlers.push(fn);
   },
   playSound(url: string, volume = 1) {
     if (!url) return;
@@ -81,6 +101,17 @@ function fireEvent(e: NormalizedEvent) {
   window.dispatchEvent(new CustomEvent("obs:event", { detail: e }));
 }
 
+function fireChat(m: ChatMessage) {
+  for (const fn of chatHandlers) {
+    try {
+      fn(m);
+    } catch (err) {
+      console.log("OBSOverlay onChat threw: " + (err as Error).message);
+    }
+  }
+  window.dispatchEvent(new CustomEvent("obs:chat", { detail: m }));
+}
+
 // EventSource auto-reconnects on drop; the host keepalive keeps it warm.
 const src = new EventSource("/w/" + boot.id + "/events?t=" + boot.token);
 src.onmessage = (msg) => {
@@ -90,6 +121,15 @@ src.onmessage = (msg) => {
     /* ignore a malformed frame */
   }
 };
+// Chat rides a NAMED SSE event, so it bypasses onmessage entirely -- alert-box
+// widgets that never call onChat are unaffected.
+src.addEventListener("chat", (msg) => {
+  try {
+    fireChat(JSON.parse((msg as MessageEvent).data) as ChatMessage);
+  } catch {
+    /* ignore a malformed frame */
+  }
+});
 
 // Fire load once the DOM + handlers are ready. Handlers registered synchronously in
 // the user JS run before this microtask, so a raf defer is enough.

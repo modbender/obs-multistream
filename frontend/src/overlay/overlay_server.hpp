@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "../events/event_model.hpp" // Events::NormalizedEvent
 
 namespace Overlay {
@@ -47,12 +49,18 @@ public:
 	void Broadcast(const Events::NormalizedEvent &ev);
 	// Push to ONE widget's sockets (overlays.test -- never goes through the store).
 	void BroadcastTo(const std::string &widgetId, const Events::NormalizedEvent &ev);
+	// Push a chat message to EVERY open widget socket as a named `chat` SSE event
+	// (distinct from the default `message` event alert boxes consume). The chat-box
+	// widget subscribes to it; alert boxes ignore it.
+	void BroadcastChat(const nlohmann::json &chatMsg);
 
 private:
 	void AcceptLoop();
 	void HandleConnection(uintptr_t clientSocket); // runs on its own thread; closes the socket
 	void ServeRuntime(uintptr_t sock, const std::string &path, const std::string &token);
 	void ServeWidget(uintptr_t sock, const std::string &path, const std::string &token);
+	// Send a prebuilt SSE frame to every open widget socket; shared by Broadcast/BroadcastChat.
+	void BroadcastFrame(const std::string &frame);
 	void RunSse(uintptr_t sock, const std::string &widgetId); // owns the socket for its lifetime
 	void UnregisterSse(const std::string &widgetId, uintptr_t sock); // erase from SSE registry; NEVER closes
 	void CloseClient(uintptr_t sock); // the OWNING thread's sole close point: erase from clientSockets_ + close

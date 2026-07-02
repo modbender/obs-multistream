@@ -214,9 +214,8 @@ std::string AssembleDocument(const Widget &w, int port)
 // owning RunSse is the sole closer of its fd, so shutdown unblocks that thread's recv
 // without freeing the fd -- the OS can't recycle the fd value onto a NEW connection and
 // have this thread later close the wrong socket (the fd-reuse hazard). caller holds sseMutex_.
-void OverlayServer::Broadcast(const Events::NormalizedEvent &ev)
+void OverlayServer::BroadcastFrame(const std::string &frame)
 {
-	const std::string frame = "data: " + ev.ToJson().dump() + "\n\n";
 	std::lock_guard<std::mutex> lock(sseMutex_);
 	std::vector<std::pair<std::string, uintptr_t>> dead;
 	for (auto &[wid, socks] : sockets_) {
@@ -236,6 +235,18 @@ void OverlayServer::Broadcast(const Events::NormalizedEvent &ev)
 		}
 		shutdown((SOCKET)s, SD_BOTH);
 	}
+}
+
+void OverlayServer::Broadcast(const Events::NormalizedEvent &ev)
+{
+	BroadcastFrame("data: " + ev.ToJson().dump() + "\n\n");
+}
+
+// Named `chat` event so widgets can select it independently of the default `message`
+// (alert) stream; body matches chat.message post-`RouteEmit` (the `event` key stripped).
+void OverlayServer::BroadcastChat(const nlohmann::json &chatMsg)
+{
+	BroadcastFrame("event: chat\ndata: " + chatMsg.dump() + "\n\n");
 }
 
 void OverlayServer::BroadcastTo(const std::string &widgetId, const Events::NormalizedEvent &ev)

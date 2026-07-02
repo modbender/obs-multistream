@@ -25,6 +25,14 @@
   let copiedId = $state<string | null>(null);
   let saving = $state(false);
   let dialog = $state<DialogSpec | null>(null);
+  let typeMenuOpen = $state(false);
+
+  // The widget types a user can create. Adding one is a single row here, not a new
+  // branch: label + backend type + the default name a fresh widget gets.
+  const WIDGET_TYPES: { type: string; label: string; name: string }[] = [
+    { type: "alertbox", label: "Alert Box", name: "New Alert Box" },
+    { type: "chatbox", label: "Chat Box", name: "New Chat Box" },
+  ];
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -95,9 +103,10 @@
     }
   }
 
-  async function create(): Promise<void> {
+  async function create(type: string, name: string): Promise<void> {
+    typeMenuOpen = false;
     try {
-      const w = await obs.call("overlays.create", { name: "New Overlay", type: "alertbox" });
+      const w = await obs.call("overlays.create", { name, type });
       refresh();
       await select(w.id);
     } catch (e) {
@@ -261,7 +270,18 @@
           </div>
         {/each}
       {/if}
-      <button class="addnav" onclick={() => void create()}>＋ New overlay</button>
+      <div class="addwrap">
+        <button class="addnav" aria-haspopup="menu" aria-expanded={typeMenuOpen} onclick={() => (typeMenuOpen = !typeMenuOpen)}>
+          ＋ New overlay
+        </button>
+        {#if typeMenuOpen}
+          <div class="typemenu" role="menu">
+            {#each WIDGET_TYPES as t (t.type)}
+              <button class="typeopt" role="menuitem" onclick={() => void create(t.type, t.name)}>{t.label}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </nav>
 
     <div class="pane">
@@ -472,6 +492,39 @@
   }
   .addnav:hover {
     border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  .addwrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .addnav {
+    width: auto;
+  }
+  .typemenu {
+    display: flex;
+    flex-direction: column;
+    margin: 0 12px;
+    background: var(--color-surface);
+    border: var(--border-weight) solid var(--color-border);
+  }
+  .typeopt {
+    text-align: left;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    border-bottom: var(--border-weight) solid var(--color-border);
+    color: var(--color-dim);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 12px;
+  }
+  .typeopt:last-child {
+    border-bottom: 0;
+  }
+  .typeopt:hover {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
     color: var(--color-accent);
   }
 
