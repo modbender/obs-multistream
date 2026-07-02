@@ -138,6 +138,15 @@ void Client::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, Terminatio
 	}
 }
 
+void Client::OnBeforeContextMenu(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> /*frame*/,
+				 CefRefPtr<CefContextMenuParams> /*params*/, CefRefPtr<CefMenuModel> model)
+{
+	CEF_REQUIRE_UI_THREAD();
+	// Drop every default entry (Back/Reload/Print/View source/Inspect) so a right-click
+	// on the UI does nothing browser-y; the web app renders its own menus in the DOM.
+	model->Clear();
+}
+
 bool Client::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
 				      CefProcessId source_process, CefRefPtr<CefProcessMessage> message)
 {

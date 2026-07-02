@@ -62,9 +62,16 @@ std::unique_ptr<InteractManager> g_interact;
 // host window is destroyed.
 std::unique_ptr<TrayIcon> g_tray;
 
-// The UI loads from the offline app:// bundle served by scheme.cpp.
+// The UI loads from the offline app:// bundle served by scheme.cpp. For live UI
+// development, set FE_DEV_URL (e.g. http://localhost:5173) to point the window at a
+// Vite dev server instead -- enables HMR. The native bridge is injected per-frame by
+// CEF regardless of origin, so window.obs still works off the dev server.
 const char *StartupUrl()
 {
+	const char *dev = getenv("FE_DEV_URL");
+	if (dev && *dev) {
+		return dev;
+	}
 	return "app://app/index.html";
 }
 

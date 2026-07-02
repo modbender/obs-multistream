@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_load_handler.h"
 #include "include/cef_request_handler.h"
@@ -21,7 +22,8 @@ class Client : public CefClient,
 	       public CefLifeSpanHandler,
 	       public CefDisplayHandler,
 	       public CefLoadHandler,
-	       public CefRequestHandler {
+	       public CefRequestHandler,
+	       public CefContextMenuHandler {
 public:
 	Client();
 
@@ -38,6 +40,7 @@ public:
 	CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
 	CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
 	CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+	CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
 	bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
 				      CefProcessId source_process, CefRefPtr<CefProcessMessage> message) override;
 
@@ -67,6 +70,13 @@ public:
 			    bool user_gesture, bool is_redirect) override;
 	void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
 				       const CefString &error_string) override;
+
+	// CefContextMenuHandler methods:
+	// Suppress CEF's default browser context menu (Print / View source / Reload …)
+	// so right-click matches a native desktop app; the web UI supplies its own DOM
+	// menus where it needs them.
+	void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+				 CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) override;
 
 private:
 	// Live browser windows. Only accessed on the CEF UI thread.
