@@ -179,6 +179,9 @@
     if (e.key === "Enter") {
       void commitRename();
     } else if (e.key === "Escape") {
+      // Swallow Escape so it cancels the rename without also reaching Modal's
+      // window handler (which would close the whole dialog).
+      e.stopPropagation();
       renamingUuid = null;
     }
   }
