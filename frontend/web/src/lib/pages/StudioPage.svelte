@@ -650,130 +650,163 @@
 </script>
 
 <div class="studio" class:hidden={pageStore.page !== "studio"}>
+  <!-- TOP BAR : CANVASES (variant B — full-height segmented blocks). -->
   <div class="canvases-bar">
-    <span class="bar-label">CANVASES</span>
+    <span class="bar-label">Canvases</span>
 
-    {#each canvases as c (c.uuid)}
-      <div class="chip" class:active={c.uuid === activeCanvasUuid}>
-        <button class="chip-main" onclick={() => (focusedCanvasUuid = c.uuid)}>
-          <span class="chip-name">{c.name}</span>
-          <span class="chip-sub">{c.outputWidth}×{c.outputHeight} · {Math.round(c.fpsNum / c.fpsDen)}</span>
-        </button>
-        <button
-          class="eye"
-          title={canvasShown(c) ? "Hide preview" : "Show preview"}
-          onclick={() => toggleCanvasPreview(c)}
-        >
-          {#if canvasShown(c)}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z" />
-              <circle cx="12" cy="12" r="2.4" />
-            </svg>
-          {:else}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M4 4 L20 20" />
-              <path
-                d="M9.5 5.7A10 10 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-2.7 3.4M6.2 7.6A17 17 0 0 0 2 12s3.6 6.5 10 6.5a10 10 0 0 0 3-.45"
-              />
-            </svg>
-          {/if}
-        </button>
-      </div>
-    {/each}
+    <div class="canvases">
+      {#each canvases as c (c.uuid)}
+        <div class="chip" data-active={c.uuid === activeCanvasUuid ? "1" : "0"}>
+          <button class="chip-main" onclick={() => (focusedCanvasUuid = c.uuid)}>
+            <span class="chip-name">{c.name}</span>
+            <span class="chip-sub">{c.outputWidth}×{c.outputHeight} · {Math.round(c.fpsNum / c.fpsDen)}</span>
+          </button>
+          <button
+            class="eye"
+            class:off={!canvasShown(c)}
+            title={canvasShown(c) ? "Hide preview" : "Show preview"}
+            onclick={() => toggleCanvasPreview(c)}
+          >
+            {#if canvasShown(c)}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            {:else}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path
+                  d="M4 4l16 16M9.5 9.6A3 3 0 0014.4 14.5M6.5 6.7C3.5 8.3 1.5 12 1.5 12s3.5 6.5 10.5 6.5c1.7 0 3.2-.4 4.5-1M14 5.8C13.4 5.6 12.7 5.5 12 5.5"
+                />
+              </svg>
+            {/if}
+          </button>
+        </div>
+      {/each}
 
-    <button class="add" title="Add canvas" onclick={addCanvas}>+</button>
+      <button class="add" title="Add canvas" onclick={addCanvas}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span class="add-txt">CANVAS</span>
+      </button>
+    </div>
 
     <div class="spacer"></div>
 
-    {#each DOCKS as d (d.id)}
-      {#if visibleDocks[d.id] === false}
-        <button class="restore" onclick={() => toggleDock(d.id)}>
-          <span class="restore-plus">+</span>
-          {d.title}
-        </button>
-      {/if}
-    {/each}
+    {#if DOCKS.some((d) => visibleDocks[d.id] === false)}
+      <div class="restore">
+        {#each DOCKS as d (d.id)}
+          {#if visibleDocks[d.id] === false}
+            <button class="restorechip" onclick={() => toggleDock(d.id)}>
+              <span class="plus">+</span>{d.title}
+            </button>
+          {/if}
+        {/each}
+      </div>
+    {/if}
 
-    <button
-      class="histbtn"
-      title={undoStore.canUndo ? "Undo " + undoStore.undoName : "Undo"}
-      aria-label="Undo"
-      disabled={!undoStore.canUndo}
-      onclick={() => undoStore.undo()}
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M3 8h11a6 6 0 0 1 0 12H8" />
-        <path d="M7 4 3 8l4 4" />
-      </svg>
-    </button>
-    <button
-      class="histbtn"
-      title={undoStore.canRedo ? "Redo " + undoStore.redoName : "Redo"}
-      aria-label="Redo"
-      disabled={!undoStore.canRedo}
-      onclick={() => undoStore.redo()}
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M21 8H10a6 6 0 0 0 0 12h6" />
-        <path d="M17 4l4 4-4 4" />
-      </svg>
-    </button>
-
-    <button class="restore reset" onclick={resetLayout}>Reset Layout</button>
-    <button class="restore overflow" title="More" aria-label="More studio actions" onclick={openOverflow}>⋯</button>
+    <div class="util">
+      <button
+        class="iconbtn"
+        title={undoStore.canUndo ? "Undo " + undoStore.undoName : "Undo"}
+        aria-label="Undo"
+        disabled={!undoStore.canUndo}
+        onclick={() => undoStore.undo()}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M3 8h11a6 6 0 0 1 0 12H8" />
+          <path d="M7 4 3 8l4 4" />
+        </svg>
+      </button>
+      <button
+        class="iconbtn"
+        title={undoStore.canRedo ? "Redo " + undoStore.redoName : "Redo"}
+        aria-label="Redo"
+        disabled={!undoStore.canRedo}
+        onclick={() => undoStore.redo()}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M21 8H10a6 6 0 0 0 0 12h6" />
+          <path d="M17 4l4 4-4 4" />
+        </svg>
+      </button>
+      <button class="txtbtn" title="Reset dock layout" onclick={resetLayout}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M20 11A8 8 0 105.6 6.5M4 3v4h4" />
+        </svg>
+        Reset Layout
+      </button>
+      <button class="iconbtn" title="More" aria-label="More studio actions" onclick={openOverflow}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
+        </svg>
+      </button>
+    </div>
   </div>
 
   <div class="host-area">
     <DockHost {onReady} />
   </div>
 
+  <!-- BOTTOM BAR : GO LIVE (variant B — segmented, GO LIVE as right-edge block). -->
   <div class="golive-bar">
-    <div class="cluster left">
+    <div class="bb-left">
       <span class="focus-dot" style:background={focusDotColor}></span>
       <span class="focus-name">{focusedLabel}</span>
       {#if liveState === "live"}
-        <span class="badge live">● LIVE&nbsp;&nbsp;{fmtDuration(liveDurationMs)}</span>
+        <span class="livebadge"><span class="rec"></span>LIVE {fmtDuration(liveDurationMs)}</span>
       {/if}
       {#if anyRunning && viewerTotal !== null}
         <span class="viewers" title="Aggregate viewers across connected platforms">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z" />
-            <circle cx="12" cy="12" r="2.4" />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M1.5 12S5 6 12 6s10.5 6 10.5 6-3.5 6-10.5 6S1.5 12 1.5 12Z" />
+            <circle cx="12" cy="12" r="2.6" />
           </svg>
           {viewerTotal.toLocaleString()}
         </span>
       {/if}
     </div>
 
-    <div class="cluster right">
+    <div class="bb-spacer"></div>
+
+    <div class="bb-right">
       <button
-        class="vcam"
+        class="txtbtn"
         onclick={() => void takeScreenshot()}
         title={"Screenshot " + (focusedCanvas?.name ?? "program") + " (Ctrl+Shift+S captures Default)"}
       >
-        📸 Screenshot
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <rect x="3" y="6" width="18" height="14" /><path d="M8 6l1.5-2.5h5L16 6" /><circle cx="12" cy="13" r="3.4" />
+        </svg>
+        Screenshot
       </button>
       <button
-        class="vcam"
+        class="txtbtn vcam"
         class:active={vcamActive}
         onclick={() => void toggleVcam()}
         oncontextmenu={openVcamMenu}
         title={"Virtual Camera → " + vcamTargetName + " (right-click to choose canvas)"}
       >
-        📷 VCAM
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <rect x="3" y="6" width="13" height="12" /><path d="M16 10l5-3v10l-5-3" />
+        </svg>
+        VCAM
       </button>
-      <div class="perf">
+      <div class="perf" title="Performance">
         {#each perfRow as e (e.k)}
-          <span><span class="pk">{e.k}</span> {e.v}</span>
+          <span class="cell"><span class="k">{e.k}</span><span class="v">{e.v}</span></span>
         {/each}
       </div>
       <button
-        class="editinfo"
+        class="txtbtn editinfo"
         disabled={outputs.length === 0}
         onclick={() => openGoLiveModal("edit")}
         title="Edit stream information (title / category / tags) — works before and during the stream"
       >
-        ✎ Edit stream info
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M15 4l5 5L8 21H3v-5L15 4Z" /><path d="M13 6l5 5" />
+        </svg>
+        Edit stream info
       </button>
       <button
         class="golive"
@@ -781,7 +814,13 @@
         disabled={busy || (!anyRunning && outputs.length === 0)}
         onclick={() => void toggleLive()}
       >
-        {anyRunning ? "■  END STREAM" : "●  GO LIVE"}
+        {#if anyRunning}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" /></svg>
+          END STREAM
+        {:else}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l14-8z" /></svg>
+          GO LIVE
+        {/if}
       </button>
     </div>
   </div>
@@ -814,158 +853,283 @@
     min-height: 0;
   }
 
+  /* ============================================================
+     TOP BAR : CANVASES  (mock .topbar, variant B "COMMAND DECK")
+     Full-height segmented blocks, zero outer padding, mono-first.
+     ============================================================ */
   .canvases-bar {
     flex: 0 0 auto;
+    height: 46px;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 16px;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    min-width: 0;
     border-bottom: var(--border-weight) solid var(--color-border);
     background: var(--color-surface-2);
     overflow: hidden;
   }
+  /* "CANVASES" label: surface block w/ a subtle horizontal structural-grid gradient
+     (the rgba stripe has no token, so it stays inline like the mock), right hairline. */
   .bar-label {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 14px;
     font-family: var(--font-mono);
     font-size: 9px;
-    letter-spacing: 0.12em;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
     color: var(--color-muted);
+    border-right: var(--border-weight) solid var(--color-border);
+    background:
+      repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 3px,
+        rgba(255, 255, 255, 0.02) 3px,
+        rgba(255, 255, 255, 0.02) 4px
+      ),
+      var(--color-surface);
+  }
+  /* Canvases segment: chips on --color-base, right hairline divider. */
+  .canvases {
+    flex: 0 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 8px 0 10px;
+    border-right: var(--border-weight) solid var(--color-border);
   }
   .chip {
     flex: 0 0 auto;
     display: flex;
-    align-items: stretch;
+    align-items: center;
     gap: 8px;
-    padding: 5px 0 5px 10px;
-    border: var(--border-weight) solid var(--color-border);
-    background: transparent;
+    height: 30px;
+    padding: 0 8px 0 10px;
+    border: var(--border-weight) solid var(--color-border-2);
+    background: var(--color-base);
     color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      border-color 0.12s,
+      background 0.12s;
   }
-  .chip.active {
+  .chip:hover {
+    border-color: var(--color-muted);
+  }
+  .chip[data-active="1"] {
     border-color: var(--color-accent);
     background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-    color: var(--color-accent);
   }
   .chip-main {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 1px;
+    gap: 2px;
+    line-height: 1;
     background: none;
     border: 0;
     padding: 0;
+    height: auto;
     cursor: pointer;
     color: inherit;
-    font-family: var(--font-ui);
     text-align: left;
   }
   .chip-name {
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     font-weight: 600;
-    line-height: 1.1;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-text);
+    line-height: 1;
   }
   .chip-sub {
     font-family: var(--font-mono);
     font-size: 8px;
+    letter-spacing: 0.05em;
     color: var(--color-muted);
     line-height: 1;
   }
+  /* Per-chip eye toggle: kept inside the chip, hairline-separated on the left. */
   .eye {
     flex: 0 0 auto;
-    width: 18px;
-    align-self: stretch;
+    width: 22px;
+    height: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: none;
     border: 0;
-    border-left: var(--border-weight) solid var(--color-border);
+    border-left: var(--border-weight) solid var(--color-border-2);
     color: var(--color-muted);
     cursor: pointer;
-    font-size: 11px;
   }
+  .eye:hover {
+    color: var(--color-dim);
+  }
+  /* Hidden-preview state: the mock dims the glyph below --color-muted; no token
+     for this deep grey, so keep it inline like the mock. */
+  .eye.off {
+    color: #54545c;
+  }
+  .chip[data-active="1"] .eye {
+    border-left-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    color: var(--color-accent);
+  }
+  /* Dashed add-canvas: plus glyph + mono "CANVAS" label. */
   .add {
     flex: 0 0 auto;
-    width: 26px;
-    height: 34px;
+    height: 30px;
+    min-width: 30px;
+    margin-left: 2px;
+    padding: 0 8px;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     background: none;
     border: var(--border-weight) dashed var(--color-border);
-    color: var(--color-dim);
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
     cursor: pointer;
-    font-size: 15px;
-    font-family: var(--font-ui);
+  }
+  .add:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
   }
   .spacer {
     flex: 1;
+    min-width: 8px;
+    border-left: var(--border-weight) solid var(--color-border);
   }
+  /* Restore-docks segment: bordered chips on --color-base, left hairline divider. */
   .restore {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 10px;
-    background: none;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-dim);
-    cursor: pointer;
-    font-size: 10px;
-    font-family: var(--font-ui);
+    gap: 8px;
+    height: 100%;
+    padding: 0 10px;
+    border-left: var(--border-weight) solid var(--color-border);
   }
-  .restore-plus {
+  .restorechip {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 9px;
+    background: var(--color-base);
+    border: var(--border-weight) solid var(--color-border-2);
+    color: var(--color-muted);
+    font-size: 10.5px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .restorechip:hover {
+    border-color: var(--color-border);
+    color: var(--color-dim);
+    background: var(--color-surface);
+  }
+  .restorechip .plus {
+    font-family: var(--font-mono);
+    font-weight: 600;
     color: var(--color-accent);
   }
-  .reset {
-    padding: 6px 12px;
-  }
-  .overflow {
-    padding: 6px 10px;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .histbtn {
+  /* Utility segment: undo / redo / reset / more as bordered blocks, left divider. */
+  .util {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    padding: 0 8px;
+    border-left: var(--border-weight) solid var(--color-border);
+  }
+  .iconbtn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
     padding: 0;
-    background: none;
+    background: var(--color-surface);
     border: var(--border-weight) solid var(--color-border);
     color: var(--color-dim);
     cursor: pointer;
+    transition:
+      border-color 0.12s,
+      color 0.12s,
+      background 0.12s;
   }
-  .histbtn:hover:not(:disabled) {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
+  .iconbtn:hover:not(:disabled) {
+    border-color: var(--color-muted);
+    color: var(--color-text);
+    background: var(--color-surface-2);
   }
-  .histbtn:disabled {
-    color: var(--color-muted);
+  .iconbtn:disabled {
+    color: #4a4a52;
     cursor: default;
   }
-
-  .golive-bar {
+  .txtbtn {
     flex: 0 0 auto;
-    height: 54px;
+    height: 28px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 18px;
+    gap: 7px;
+    padding: 0 11px;
+    background: var(--color-surface);
+    border: var(--border-weight) solid var(--color-border);
+    color: var(--color-dim);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      border-color 0.12s,
+      color 0.12s,
+      background 0.12s;
+  }
+  .txtbtn:hover:not(:disabled) {
+    border-color: var(--color-muted);
+    color: var(--color-text);
+    background: var(--color-surface-2);
+  }
+
+  /* ============================================================
+     BOTTOM BAR : GO LIVE  (mock .bottombar, variant B)
+     Segmented; GO LIVE is a full-height right-edge block.
+     ============================================================ */
+  .golive-bar {
+    flex: 0 0 auto;
+    height: 60px;
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
     border-top: var(--border-weight) solid var(--color-border);
     background: var(--color-surface);
   }
-  .cluster {
+  /* Left cluster: focus dot + label (+ live badge / viewers when live), right
+     hairline, on --color-surface. */
+  .bb-left {
     display: flex;
     align-items: center;
-  }
-  .cluster.left {
-    gap: 12px;
-  }
-  .cluster.right {
-    gap: 18px;
+    gap: 14px;
+    min-width: 0;
+    padding: 0 14px;
+    background: var(--color-surface);
+    border-right: var(--border-weight) solid var(--color-border);
   }
   .focus-dot {
     width: 9px;
@@ -977,95 +1141,138 @@
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--color-text);
+    white-space: nowrap;
   }
-  .badge.live {
+  .livebadge {
     display: flex;
     align-items: center;
     gap: 7px;
+    height: 24px;
+    padding: 0 9px;
     font-family: var(--font-mono);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: 0.06em;
     color: var(--color-live);
-    padding: 3px 9px;
-    border: var(--border-weight) solid var(--color-live);
-    background: color-mix(in srgb, var(--color-live) 10%, transparent);
+    white-space: nowrap;
+    border: var(--border-weight) solid color-mix(in srgb, var(--color-live) 55%, transparent);
+    background: color-mix(in srgb, var(--color-live) 14%, transparent);
+  }
+  .livebadge .rec {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    background: var(--color-live);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
   }
   .viewers {
     display: flex;
     align-items: center;
     gap: 6px;
+    height: 24px;
+    padding: 0 9px;
     font-family: var(--font-mono);
     font-size: 11px;
-    font-weight: 600;
-    color: var(--color-text);
-    padding: 3px 9px;
+    color: var(--color-dim);
+    white-space: nowrap;
     border: var(--border-weight) solid var(--color-border);
     background: var(--color-surface-2);
   }
-  .perf {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-dim);
-  }
-  .pk {
+  .viewers svg {
     color: var(--color-muted);
   }
-  .vcam {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    background: transparent;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-dim);
-    font-family: var(--font-ui);
-    font-size: 11px;
-    padding: 7px 12px;
-    cursor: pointer;
+  /* Base-colored spacer between the clusters. */
+  .bb-spacer {
+    flex: 1;
+    min-width: 8px;
+    background: var(--color-base);
   }
-  .vcam:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+  /* Right cluster: text buttons + perf readout + GO LIVE, all gapless full-height. */
+  .bb-right {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+  }
+  /* Text buttons (Screenshot / VCAM / Edit): full-height surface blocks, only a
+     left hairline, surface-2 hover. */
+  .bb-right .txtbtn {
+    height: auto;
+    border: 0;
+    border-left: var(--border-weight) solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .bb-right .txtbtn:hover:not(:disabled) {
+    background: var(--color-surface-2);
+    color: var(--color-text);
   }
   .vcam.active {
-    border-color: var(--meter-green);
     color: var(--meter-green);
+    border-left-color: var(--meter-green);
   }
-  .editinfo {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    background: transparent;
-    border: var(--border-weight) solid var(--color-border);
-    color: var(--color-dim);
-    font-family: var(--font-ui);
-    font-size: 11px;
-    padding: 7px 12px;
-    cursor: pointer;
-  }
-  .editinfo:hover:not(:disabled) {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+  .vcam.active:hover:not(:disabled) {
+    color: var(--meter-green);
   }
   .editinfo:disabled {
     opacity: 0.5;
     cursor: default;
   }
+  /* Perf readout: bordered surface segment, centered cells with internal dividers. */
+  .perf {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: var(--color-surface);
+    border-left: var(--border-weight) solid var(--color-border);
+    border-right: var(--border-weight) solid var(--color-border);
+  }
+  .perf .cell {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 0 10px;
+  }
+  .perf .cell + .cell {
+    border-left: var(--border-weight) solid var(--color-border-2);
+  }
+  .perf .k {
+    color: var(--color-muted);
+  }
+  .perf .v {
+    color: var(--color-dim);
+  }
+  /* GO LIVE: full-height right-edge accent block; red END STREAM when live. */
   .golive {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
+    padding: 0 26px;
     background: var(--color-accent);
     color: var(--color-accent-ink);
     border: 0;
-    font-family: var(--font-ui);
-    font-size: 12px;
+    border-left: var(--border-weight) solid var(--color-accent);
+    font-family: var(--font-mono);
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 9px 22px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
     cursor: pointer;
+    transition: filter 0.12s;
+  }
+  .golive:hover:not(:disabled) {
+    filter: brightness(1.08);
   }
   .golive.running {
     background: var(--color-live);

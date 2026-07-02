@@ -252,7 +252,14 @@
     width: 70px;
     flex: 0 0 70px;
     background: var(--color-rail);
-    border-right: var(--border-weight) solid var(--color-border);
+    /* Seam B: double hairline with a 2px base-colored channel. Layered box-shadows
+       paint (topmost first) a --color-border hairline, then a 2px --color-base
+       channel, then a --color-border-2 hairline — all in the 4px gap App.svelte's
+       .view leaves via margin-left. Replaces the plain border-right. */
+    box-shadow:
+      var(--border-weight) 0 0 0 var(--color-border),
+      3px 0 0 0 var(--color-base),
+      4px 0 0 0 var(--color-border-2);
     display: flex;
     flex-direction: column;
     align-items: stretch;

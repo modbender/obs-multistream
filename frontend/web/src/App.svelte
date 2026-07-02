@@ -179,5 +179,9 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    /* Seam B: the rail paints a double-hairline + 2px base channel via box-shadow
+       (see NavRail .rail); the content column shifts 4px right so it clears the
+       channel. App-wide — every page starts flush inside this offset column. */
+    margin-left: 4px;
   }
 </style>
