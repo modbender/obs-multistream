@@ -26,6 +26,7 @@
 #include "bridge.hpp"
 #include "frontend_callbacks.hpp"
 #include "log.hpp"
+#include "chat/chat_hub.hpp"
 #include "events/event_hub.hpp"
 #include "events/event_store.hpp"
 #include "multistream/CanvasRuntime.hpp"
@@ -658,6 +659,12 @@ bool ObsBootstrap::Start()
 	// that the registry + token store are ready; inert until a provider's events()
 	// transport is non-null (9.2b+).
 	Events::Hub().StartConnectedAccounts();
+
+	// Pre-live chat: the chat hub is account-lifecycle (always-on), not go-live-gated,
+	// so multichat is live before/after streaming. Start() enumerates every connected,
+	// scope-current account; YouTube's transport no-ops until a live broadcast supplies
+	// its liveChatId (re-resolved at go-live), while Twitch/Kick connect immediately.
+	Chat::Hub().Start();
 
 	// Phase 9.3: bring up the overlay-widget loopback server (127.0.0.1). Started
 	// after the model + providers so a widget URL is immediately servable; stopped in

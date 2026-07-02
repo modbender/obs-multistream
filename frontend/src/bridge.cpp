@@ -250,8 +250,9 @@ bool MethodStreamingStart(const json & /*params*/, json &result, std::string & /
 	const bool active = ObsBootstrap::Multistream().AnyLive();
 	result = json{{"active", active}};
 	EmitEvent("streaming.changed", result);
-	// Phase 9.0: spin up chat transports + the viewer poller now that we are live.
-	// Both Start()s are idempotent.
+	// The viewer poller is live-only. The chat hub is already always-on (started on
+	// connect/boot), but re-Start() here so YouTube's chat transport picks up the
+	// liveChatId that exists only once the broadcast is live. Both Start()s are idempotent.
 	if (active) {
 		Chat::Hub().Start();
 		Chat::Viewers().Start();
@@ -261,15 +262,15 @@ bool MethodStreamingStart(const json & /*params*/, json &result, std::string & /
 
 bool MethodStreamingStop(const json & /*params*/, json &result, std::string & /*error*/)
 {
-	// Stop chat transports + the viewer poller first so their loops stop before the
-	// outputs tear down.
-	Chat::Hub().Stop();
+	// The viewer poller is live-only, so stop it. Chat stays connected across go-live-stop
+	// (pre-live/always-on): drop each provider's active-broadcast target FIRST so the chat
+	// re-resolve below sees YouTube's liveChatId as gone (its transport no-ops off-live)
+	// while Twitch/Kick keep running. clearActiveBroadcast is a no-op except on YouTube.
 	Chat::Viewers().Stop();
-	// Drop each provider's active-broadcast target so a subsequent go-live without a
-	// fresh applyMetadata can't poll a stale, ended broadcast (no-op except YouTube).
 	for (OAuth::StreamProvider *provider : OAuth::Registry().All()) {
 		provider->clearActiveBroadcast();
 	}
+	Chat::Hub().Start();
 	ObsBootstrap::Multistream().StopAll();
 	result = json{{"active", false}};
 	EmitEvent("streaming.changed", result);
@@ -7446,6 +7447,11 @@ try {
 	// returns a non-null events() transport.
 	Events::Hub().StartAccount(providerId, acct);
 
+	// Pre-live chat: bring the new account's chat transport up immediately (not at
+	// go-live). Start() re-enumerates all connected accounts; it's idempotent, so the
+	// churn to existing transports is a brief reconnect.
+	Chat::Hub().Start();
+
 	if (haveKey) {
 		AsyncTask::PostToUi([profileUuid, streamKey] {
 			StreamProfile *p = ObsBootstrap::StreamProfiles().Find(profileUuid);
@@ -7526,6 +7532,9 @@ bool MethodOAuthDisconnect(const json &params, json &result, std::string &error)
 	if (!providerId.empty()) {
 		Events::Hub().StopAccount(providerId);
 	}
+	// Pre-live chat: re-resolve chat after the token is removed so the disconnected
+	// account's transport drops (Start() enumerates only still-connected accounts).
+	Chat::Hub().Start();
 	EmitEvent("oauth.status", BuildOAuthStatusArray());
 	result = json{{"ok", true}};
 	return true;
