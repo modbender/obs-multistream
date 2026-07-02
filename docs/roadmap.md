@@ -1168,8 +1168,24 @@ font/size/colors, scroll speed, direction, separator, platform tag, max items, i
 type picker gains it. check 0/0, build green, smoke `leaks: 2`. **Live Browser-Source render GUI-owed**
 (esp. the RTL mirror).
 
-**Remaining Phase 9 (planned):** moderation · pre-live chat · more widget types (goal bar, labels)
-on the 9.3 overlay infra.
+**9.3d (Goal bar + Labels overlay widgets) ✅ DONE 2026-07-02** (`ui-redesign`, commit on
+`origin/ui-redesign`). Final two widget types, both **web-only** via `OBSOverlay.onEvent`. **Goal Bar**
+counts matching events since load toward a target (followers/subs/gifted-subs/bits/donations, per-type
+increments + a `startCurrent` seed) → progress bar. **Labels** shows the latest actor for an event
+type OR a running session count via a `{name}/{count}/{amount}` format template. Event-type strings
+match the transports (`follow`/`sub`/`resub`/`subgift`/`cheer`/`raid`/`superchat`/`supersticker`);
+XSS-safe. Editor type picker gains both. check 0/0, build green, smoke `leaks: 2`. The overlay widget
+family is now complete: **alert box · chat box · ticker · goal bar · labels**. **Live render GUI-owed.**
+
+**Remaining Phase 9 (planned):**
+- **Moderation** — per-platform mod actions in multichat (timeout/ban/delete-message) where OAuth
+  scopes allow. Needs a design pass (scopes per platform + a compact moderation UI on chat rows).
+- **Pre-live chat** — chat is currently **live-gated** (`MethodStreamingStart` starts `Chat::Hub()`
+  only when outputs go live; stopped on go-live-stop). Make `ChatHub` always-on like `EventHub`
+  (start on account connect + boot sweep, independent of go-live). Caveat: **YouTube** chat needs a
+  live broadcast's `liveChatId`, so YT only joins at go-live (its transport no-ops on an empty
+  channelRef); Twitch/Kick connect pre-live. A real backend lifecycle change (generation model +
+  re-resolve at go-live so YT picks up its liveChatId), not free.
 
 **Goal:** the Streamlabs/StreamElements-style live layer the fork lacks — unified **multichat**
 (read+send across every connected platform in one pane), **aggregate viewer count** (sum of live
