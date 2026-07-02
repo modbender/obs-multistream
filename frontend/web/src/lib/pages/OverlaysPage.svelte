@@ -32,6 +32,7 @@
   const WIDGET_TYPES: { type: string; label: string; name: string }[] = [
     { type: "alertbox", label: "Alert Box", name: "New Alert Box" },
     { type: "chatbox", label: "Chat Box", name: "New Chat Box" },
+    { type: "ticker", label: "Event Ticker", name: "New Event Ticker" },
   ];
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;

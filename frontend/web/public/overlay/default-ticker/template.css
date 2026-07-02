@@ -1,0 +1,103 @@
+:root {
+  --ov-font: "Inter", system-ui, sans-serif;
+  --ov-size: 20px;
+  --ov-text: #ffffff;
+  --ov-bg: rgba(0, 0, 0, 0);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--ov-font);
+}
+
+/* Full-width single-line viewport (the "mask"). Content overflows and is clipped;
+   the JS conveyor translates the track so items scroll across it. */
+.ticker {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--ov-bg);
+  color: var(--ov-text);
+  font-size: var(--ov-size);
+  line-height: 1.2;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* Flip layer. For right-to-left scrolling it mirrors the whole belt (scaleX) so the
+   identical left-scrolling engine appears to run rightward; the translate lives on
+   the inner .track so the inline transform never clobbers this mirror. */
+.strip {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+.ticker.rtl .strip { transform: scaleX(-1); }
+.ticker.rtl .tick-inner { transform: scaleX(-1); }
+
+/* The conveyor: an inline row the JS translates each frame. Items are appended at
+   the back and removed at the front off-screen, so the belt never rebuilds. */
+.track {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.tick {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.tick-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 0.62em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.emoji { flex: 0 0 auto; }
+
+.actor { font-weight: 700; }
+
+.summary { color: var(--ov-text); }
+
+.body {
+  color: var(--ov-text);
+  opacity: 0.75;
+}
+
+/* Configurable text between items. Dimmed so the events read as the content. */
+.sep {
+  color: var(--ov-text);
+  opacity: 0.4;
+  white-space: pre;
+}
+
+/* Static label shown only while no events have arrived yet. */
+.idle {
+  position: absolute;
+  left: 16px;
+  color: var(--ov-text);
+  opacity: 0.55;
+  display: none;
+}
+.idle.show { display: block; }
