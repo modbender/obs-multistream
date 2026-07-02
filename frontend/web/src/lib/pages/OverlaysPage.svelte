@@ -231,8 +231,10 @@
 
 <div class="page">
   <header class="head">
-    <span class="title">Overlays</span>
-    <span class="sub">loopback widgets · copy a URL into a browser source</span>
+    <div class="head-titles">
+      <span class="title">Overlays</span>
+      <span class="sub">loopback widgets · copy a URL into a browser source</span>
+    </div>
   </header>
 
   {#if serverDown}
@@ -362,11 +364,16 @@
     flex: 0 0 auto;
     height: 58px;
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    align-items: center;
     padding: 0 24px;
     border-bottom: var(--border-weight) solid var(--color-border);
     background: var(--color-surface);
+  }
+  .head-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
   }
   .title {
     font-family: var(--font-ui);
